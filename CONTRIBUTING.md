@@ -62,3 +62,13 @@ and the agent share one engine.
 Open an issue with the diagnostics text from **Settings → About → Copy diagnostics**
 (version, OS, library path) and the steps to reproduce. Never paste tokens or responses
 that contain personal data — use "Copy as curl (without secrets)".
+
+## Releases
+
+Tag `vX.Y.Z` on `main` and push the tag. CI builds macOS (universal), Linux and Windows,
+signs the updater artifacts with the project key (`TAURI_SIGNING_PRIVATE_KEY` /
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repository secrets) and opens a draft release with
+`latest.json`. Publishing the draft makes the update visible to installed apps.
+
+Bump the version in `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`
+and `apps/desktop/src-tauri/Cargo.toml` together, and add a `CHANGELOG.md` entry.

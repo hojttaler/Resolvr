@@ -6,7 +6,7 @@ import { ReportPage } from './ReportPage.js'
 import { Inspector } from './Inspector.js'
 import { RequestPane } from './RequestPane.js'
 import { ResponsePane } from './ResponsePane.js'
-import { Sidebar } from './Sidebar.js'
+import { ActivityRail, Sidebar } from './Sidebar.js'
 
 /**
  * Раскладка рабочей области.
@@ -17,6 +17,21 @@ import { Sidebar } from './Sidebar.js'
  * панелей сохраняются на workspace отдельно для каждого пресета.
  */
 export function WorkspaceLayout(): React.JSX.Element {
+    const preset = useAppStore((state) => state.layoutPreset)
+
+    // Полоса разделов стоит слева от всех панелей и не участвует в
+    // перетаскивании; в режиме Focus её нет — как и сайдбара.
+    return (
+        <div className="workspace">
+            {preset !== 'focus' && <ActivityRail />}
+            <div className="workspace__panels">
+                <WorkspacePanels />
+            </div>
+        </div>
+    )
+}
+
+function WorkspacePanels(): React.JSX.Element {
     const preset = useAppStore((state) => state.layoutPreset)
     const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed)
     const layoutSizes = useAppStore((state) => state.layoutSizes)
@@ -52,7 +67,7 @@ export function WorkspaceLayout(): React.JSX.Element {
                     }
                 }}
             >
-                <Panel id="sidebar" minSize="12" maxSize="40">
+                <Panel id="sidebar" minSize="14" maxSize="40">
                     <Sidebar />
                 </Panel>
                 <Separator className="resize-handle" />
@@ -98,7 +113,7 @@ export function WorkspaceLayout(): React.JSX.Element {
             >
                 {!sidebarCollapsed && (
                     <>
-                        <Panel id="sidebar" minSize="12" maxSize="40">
+                        <Panel id="sidebar" minSize="14" maxSize="40">
                             <Sidebar />
                         </Panel>
                         <Separator className="resize-handle" />

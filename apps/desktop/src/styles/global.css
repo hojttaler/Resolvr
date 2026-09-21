@@ -102,6 +102,8 @@ textarea {
     flex: 1;
     min-height: 0;
     display: flex;
+    /* Панели-карточки лежат на фоне окна с зазором, а не стык в стык. */
+    padding: 0 var(--pad-sm) var(--pad-sm);
 }
 
 /* ── Полоса заголовка и вкладки ──────────────────────────────────────────── */
@@ -113,8 +115,103 @@ textarea {
     height: var(--titlebar-height);
     padding-left: var(--pad-sm);
     padding-right: var(--pad-sm);
-    border-bottom: 1px solid var(--separator);
     flex: 0 0 auto;
+}
+
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-right: var(--pad-xs);
+    font-weight: 600;
+    font-size: var(--text-size);
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+    user-select: none;
+}
+
+.brand__mark {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: #05070d;
+    border: 1px solid var(--surface-panel-border);
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+}
+
+/* Инициалы workspace в его селекторе, как аватар. */
+.ws-badge {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    display: grid;
+    place-items: center;
+    background: var(--brand-gradient);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    flex: 0 0 auto;
+}
+
+/* Обёртка селектора с бейджем: бейдж лежит поверх поля слева. */
+.select-with-badge {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.select-with-badge .ws-badge {
+    position: absolute;
+    left: 5px;
+    pointer-events: none;
+}
+
+.select-with-badge .select {
+    padding-left: 30px;
+}
+
+/* Точка состояния окружения перед его именем. */
+.env-dot {
+    position: absolute;
+    left: 9px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+    pointer-events: none;
+}
+
+.env-dot--prod {
+    background: var(--danger);
+}
+
+.select-with-dot .select {
+    padding-left: 22px;
+}
+
+/* Адрес эндпоинта в шапке — как поле, но только для чтения. */
+.endpoint-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    height: 24px;
+    padding: 0 var(--pad-md);
+    border: 1px solid var(--control-border);
+    border-radius: 999px;
+    background: var(--control-bg);
+    font-size: var(--text-size-small);
+    color: var(--text-secondary);
+    max-width: 380px;
+}
+
+.endpoint-pill__url {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
 }
 
 /* Место под системные кнопки окна есть только у macOS с overlay-заголовком. */
@@ -142,10 +239,9 @@ textarea {
 .tabstrip {
     display: flex;
     align-items: stretch;
-    gap: 2px;
+    gap: 4px;
     height: var(--tabstrip-height);
     padding: 0 var(--pad-sm);
-    border-bottom: 1px solid var(--separator);
     overflow-x: auto;
     overflow-y: hidden;
     flex: 0 0 auto;
@@ -181,7 +277,8 @@ textarea {
 }
 
 .tab--active {
-    background: var(--surface-active);
+    background: var(--surface-panel);
+    border: 1px solid var(--surface-panel-border);
     color: var(--text-primary);
 }
 
@@ -192,29 +289,37 @@ textarea {
     font-size: var(--text-size);
 }
 
+/* Тип операции — цветной квадрат с буквой, как метка в дереве. */
 .tab__kind {
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
     font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.06em;
-    padding: 1px 4px;
-    border-radius: 3px;
-    background: var(--surface-sunken);
-    color: var(--text-tertiary);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--accent);
+    flex: 0 0 auto;
 }
 
 .tab__kind--mutation {
+    background: color-mix(in srgb, var(--warning) 22%, transparent);
     color: var(--warning);
 }
 
 .tab__kind--subscription {
-    color: var(--accent);
+    background: color-mix(in srgb, var(--brand-to) 22%, transparent);
+    color: var(--brand-to);
 }
 
 .tab__kind--flow {
+    background: color-mix(in srgb, var(--success) 22%, transparent);
     color: var(--success);
 }
 
 .tab__kind--report {
+    background: color-mix(in srgb, var(--syntax-variable) 22%, transparent);
     color: var(--syntax-variable);
 }
 
@@ -299,13 +404,16 @@ textarea {
     min-height: 0;
     height: 100%;
     overflow: hidden;
+    border: 1px solid var(--surface-panel-border);
+    border-radius: var(--radius-md);
+    background: var(--surface-panel);
 }
 
 .panel__header {
     display: flex;
     align-items: center;
     gap: var(--pad-sm);
-    height: 30px;
+    height: 34px;
     padding: 0 var(--pad-sm) 0 var(--pad-md);
     flex: 0 0 auto;
     border-bottom: 1px solid var(--separator);
@@ -313,11 +421,9 @@ textarea {
 }
 
 .panel__title {
-    font-size: var(--text-size-small);
+    font-size: var(--text-size);
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
+    color: var(--text-primary);
 }
 
 .panel__spacer {
@@ -331,20 +437,7 @@ textarea {
 }
 
 .sidebar {
-    background: var(--surface-sunken);
-    border-right: 1px solid var(--separator);
-}
-
-:root[data-theme='light'] .sidebar,
-:root:not([data-theme='dark']) .sidebar {
-    /* Светлая тема: разделения одной линией мало, панель делается плотнее. */
-    background: rgba(0, 0, 0, 0.06);
-}
-
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme='light']) .sidebar {
-        background: var(--surface-sunken);
-    }
+    /* Сайдбар — такая же карточка, как остальные панели. */
 }
 
 .layout-group {
@@ -360,21 +453,24 @@ textarea {
  * чужеродно рядом с системными окнами.
  */
 .resize-handle {
-    flex: 0 0 auto;
-    background: var(--separator);
+    flex: 0 0 var(--pad-sm);
+    background: transparent;
     position: relative;
-    transition: background var(--duration-fast) var(--ease);
 }
 
+/* Полоска появляется только при наведении — зазор остаётся чистым. */
 .resize-handle::after {
     content: '';
     position: absolute;
-    inset: -3px;
+    inset: 2px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background var(--duration-fast) var(--ease);
 }
 
-.resize-handle:hover,
-.resize-handle[data-separator-active],
-.resize-handle[data-active] {
+.resize-handle:hover::after,
+.resize-handle[data-separator-active]::after,
+.resize-handle[data-active]::after {
     background: var(--accent);
 }
 
@@ -414,7 +510,8 @@ textarea {
     background: var(--accent);
     border-color: transparent;
     color: var(--accent-contrast);
-    font-weight: 500;
+    font-weight: 600;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset;
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -589,8 +686,9 @@ textarea {
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.05em;
-    padding: 1px 4px;
-    border-radius: 3px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid transparent;
     background: var(--surface-sunken);
     color: var(--text-tertiary);
     white-space: nowrap;
@@ -610,10 +708,12 @@ textarea {
 }
 
 .badge--ok {
+    border-color: color-mix(in srgb, var(--success) 40%, transparent);
     color: var(--success);
 }
 
 .badge--fail {
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
     color: var(--danger);
 }
 
@@ -633,7 +733,6 @@ textarea {
     gap: var(--pad-md);
     height: var(--statusbar-height);
     padding: 0 var(--pad-md);
-    border-top: 1px solid var(--separator);
     font-size: var(--text-size-small);
     color: var(--text-secondary);
     flex: 0 0 auto;
@@ -1845,4 +1944,67 @@ input[type='checkbox'] {
     display: flex;
     flex-direction: column;
     gap: var(--pad-xs);
+}
+
+/* Плашка обновления: между шапкой и вкладками, в цвете акцента. */
+.update-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    padding: var(--pad-xs) var(--pad-md);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    font-size: var(--text-size);
+    flex: 0 0 auto;
+}
+
+/* ── Полоса разделов слева ───────────────────────────────────────────────── */
+
+.workspace {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+}
+
+.workspace__panels {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+}
+
+.rail {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 36px;
+    padding: 2px 0;
+    margin-right: var(--pad-sm);
+    flex: 0 0 auto;
+}
+
+.rail__item {
+    width: 32px;
+    height: 32px;
+    margin: 0 auto;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-tertiary);
+    display: grid;
+    place-items: center;
+    transition:
+        background var(--duration-fast) var(--ease),
+        color var(--duration-fast) var(--ease);
+}
+
+.rail__item:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+}
+
+.rail__item--active {
+    background: var(--surface-active);
+    color: var(--text-primary);
 }

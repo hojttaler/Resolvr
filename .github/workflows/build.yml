@@ -61,6 +61,11 @@ jobs:
             - run: pnpm --filter @resolvr/mcp build
 
             - uses: tauri-apps/tauri-action@v0
+              env:
+                  # Ключ подписи обновлений (minisign): `tauri signer generate`.
+                  # Секреты репозитория: Settings → Secrets and variables → Actions.
+                  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+                  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
               with:
                   projectPath: apps/desktop
                   args: ${{ matrix.args }}
@@ -68,6 +73,9 @@ jobs:
                   tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
                   releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Resolvr {0}', github.ref_name) || '' }}
                   releaseDraft: true
+                  # latest.json нужен встроенному updater; без него приложение не
+                  # узнает о новой версии.
+                  includeUpdaterJson: true
 
             - uses: actions/upload-artifact@v4
               with:
@@ -78,4 +86,6 @@ jobs:
                       apps/desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
                       apps/desktop/src-tauri/target/**/release/bundle/msi/*.msi
                       apps/desktop/src-tauri/target/**/release/bundle/nsis/*.exe
+                      apps/desktop/src-tauri/target/**/release/bundle/**/*.sig
+                      apps/desktop/src-tauri/target/**/release/bundle/**/*.tar.gz
                   if-no-files-found: ignore

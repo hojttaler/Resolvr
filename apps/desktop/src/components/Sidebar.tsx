@@ -14,17 +14,100 @@ import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 
 type ISidebarTab = 'collections' | 'schema' | 'history' | 'flows'
 
-const TABS: Array<{ id: ISidebarTab; label: string }> = [
-    { id: 'collections', label: 'Коллекции' },
-    { id: 'schema', label: 'Схема' },
-    { id: 'history', label: 'История' },
-    { id: 'flows', label: 'Флоу' },
+const TABS: Array<{ id: ISidebarTab; label: string; hint: string }> = [
+    { id: 'collections', label: 'Коллекции', hint: 'Сохранённые запросы' },
+    { id: 'schema', label: 'Схема', hint: 'Типы и поля эндпоинта' },
+    { id: 'history', label: 'История', hint: 'Последние запуски' },
+    { id: 'flows', label: 'Цепочки', hint: 'Сценарии и smoke-тесты' },
 ]
 
+/**
+ * Вертикальная полоса разделов слева.
+ *
+ * Иконки вместо вкладок в шапке панели: при узком сайдбаре подписи
+ * перекрывались, а полоса занимает 40 px и не зависит от ширины панели.
+ * Клик по активному разделу сворачивает панель, по любому другому —
+ * открывает его.
+ */
+export function ActivityRail(): React.JSX.Element {
+    const sidebarTab = useAppStore((state) => state.sidebarTab)
+    const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed)
+    const setSidebarTab = useAppStore((state) => state.setSidebarTab)
+    const toggleSidebar = useAppStore((state) => state.toggleSidebar)
+
+    return (
+        <nav className="rail" aria-label="Разделы">
+            {TABS.map((tab) => {
+                const active = sidebarTab === tab.id && !sidebarCollapsed
+
+                return (
+                    <button
+                        key={tab.id}
+                        type="button"
+                        className={`rail__item${active ? ' rail__item--active' : ''}`}
+                        title={`${tab.label} — ${tab.hint}`}
+                        aria-label={tab.label}
+                        aria-pressed={active}
+                        onClick={() => {
+                            if (sidebarTab === tab.id) {
+                                toggleSidebar()
+
+                                return
+                            }
+                            setSidebarTab(tab.id)
+                            if (sidebarCollapsed) toggleSidebar()
+                        }}
+                    >
+                        <RailIcon tab={tab.id} />
+                    </button>
+                )
+            })}
+        </nav>
+    )
+}
+
+function RailIcon({ tab }: { tab: ISidebarTab }): React.JSX.Element {
+    const common = { width: 17, height: 17, viewBox: '0 0 16 16', fill: 'none' as const }
+    const stroke = { stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+
+    switch (tab) {
+        case 'collections':
+            return (
+                <svg {...common} aria-hidden="true">
+                    <path d="M2.5 4.5a1 1 0 011-1h3l1.2 1.5h4.8a1 1 0 011 1v6a1 1 0 01-1 1h-9a1 1 0 01-1-1v-7.5z" {...stroke} />
+                </svg>
+            )
+        case 'schema':
+            return (
+                <svg {...common} aria-hidden="true">
+                    <circle cx="4" cy="8" r="1.6" {...stroke} />
+                    <circle cx="12" cy="4" r="1.6" {...stroke} />
+                    <circle cx="12" cy="12" r="1.6" {...stroke} />
+                    <path d="M5.5 7.2l5-2.4M5.5 8.8l5 2.4" {...stroke} />
+                </svg>
+            )
+        case 'history':
+            return (
+                <svg {...common} aria-hidden="true">
+                    <circle cx="8" cy="8" r="5.5" {...stroke} />
+                    <path d="M8 5v3.2l2.2 1.3" {...stroke} />
+                </svg>
+            )
+        case 'flows':
+            return (
+                <svg {...common} aria-hidden="true">
+                    <path d="M3 4.5h2.5M3 8h2.5M3 11.5h2.5" {...stroke} />
+                    <path d="M8 4.5h5M8 8h5M8 11.5h5" {...stroke} />
+                </svg>
+            )
+    }
+}
+
+/** Панель содержимого выбранного раздела. */
 export function Sidebar(): React.JSX.Element {
     const sidebarTab = useAppStore((state) => state.sidebarTab)
-    const setSidebarTab = useAppStore((state) => state.setSidebarTab)
     const setDialog = useAppStore((state) => state.setDialog)
+    const toggleSidebar = useAppStore((state) => state.toggleSidebar)
     const createCollection = useAppStore((state) => state.createCollection)
     const tree = useAppStore((state) => state.tree)
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
@@ -38,23 +121,12 @@ export function Sidebar(): React.JSX.Element {
         return name
     }
 
+    const current = TABS.find((tab) => tab.id === sidebarTab) ?? TABS[0]
+
     return (
         <div className="panel sidebar">
             <div className="panel__header">
-                <div className="segmented">
-                    {TABS.map((tab) => (
-                        <button
-                            key={tab.id}
-                            type="button"
-                            className={`segmented__item${
-                                sidebarTab === tab.id ? ' segmented__item--active' : ''
-                            }`}
-                            onClick={() => setSidebarTab(tab.id)}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
+                <span className="panel__title">{current?.label}</span>
 
                 <span className="panel__spacer" />
 
@@ -89,6 +161,16 @@ export function Sidebar(): React.JSX.Element {
                         +
                     </button>
                 )}
+
+                <button
+                    type="button"
+                    className="btn btn--quiet btn--icon"
+                    onClick={toggleSidebar}
+                    title="Свернуть панель (⌘B)"
+                    aria-label="Свернуть панель"
+                >
+                    ‹
+                </button>
 
                 <ContextMenu menu={menu} onClose={() => setMenu(undefined)} />
             </div>
@@ -627,13 +709,13 @@ function FlowsPanel(): React.JSX.Element {
                 <button type="button" className="btn" onClick={() => void openFlowTab()}>
                     + Создать цепочку
                 </button>
-                {flows.length > 1 && (
+                {flows.length > 0 && (
                     <button
                         type="button"
                         className="btn btn--primary"
                         disabled={reportRunning}
                         onClick={() => void runAllFlows()}
-                        title="Прогнать все цепочки по очереди и показать отчёт"
+                        title="Smoke-тест: прогнать все цепочки по очереди и показать отчёт"
                     >
                         {reportRunning ? 'Выполняется…' : 'Запустить все'}
                     </button>

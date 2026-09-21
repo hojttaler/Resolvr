@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { useAppStore } from '../state/store.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
+import { initials, LogoMark } from './Logo.js'
 
 /**
  * Верхняя полоса окна.
@@ -27,6 +28,9 @@ export function TitleBar(): React.JSX.Element {
     const activeEnvironment = workspace?.environments.find(
         (item) => item.id === (activeTab?.environmentId ?? workspace.defaultEnvironmentId),
     )
+    const activeEndpoint = workspace?.endpoints.find(
+        (endpoint) => endpoint.id === (activeTab?.endpointId ?? workspace.defaultEndpointId),
+    )
 
     return (
         <div className="titlebar">
@@ -40,20 +44,30 @@ export function TitleBar(): React.JSX.Element {
                     }
                 }}
             >
-                <select
-                    className="select"
-                    value={workspace?.id ?? ''}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onChange={(event) => void selectWorkspace(event.target.value)}
-                    title="Workspace"
-                >
-                    {workspaces.length === 0 && <option value="">Нет workspace</option>}
-                    {workspaces.map((item) => (
-                        <option key={item.id} value={item.id}>
-                            {item.name}
-                        </option>
-                    ))}
-                </select>
+                <span className="brand" title="Resolvr">
+                    <span className="brand__mark">
+                        <LogoMark size={15} />
+                    </span>
+                    Resolvr
+                </span>
+
+                <span className="select-with-badge">
+                    <span className="ws-badge">{initials(workspace?.name ?? '')}</span>
+                    <select
+                        className="select"
+                        value={workspace?.id ?? ''}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onChange={(event) => void selectWorkspace(event.target.value)}
+                        title="Workspace"
+                    >
+                        {workspaces.length === 0 && <option value="">Нет workspace</option>}
+                        {workspaces.map((item) => (
+                            <option key={item.id} value={item.id}>
+                                {item.name}
+                            </option>
+                        ))}
+                    </select>
+                </span>
 
                 {activeTab && workspace && workspace.endpoints.length > 1 && (
                     <select
@@ -72,23 +86,30 @@ export function TitleBar(): React.JSX.Element {
                 )}
 
                 {activeTab && workspace && (
-                    <select
-                        className={`select${activeEnvironment?.production ? ' select--prod' : ''}`}
-                        value={activeTab.environmentId ?? workspace.defaultEnvironmentId ?? ''}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onChange={(event) => setTabEnvironment(activeTab.id, event.target.value)}
-                        title={
-                            activeEnvironment?.production
-                                ? 'Боевое окружение: мутации и цепочки требуют подтверждения'
-                                : 'Окружение'
-                        }
-                    >
-                        {workspace.environments.map((environment) => (
-                            <option key={environment.id} value={environment.id}>
-                                {environment.production ? `${environment.name} · PROD` : environment.name}
-                            </option>
-                        ))}
-                    </select>
+                    <span className="select-with-badge select-with-dot">
+                        <span
+                            className={`env-dot${activeEnvironment?.production ? ' env-dot--prod' : ''}`}
+                        />
+                        <select
+                            className={`select${activeEnvironment?.production ? ' select--prod' : ''}`}
+                            value={activeTab.environmentId ?? workspace.defaultEnvironmentId ?? ''}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onChange={(event) => setTabEnvironment(activeTab.id, event.target.value)}
+                            title={
+                                activeEnvironment?.production
+                                    ? 'Боевое окружение: мутации и цепочки требуют подтверждения'
+                                    : 'Окружение'
+                            }
+                        >
+                            {workspace.environments.map((environment) => (
+                                <option key={environment.id} value={environment.id}>
+                                    {environment.production
+                                        ? `${environment.name} · PROD`
+                                        : environment.name}
+                                </option>
+                            ))}
+                        </select>
+                    </span>
                 )}
 
                 {activeEnvironment?.production && (
@@ -99,13 +120,13 @@ export function TitleBar(): React.JSX.Element {
 
                 <span className="panel__spacer" />
 
-                <span className="titlebar__title">
-                    {workspace?.endpoints.find(
-                        (endpoint) =>
-                            endpoint.id ===
-                            (activeTab?.endpointId ?? workspace.defaultEndpointId),
-                    )?.url ?? 'Resolvr'}
-                </span>
+                {activeEndpoint && (
+                    <span className="endpoint-pill" title={activeEndpoint.url}>
+                        <LinkIcon />
+                        <span className="endpoint-pill__url">{activeEndpoint.url}</span>
+                        <LastRunStatus />
+                    </span>
+                )}
             </div>
 
             <TokenStatus />
@@ -139,6 +160,33 @@ export function TitleBar(): React.JSX.Element {
                 <GearIcon />
             </button>
         </div>
+    )
+}
+
+/** Итог последнего запуска активной вкладки: точка и время, как «Online 42 ms». */
+function LastRunStatus(): React.JSX.Element | null {
+    const run = useAppStore((state) => (state.activeTabId ? state.runs[state.activeTabId] : undefined))
+    const result = run?.status === 'done' ? run.result : undefined
+    if (!result) return null
+
+    return (
+        <span className="row" style={{ gap: 5 }}>
+            <span className={`statusbar__dot ${result.ok ? 'statusbar__dot--ok' : 'statusbar__dot--fail'}`} />
+            <span>{Math.round(result.durationMs)} мс</span>
+        </span>
+    )
+}
+
+function LinkIcon(): React.JSX.Element {
+    return (
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path
+                d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.5 2.5 0 013.5 3.5L10.5 8M5.5 8l-1.2 1.2a2.5 2.5 0 003.5 3.5L9 11.5"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+            />
+        </svg>
     )
 }
 
@@ -418,6 +466,47 @@ export function TabStrip(): React.JSX.Element {
             </button>
 
             <ContextMenu menu={menu} onClose={() => setMenu(undefined)} />
+        </div>
+    )
+}
+
+/**
+ * Плашка «доступна новая версия».
+ *
+ * Показывается под шапкой, а не диалогом: обновление никогда не срочное, и
+ * прерывать работу ради него нельзя. Одна кнопка — скачать, установить и
+ * перезапустить.
+ */
+export function UpdateBanner(): React.JSX.Element | null {
+    const update = useAppStore((state) => state.update)
+    const progress = useAppStore((state) => state.updateProgress)
+    const error = useAppStore((state) => state.updateError)
+    const installUpdate = useAppStore((state) => state.installUpdate)
+    const dismissUpdate = useAppStore((state) => state.dismissUpdate)
+
+    if (!update) return null
+
+    return (
+        <div className="update-banner">
+            <span>
+                Доступна версия <b>{update.version}</b>
+                {error ? ` — не удалось установить: ${error}` : ''}
+            </span>
+            <span className="panel__spacer" />
+            {progress !== undefined && !error ? (
+                <span className="inspector__hint">
+                    {progress < 1 ? `скачивание ${Math.round(progress * 100)}%` : 'установка…'}
+                </span>
+            ) : (
+                <>
+                    <button type="button" className="btn btn--quiet" onClick={dismissUpdate}>
+                        Позже
+                    </button>
+                    <button type="button" className="btn btn--primary" onClick={() => void installUpdate()}>
+                        Обновить и перезапустить
+                    </button>
+                </>
+            )}
         </div>
     )
 }

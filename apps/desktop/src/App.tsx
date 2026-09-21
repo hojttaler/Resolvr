@@ -9,7 +9,7 @@ import {
 } from './components/Dialogs.js'
 import { SettingsDialog } from './components/SettingsDialog.js'
 import { WorkspaceSettings } from './components/WorkspaceSettings.js'
-import { TabStrip, TitleBar } from './components/TitleBar.js'
+import { TabStrip, TitleBar, UpdateBanner } from './components/TitleBar.js'
 import { WorkspaceLayout } from './components/WorkspaceLayout.js'
 import { useAppEvents, useShowWindowWhenReady } from './hooks/use-app-events.js'
 import { useDeepLinks } from './hooks/use-deep-links.js'
@@ -153,6 +153,7 @@ export function App(): React.JSX.Element {
     return (
         <div className="app">
             <TitleBar />
+            <UpdateBanner />
 
             {workspaces.length === 0 ? (
                 <Onboarding onCreate={() => setDialog('workspace')} />

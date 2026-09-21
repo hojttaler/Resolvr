@@ -42,6 +42,7 @@ import { parse, print, type GraphQLSchema } from 'graphql'
 import { create } from 'zustand'
 
 import { getAppContext } from '../platform/context.js'
+import { checkForUpdate, type IAvailableUpdate } from '../platform/updates.js'
 
 /** Вызов нативной команды; вне Tauri (витрина, тесты) — тихо ничего не делает. */
 async function invokeSafely(command: string, args: Record<string, unknown>): Promise<void> {
@@ -151,6 +152,13 @@ export interface IAppState {
     /** Запрос подтверждения перед необратимым или боевым действием. */
     confirm?: IConfirmRequest
 
+    /** Найденное обновление; `null` — проверяли, обновлений нет. */
+    update?: IAvailableUpdate | null
+    updateChecking: boolean
+    /** Доля скачанного при установке обновления. */
+    updateProgress?: number
+    updateError?: string
+
     layoutPreset: ILayoutPreset
     /** Раскладка панелей по группам: имя группы → размеры её панелей. */
     layoutSizes: Record<string, Record<string, number>>
@@ -204,6 +212,11 @@ export interface IAppActions {
     setResponseTab(tabId: string, tab: 'response' | 'raw' | 'headers' | 'trace'): void
 
     runActiveTab(options?: { force?: boolean; confirmed?: boolean }): Promise<void>
+    /** Проверяет обновления; `silent` — без индикации, при старте. */
+    checkUpdates(options?: { silent?: boolean }): Promise<void>
+    installUpdate(): Promise<void>
+    dismissUpdate(): void
+
     requestConfirm(request: IConfirmRequest): void
     /** Снимает запрос подтверждения без выполнения. */
     dismissConfirm(): void
@@ -291,6 +304,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     layouts: {},
     variableProblems: [],
     tokenRefreshing: false,
+    updateChecking: false,
     sidebarCollapsed: false,
     sidebarTab: 'collections',
     paletteOpen: false,
@@ -373,6 +387,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 sidebarCollapsed: layout?.sidebarCollapsed ?? false,
                 sidebarTab: layout?.sidebarTab ?? 'collections',
             })
+
+            window.setTimeout(() => void get().checkUpdates({ silent: true }), 8_000)
 
             if (workspace) {
                 await get().reloadTree()
@@ -1211,6 +1227,37 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
     clearFlowRun() {
         set({ flowRun: undefined })
+    },
+
+    async checkUpdates(options = {}) {
+        if (get().updateChecking) return
+
+        set({ updateChecking: !options.silent, updateError: undefined })
+        try {
+            const update = await checkForUpdate()
+            set({ update: update ?? null })
+        } finally {
+            set({ updateChecking: false })
+        }
+    },
+
+    async installUpdate() {
+        const { update } = get()
+        if (!update) return
+
+        set({ updateProgress: 0, updateError: undefined })
+        try {
+            // Черновики сбрасываются до перезапуска: иначе последние секунды
+            // ввода пропали бы вместе со старым процессом.
+            await get().flushAll()
+            await update.install((fraction) => set({ updateProgress: fraction }))
+        } catch (error) {
+            set({ updateProgress: undefined, updateError: toErrorMessage(error) })
+        }
+    },
+
+    dismissUpdate() {
+        set({ update: null })
     },
 
     requestConfirm(request) {

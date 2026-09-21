@@ -14,6 +14,19 @@ TARGET="/Applications/Resolvr.app"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# Ключ подписи обновлений: с включённым `createUpdaterArtifacts` сборка без
+# него не проходит. Локальный ключ лежит вне репозитория.
+SIGNING_KEY="$HOME/.tauri/resolvr.key"
+if [ -f "${SIGNING_KEY}" ]; then
+    TAURI_SIGNING_PRIVATE_KEY="$(cat "${SIGNING_KEY}")"
+    export TAURI_SIGNING_PRIVATE_KEY
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+else
+    echo "✗ Нет ключа подписи ${SIGNING_KEY}: создайте его командой" >&2
+    echo "  pnpm --filter @resolvr/desktop exec tauri signer generate -w ${SIGNING_KEY}" >&2
+    exit 1
+fi
+
 # MCP собирается вместе с приложением: иначе агент продолжает работать со
 # старой сборкой сервера, и новые возможности до него просто не доезжают.
 echo "→ Сборка MCP-сервера…"

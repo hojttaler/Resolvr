@@ -24,6 +24,9 @@ pub fn run() {
         // Ссылки resolvr://… открывают операцию или цепочку; схема
         // регистрируется в Info.plist при сборке.
         .plugin(tauri_plugin_deep_link::init())
+        // Обновления из GitHub Releases: подпись minisign, независимая от Apple.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle();
             watcher::init(handle);

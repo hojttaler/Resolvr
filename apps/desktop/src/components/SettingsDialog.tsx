@@ -333,6 +333,10 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
 function AboutSection(props: { secretStorage: string }): React.JSX.Element {
     const workspaces = useAppStore((state) => state.workspaces)
     const initError = useAppStore((state) => state.initError)
+    const update = useAppStore((state) => state.update)
+    const updateChecking = useAppStore((state) => state.updateChecking)
+    const checkUpdates = useAppStore((state) => state.checkUpdates)
+    const installUpdate = useAppStore((state) => state.installUpdate)
     const [info, setInfo] = useState<IAboutInfo | undefined>()
     const [copied, setCopied] = useState(false)
 
@@ -368,6 +372,32 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
                 >
                     {copied ? 'Скопировано' : 'Скопировать диагностику'}
                 </button>
+            </SettingRow>
+
+            <SettingRow
+                label="Обновления"
+                hint={
+                    update
+                        ? `Доступна версия ${update.version}`
+                        : update === null
+                          ? 'Установлена последняя версия'
+                          : 'Проверяются автоматически после запуска'
+                }
+            >
+                {update ? (
+                    <button type="button" className="btn btn--primary" onClick={() => void installUpdate()}>
+                        Обновить
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        className="btn"
+                        disabled={updateChecking}
+                        onClick={() => void checkUpdates()}
+                    >
+                        {updateChecking ? 'Проверяю…' : 'Проверить обновления'}
+                    </button>
+                )}
             </SettingRow>
 
             <SettingRow

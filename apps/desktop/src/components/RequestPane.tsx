@@ -40,6 +40,13 @@ export function RequestPane(): React.JSX.Element {
     const linkTo = useAppStore((state) => state.linkTo)
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
 
+    const prerequisiteFlow = tree
+        .flatMap((node) => node.operations)
+        .find(
+            (operation) =>
+                `${operation.collectionId}/${operation.name}` === tab?.operationRef,
+        )?.prerequisiteFlow
+
     const groupHandle = useRef<GroupImperativeHandle | null>(null)
     const groupElement = useRef<HTMLDivElement | null>(null)
     const savedLayout = layoutSizes['request-pane']
@@ -96,41 +103,6 @@ export function RequestPane(): React.JSX.Element {
                     <div className="panel__header">
                         <span className="panel__title">Запрос</span>
                         <span className="panel__spacer" />
-
-                        {tab.operationRef && flows.length > 0 && (
-                            <span className="panel__label">Сначала</span>
-                        )}
-
-                        {tab.operationRef && flows.length > 0 && (
-                            <select
-                                className="select select--compact"
-                                value={
-                                    tree
-                                        .flatMap((node) => node.operations)
-                                        .find(
-                                            (operation) =>
-                                                `${operation.collectionId}/${operation.name}` ===
-                                                tab.operationRef,
-                                        )?.prerequisiteFlow ?? ''
-                                }
-                                title="Цепочка, выполняемая перед этим запросом"
-                                onChange={(event) => {
-                                    if (tab.operationRef) {
-                                        void setPrerequisiteFlow(
-                                            tab.operationRef,
-                                            event.target.value || undefined,
-                                        )
-                                    }
-                                }}
-                            >
-                                <option value="">— ничего —</option>
-                                {flows.map((flow) => (
-                                    <option key={flow.id} value={flow.id}>
-                                        {flow.name}
-                                    </option>
-                                ))}
-                            </select>
-                        )}
 
                         <button
                             type="button"
@@ -206,6 +178,31 @@ export function RequestPane(): React.JSX.Element {
                                             hint: 'другая коллекция или имя',
                                             run: () => setDialog('save'),
                                         },
+                                        // Цепочка-предусловие выбирается здесь, а не
+                                        // селектом в шапке: там она вытесняла кнопки.
+                                        ...(tab.operationRef && flows.length > 0
+                                            ? [
+                                                  {
+                                                      label: 'Перед запуском: ничего',
+                                                      separated: true,
+                                                      hint: prerequisiteFlow ? undefined : '✓',
+                                                      run: () =>
+                                                          setPrerequisiteFlow(
+                                                              tab.operationRef ?? '',
+                                                              undefined,
+                                                          ),
+                                                  },
+                                                  ...flows.map((flow) => ({
+                                                      label: `Перед запуском: ${flow.name}`,
+                                                      hint: prerequisiteFlow === flow.id ? '✓' : undefined,
+                                                      run: () =>
+                                                          setPrerequisiteFlow(
+                                                              tab.operationRef ?? '',
+                                                              flow.id,
+                                                          ),
+                                                  })),
+                                              ]
+                                            : []),
                                     ],
                                 })
                             }}
@@ -229,6 +226,7 @@ export function RequestPane(): React.JSX.Element {
                                 onClick={() => void runActiveTab()}
                                 title="Выполнить (⌘↩)"
                             >
+                                <PlayIcon />
                                 Выполнить
                                 <kbd className="btn__key">⌘↩</kbd>
                             </button>
@@ -427,5 +425,13 @@ function InheritedHeaders(): React.JSX.Element | null {
                 ))
             )}
         </div>
+    )
+}
+
+function PlayIcon(): React.JSX.Element {
+    return (
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M2 1.2v7.6L8.4 5 2 1.2z" fill="currentColor" />
+        </svg>
     )
 }

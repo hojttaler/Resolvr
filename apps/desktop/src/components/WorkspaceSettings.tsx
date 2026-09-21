@@ -285,7 +285,7 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
     if (props.flowOptions.length === 0) {
         return (
             <div className="inspector__hint">
-                Сначала создайте цепочку авторизации на вкладке «Флоу»: например, логин, из
+                Сначала создайте цепочку авторизации в разделе «Цепочки»: например, логин, из
                 ответа которого извлекается токен.
             </div>
         )

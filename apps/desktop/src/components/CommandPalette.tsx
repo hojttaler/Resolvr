@@ -194,6 +194,12 @@ function useCommands(): ICommand[] {
                         }),
             },
             {
+                id: 'action:run-all-flows',
+                label: 'Запустить все цепочки (smoke-тест)',
+                hint: 'отчёт откроется вкладкой',
+                run: () => store.getState().runAllFlows(),
+            },
+            {
                 id: 'action:save-operation-as',
                 label: 'Сохранить операцию как…',
                 hint: 'в другую коллекцию или под другим именем',

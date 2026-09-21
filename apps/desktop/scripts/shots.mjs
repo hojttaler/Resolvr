@@ -58,23 +58,30 @@ async function readPalette(theme) {
     await page.goto(`${BASE}?theme=${theme}`, { waitUntil: 'networkidle' })
 
     return page.evaluate(() => {
-        const styles = getComputedStyle(document.documentElement)
-        const parse = (name) =>
-            (styles.getPropertyValue(name).match(/[\d.]+/g) ?? []).map(Number)
-
-        return {
-            text: parse('--text-primary'),
-            base: styles.getPropertyValue('--window-base').trim(),
+        // Цвета читаются через реальный элемент: браузер сам приводит hex и
+        // rgba к одной форме `rgb(r, g, b[, a])`.
+        const probe = document.createElement('span')
+        document.body.append(probe)
+        const resolve = (name) => {
+            probe.style.color = `var(${name})`
+            const [r, g, b] = (getComputedStyle(probe).color.match(/[\d.]+/g) ?? []).map(Number)
+            return [r, g, b]
         }
+        const result = { text: resolve('--text-primary'), base: resolve('--window-base') }
+        probe.remove()
+
+        return result
     })
 }
+
+const luminance = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 const light = await readPalette('light')
 const dark = await readPalette('dark')
 
-// В светлой теме основной текст тёмный, в тёмной — светлый.
-const lightOk = light.text[0] < 128 && light.base === '#ffffff'
-const darkOk = dark.text[0] > 128 && dark.base !== '#ffffff'
+// В светлой теме основной текст тёмный на светлом фоне, в тёмной — наоборот.
+const lightOk = luminance(light.text) < 100 && luminance(light.base) > 200
+const darkOk = luminance(dark.text) > 180 && luminance(dark.base) < 60
 
 console.log('светлая тема:', lightOk ? 'ок' : 'СЛОМАНА', light)
 console.log('тёмная тема:', darkOk ? 'ок' : 'СЛОМАНА', dark)

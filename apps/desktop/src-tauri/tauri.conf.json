@@ -43,6 +43,12 @@
                     "resolvr"
                 ]
             }
+        },
+        "updater": {
+            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIyRTE2NzVEODVDOTBDODAKUldTQURNbUZYV2Zoc3ZvLy9va1p6ajZNay95a3FQZStUR01sZDZJcnM0Rm5PdkZVOHUvSlFJRysK",
+            "endpoints": [
+                "https://github.com/hojttaler/Resolvr/releases/latest/download/latest.json"
+            ]
         }
     },
     "bundle": {
@@ -62,6 +68,7 @@
         },
         "resources": {
             "../../../packages/mcp-server/dist/index.js": "mcp/index.js"
-        }
+        },
+        "createUpdaterArtifacts": true
     }
 }
