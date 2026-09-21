@@ -1,0 +1,51 @@
+[package]
+name = "resolvr"
+version = "0.1.0"
+description = "GraphQL-клиент для macOS с сохранением состояния и доступом для агента"
+authors = ["hojttaler"]
+edition = "2021"
+rust-version = "1.82"
+
+[lib]
+name = "resolvr_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "devtools"] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-os = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-window-state = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# HTTP-прокси: webview не может ходить на произвольные хосты из-за CORS,
+# поэтому все запросы уходят через Rust.
+reqwest = { version = "0.13", features = ["json", "stream", "gzip", "brotli"] }
+futures-util = "0.3"
+
+# Секреты в системном Keychain. Фича `v1` включена по умолчанию и подключает
+# нативное хранилище Apple Keychain.
+keyring = "4"
+
+# Отслеживание изменений файлов: правки, сделанные агентом через MCP,
+# подхватываются в открытом приложении без перезапуска.
+notify = "8"
+notify-debouncer-full = "0.6"
+tauri-plugin-deep-link = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+window-vibrancy = "0.8"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -1,0 +1,15 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "lib": ["ES2023"],
+        "types": ["node"],
+        "noEmit": true,
+        "declaration": false,
+        "declarationMap": false,
+        "paths": {
+            "@resolvr/core": ["../core/src/index.ts"],
+            "@resolvr/core/node": ["../core/src/adapters/node/index.ts"]
+        }
+    },
+    "include": ["src/**/*.ts"]
+}

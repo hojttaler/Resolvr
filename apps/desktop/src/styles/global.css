@@ -1,0 +1,1848 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+/*
+ * Прозрачный фон обязателен: под окном работает нативное размытие, и любой
+ * непрозрачный слой здесь погасил бы его.
+ */
+html,
+body {
+    background: transparent;
+    overflow: hidden;
+}
+
+body {
+    font-family: var(--font-ui);
+    font-size: var(--text-size);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    user-select: none;
+    cursor: default;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+    color: inherit;
+}
+
+/* Тонкие скроллбары в системном стиле; появляются только при наведении. */
+::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+    background: var(--separator-strong);
+    background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+    background-clip: padding-box;
+}
+
+:focus {
+    outline: none;
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+}
+
+/* ── Каркас окна ─────────────────────────────────────────────────────────── */
+
+/*
+ * Фон окна: полупрозрачный слой поверх нативного размытия. При нулевой
+ * плотности слоя виден чистый материал NSVisualEffectView, при 100 % окно
+ * становится непрозрачным — это и есть регулировка прозрачности.
+ */
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background-color: color-mix(
+        in srgb,
+        var(--window-base) calc(var(--window-opacity) * 1%),
+        transparent
+    );
+    transition: background-color var(--duration-normal) var(--ease);
+}
+
+.app__body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+/* ── Полоса заголовка и вкладки ──────────────────────────────────────────── */
+
+.titlebar {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    height: var(--titlebar-height);
+    padding-left: var(--pad-sm);
+    padding-right: var(--pad-sm);
+    border-bottom: 1px solid var(--separator);
+    flex: 0 0 auto;
+}
+
+/* Место под системные кнопки окна есть только у macOS с overlay-заголовком. */
+:root[data-platform='macos'] .titlebar {
+    padding-left: 78px;
+}
+
+.titlebar__drag {
+    flex: 1;
+    height: 100%;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+}
+
+.titlebar__title {
+    font-size: var(--text-size-small);
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+}
+
+.tabstrip {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    height: var(--tabstrip-height);
+    padding: 0 var(--pad-sm);
+    border-bottom: 1px solid var(--separator);
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex: 0 0 auto;
+    scrollbar-width: none;
+}
+
+.tabstrip::-webkit-scrollbar {
+    display: none;
+}
+
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 6px 0 var(--pad-sm);
+    margin: 4px 0;
+    /*
+     * Ширина по содержимому с потолком: вкладки с короткими названиями не
+     * растягиваются до общей ширины, а длинные обрезаются многоточием. При
+     * переполнении полосы вкладки ужимаются, но не ниже минимума.
+     */
+    flex: 0 1 auto;
+    min-width: 72px;
+    max-width: 200px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    transition: background var(--duration-fast) var(--ease);
+}
+
+.tab:hover {
+    background: var(--surface-hover);
+}
+
+.tab--active {
+    background: var(--surface-active);
+    color: var(--text-primary);
+}
+
+.tab__label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: var(--text-size);
+}
+
+.tab__kind {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--surface-sunken);
+    color: var(--text-tertiary);
+}
+
+.tab__kind--mutation {
+    color: var(--warning);
+}
+
+.tab__kind--subscription {
+    color: var(--accent);
+}
+
+.tab__kind--flow {
+    color: var(--success);
+}
+
+.tab__kind--report {
+    color: var(--syntax-variable);
+}
+
+.tab__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    flex: 0 0 auto;
+}
+
+.tab__close {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-tertiary);
+    display: grid;
+    place-items: center;
+    opacity: 0;
+    transition:
+        opacity var(--duration-fast) var(--ease),
+        background var(--duration-fast) var(--ease),
+        color var(--duration-fast) var(--ease);
+}
+
+.tab:hover .tab__close,
+.tab--active .tab__close {
+    opacity: 1;
+}
+
+/* Красный при наведении: крестик — единственное разрушающее действие в полосе. */
+.tab__close:hover {
+    background: color-mix(in srgb, var(--danger) 18%, transparent);
+    color: var(--danger);
+}
+
+.context-menu__item:disabled {
+    color: var(--text-tertiary);
+    cursor: default;
+}
+
+.context-menu__item:disabled:hover {
+    background: transparent;
+}
+
+/* ── Страница цепочки ────────────────────────────────────────────────────── */
+
+.flow-page__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-md);
+    padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
+    max-width: 960px;
+}
+
+.flow-page__name {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+}
+
+.flow-page__body > .btn {
+    align-self: flex-start;
+}
+
+.flow-page__title {
+    font-size: 15px;
+    font-weight: 600;
+    height: 30px;
+}
+
+/* ── Панели ──────────────────────────────────────────────────────────────── */
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+.panel__header {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    height: 30px;
+    padding: 0 var(--pad-sm) 0 var(--pad-md);
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--separator);
+    background: var(--surface-header);
+}
+
+.panel__title {
+    font-size: var(--text-size-small);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.panel__spacer {
+    flex: 1;
+}
+
+.panel__content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.sidebar {
+    background: var(--surface-sunken);
+    border-right: 1px solid var(--separator);
+}
+
+:root[data-theme='light'] .sidebar,
+:root:not([data-theme='dark']) .sidebar {
+    /* Светлая тема: разделения одной линией мало, панель делается плотнее. */
+    background: rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) .sidebar {
+        background: var(--surface-sunken);
+    }
+}
+
+.layout-group {
+    height: 100%;
+    width: 100%;
+    min-height: 0;
+    min-width: 0;
+}
+
+/*
+ * Разделитель шириной в пиксель, но с увеличенной зоной захвата: попасть в
+ * однопиксельную линию мышью невозможно, а более толстая линия выглядела бы
+ * чужеродно рядом с системными окнами.
+ */
+.resize-handle {
+    flex: 0 0 auto;
+    background: var(--separator);
+    position: relative;
+    transition: background var(--duration-fast) var(--ease);
+}
+
+.resize-handle::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+}
+
+.resize-handle:hover,
+.resize-handle[data-separator-active],
+.resize-handle[data-active] {
+    background: var(--accent);
+}
+
+/* ── Элементы управления ─────────────────────────────────────────────────── */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 var(--pad-sm);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-sm);
+    background: var(--control-bg);
+    color: var(--text-primary);
+    font-size: var(--text-size);
+    white-space: nowrap;
+    transition:
+        background var(--duration-fast) var(--ease),
+        border-color var(--duration-fast) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+    background: var(--surface-hover);
+}
+
+.btn:active:not(:disabled) {
+    background: var(--surface-active);
+}
+
+.btn:disabled {
+    opacity: 0.45;
+}
+
+.btn--primary {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--accent-contrast);
+    font-weight: 500;
+}
+
+.btn--primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+    background: var(--accent);
+}
+
+.btn--quiet {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-secondary);
+}
+
+.btn--quiet:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+}
+
+.btn--icon {
+    width: 24px;
+    padding: 0;
+}
+
+/*
+ * Селект оформляется вручную: нативный элемент в WebKit рисуется системным
+ * тёмным блоком с толстой рамкой и выбивается из остального интерфейса.
+ */
+.select {
+    height: 24px;
+    padding: 0 22px 0 var(--pad-sm);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-sm);
+    background-color: var(--control-bg);
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+        right 11px center,
+        right 7px center;
+    background-size:
+        4px 4px,
+        4px 4px;
+    background-repeat: no-repeat;
+    color: var(--text-primary);
+    font-size: var(--text-size);
+    max-width: 190px;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: background-color var(--duration-fast) var(--ease);
+}
+
+.select:hover {
+    background-color: var(--surface-hover);
+}
+
+/* Компактный вариант для панелей, где селект вторичен по отношению к кнопкам. */
+.select--compact {
+    max-width: 150px;
+    color: var(--text-secondary);
+    border-color: transparent;
+    background-color: transparent;
+}
+
+.select--compact:hover {
+    background-color: var(--surface-hover);
+}
+
+.input {
+    height: 26px;
+    width: 100%;
+    padding: 0 var(--pad-sm);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-sm);
+    background: var(--control-bg);
+    font-size: var(--text-size);
+    user-select: text;
+}
+
+.input:focus {
+    border-color: var(--accent);
+}
+
+.segmented {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-sunken);
+    gap: 2px;
+}
+
+.segmented__item {
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    height: 20px;
+    padding: 0 var(--pad-sm);
+    font-size: var(--text-size-small);
+    color: var(--text-secondary);
+    transition: background var(--duration-fast) var(--ease);
+}
+
+.segmented__item:hover {
+    color: var(--text-primary);
+}
+
+.segmented__item--active {
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+/* ── Списки ──────────────────────────────────────────────────────────────── */
+
+.tree {
+    padding: var(--pad-xs) 0;
+}
+
+.tree__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 var(--pad-md);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.tree__row:hover {
+    background: var(--surface-hover);
+}
+
+.tree__row--active {
+    background: var(--surface-active);
+    color: var(--text-primary);
+}
+
+.tree__row--nested {
+    padding-left: 28px;
+}
+
+/* Коллекция, над которой тащат операцию. */
+.tree__row--drop {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tree__rename {
+    flex: 1;
+    height: 20px;
+    padding: 0 6px;
+    font-size: var(--text-size);
+}
+
+.tree__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+}
+
+.tree__chevron {
+    width: 12px;
+    color: var(--text-tertiary);
+    font-size: 9px;
+    transition: transform var(--duration-fast) var(--ease);
+}
+
+.tree__chevron--open {
+    transform: rotate(90deg);
+}
+
+.badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--surface-sunken);
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.badge--query {
+    color: var(--syntax-field);
+}
+
+.badge--mutation {
+    color: var(--warning);
+}
+
+.badge--subscription {
+    color: var(--accent);
+}
+
+.badge--ok {
+    color: var(--success);
+}
+
+.badge--fail {
+    color: var(--danger);
+}
+
+.empty {
+    padding: var(--pad-lg);
+    color: var(--text-tertiary);
+    font-size: var(--text-size);
+    line-height: 1.5;
+    text-align: center;
+}
+
+/* ── Статусная строка ────────────────────────────────────────────────────── */
+
+.statusbar {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-md);
+    height: var(--statusbar-height);
+    padding: 0 var(--pad-md);
+    border-top: 1px solid var(--separator);
+    font-size: var(--text-size-small);
+    color: var(--text-secondary);
+    flex: 0 0 auto;
+}
+
+.statusbar__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+}
+
+.statusbar__dot--ok {
+    background: var(--success);
+}
+
+.statusbar__dot--fail {
+    background: var(--danger);
+}
+
+.statusbar__dot--live {
+    background: var(--accent);
+    animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.35;
+    }
+}
+
+/* ── Модальные слои ──────────────────────────────────────────────────────── */
+
+.overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.42);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 12vh;
+    z-index: 100;
+    backdrop-filter: blur(2px);
+}
+
+/*
+ * Модальное окно.
+ *
+ * Фон плотный, а не полупрозрачный: сквозь прежний слой читался текст запроса
+ * и ответа, и разобрать содержимое диалога было невозможно.
+ */
+.dialog {
+    width: min(560px, 90vw);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--separator-strong);
+    background: var(--surface-overlay);
+    backdrop-filter: blur(30px) saturate(180%);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+}
+
+/* Настройки и редактор цепочек не помещаются в узкий диалог палитры. */
+.dialog--wide {
+    width: min(760px, 92vw);
+    max-height: 84vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.dialog__body {
+    padding: var(--pad-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-md);
+    overflow-y: auto;
+    /* Кнопки внутри формы занимают свою ширину, а не всю колонку. */
+    align-items: stretch;
+}
+
+.dialog__body > .btn {
+    align-self: flex-start;
+}
+
+.dialog__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--pad-sm);
+    padding: var(--pad-md);
+    border-top: 1px solid var(--separator);
+}
+
+.dialog__title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+}
+
+.field__label {
+    font-size: var(--text-size);
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+/* ── Палитра команд ──────────────────────────────────────────────────────── */
+
+.palette__input {
+    width: 100%;
+    height: 44px;
+    padding: 0 var(--pad-lg);
+    border: none;
+    border-bottom: 1px solid var(--separator);
+    background: transparent;
+    font-size: 15px;
+    user-select: text;
+}
+
+.palette__list {
+    max-height: 46vh;
+    overflow-y: auto;
+    padding: var(--pad-xs) 0;
+}
+
+.palette__item {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    padding: 0 var(--pad-lg);
+    height: 32px;
+    color: var(--text-secondary);
+}
+
+.palette__item--active {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+
+.palette__item--active .badge,
+.palette__item--active .palette__hint {
+    color: inherit;
+    opacity: 0.8;
+}
+
+.palette__hint {
+    margin-left: auto;
+    font-size: var(--text-size-small);
+    color: var(--text-tertiary);
+}
+
+/* ── Редактор ────────────────────────────────────────────────────────────── */
+
+.editor-host {
+    height: 100%;
+    overflow: hidden;
+}
+
+.editor-host .cm-editor {
+    height: 100%;
+}
+
+/* ── Просмотр JSON ───────────────────────────────────────────────────────── */
+
+.json-viewer {
+    line-height: 1.5;
+}
+
+/*
+ * Строка дерева: колонка под шеврон, затем ключ, затем значение.
+ *
+ * Переноситься имеет право только значение. Раньше перенос стоял на всей
+ * строке, и при длинном значении ключ сжимался до нулевой ширины и ломался
+ * по одной букве на строку.
+ */
+.json-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.json-gutter {
+    flex: 0 0 auto;
+    width: 8px;
+    display: inline-flex;
+    justify-content: center;
+}
+
+.json-value {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.json-row--clickable:hover {
+    background: var(--surface-hover);
+}
+
+.json-chevron {
+    color: var(--text-tertiary);
+    font-size: 8px;
+    line-height: 1;
+    transition: transform var(--duration-fast) var(--ease);
+}
+
+.json-chevron--open {
+    transform: rotate(90deg);
+}
+
+.json-key {
+    color: var(--syntax-field);
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.json-key::after {
+    content: ':';
+    color: var(--syntax-punctuation);
+}
+
+/*
+ * Индекс элемента массива — это позиция, а не имя поля, поэтому он не
+ * оформляется как ключ: приглушённый номер справа выравнивается по правому
+ * краю и не мешает читать сами значения.
+ */
+.json-index {
+    color: var(--text-tertiary);
+    min-width: 1.6em;
+    text-align: right;
+    flex: 0 0 auto;
+    font-size: 0.92em;
+}
+
+.json-string {
+    color: var(--syntax-string);
+}
+
+.json-number {
+    color: var(--syntax-number);
+}
+
+.json-bool {
+    color: var(--syntax-keyword);
+}
+
+.json-null {
+    color: var(--text-tertiary);
+}
+
+.json-brace,
+.json-hint {
+    color: var(--text-tertiary);
+    flex: 0 0 auto;
+}
+
+/* Кнопка раскрытия длинной строки: часть текста, а не отдельный элемент. */
+.json-more {
+    border: none;
+    padding: 0 4px;
+    margin: 0 2px;
+    border-radius: 3px;
+    background: var(--surface-active);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.92em;
+}
+
+.json-more:hover {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+
+.raw {
+    margin: 0;
+    padding: var(--pad-sm) var(--pad-md);
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+}
+
+.errors {
+    margin-bottom: var(--pad-md);
+    padding: var(--pad-sm) var(--pad-md);
+    border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.errors__title {
+    font-size: var(--text-size-small);
+    font-weight: 600;
+    color: var(--danger);
+    margin-bottom: var(--pad-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.event {
+    padding: var(--pad-sm) 0;
+    border-bottom: 1px solid var(--separator);
+}
+
+.event__time {
+    color: var(--text-tertiary);
+    font-size: var(--text-size-small);
+    margin-bottom: 2px;
+}
+
+/* ── Инспектор ───────────────────────────────────────────────────────────── */
+
+.inspector__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+    align-items: flex-start;
+    padding-bottom: var(--pad-md);
+    margin-bottom: var(--pad-md);
+    border-bottom: 1px solid var(--separator);
+}
+
+.inspector__label {
+    font-size: var(--text-size-small);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-tertiary);
+}
+
+.inspector__value {
+    font-size: var(--text-size);
+}
+
+.inspector__hint {
+    font-size: var(--text-size-small);
+    color: var(--text-tertiary);
+    line-height: 1.45;
+}
+
+.diff {
+    width: 100%;
+    margin-top: var(--pad-xs);
+    max-height: 40vh;
+    overflow: auto;
+}
+
+.diff__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+}
+
+.diff__row--breaking .diff__path {
+    color: var(--danger);
+}
+
+.diff__path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Настройки ───────────────────────────────────────────────────────────── */
+
+.settings__group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-sm);
+    padding-bottom: var(--pad-md);
+    border-bottom: 1px solid var(--separator);
+}
+
+.settings__group:last-of-type {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.settings__caption {
+    font-size: var(--text-size-small);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-tertiary);
+}
+
+.settings__row {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-md);
+    min-height: 28px;
+}
+
+.settings__label {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings__control {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+}
+
+.input--narrow {
+    width: 92px;
+}
+
+input[type='range'] {
+    width: 170px;
+    accent-color: var(--accent);
+}
+
+input[type='checkbox'] {
+    accent-color: var(--accent);
+}
+
+.toggle {
+    width: 38px;
+    height: 22px;
+    padding: 2px;
+    border-radius: 11px;
+    border: 1px solid var(--control-border);
+    background: var(--surface-sunken);
+    display: flex;
+    justify-content: flex-start;
+    transition:
+        background var(--duration-normal) var(--ease),
+        border-color var(--duration-normal) var(--ease);
+}
+
+.toggle--on {
+    background: var(--accent);
+    border-color: transparent;
+    justify-content: flex-end;
+}
+
+.toggle__knob {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--control-bg);
+    transition: background var(--duration-normal) var(--ease);
+}
+
+.toggle--on .toggle__knob {
+    background: var(--accent-contrast);
+}
+
+/* ── Редактор цепочек ────────────────────────────────────────────────────── */
+
+.flow__steps {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-md);
+}
+
+.flow__step {
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-md);
+    padding: var(--pad-sm) var(--pad-md) var(--pad-md);
+    background: var(--surface-sunken);
+}
+
+.flow__step-head {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    margin-bottom: var(--pad-sm);
+}
+
+.flow__step-number {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface-active);
+    color: var(--text-secondary);
+    font-size: var(--text-size-small);
+    flex: 0 0 auto;
+}
+
+/* Подпись слева, поле справа: длинные пути и JSON читаются в одну колонку. */
+/* Подпись слева, поле справа: узкая колонка рвала подписи на четыре строки. */
+.flow__grid {
+    display: grid;
+    grid-template-columns: 176px 1fr;
+    gap: var(--pad-sm) var(--pad-md);
+    align-items: start;
+}
+
+.flow__grid > .field__label {
+    padding-top: 5px;
+}
+
+/* Редактор внутри шага: фиксированная высота со своей прокруткой. */
+.flow__editor {
+    height: 92px;
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-sm);
+    background: var(--control-bg);
+    overflow: hidden;
+}
+
+.flow__editor--query {
+    height: 150px;
+}
+
+.flow__textarea {
+    height: auto;
+    padding: 6px var(--pad-sm);
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.flow__rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+    align-items: flex-start;
+}
+
+.flow__rows .row {
+    width: 100%;
+}
+
+.flow__error {
+    margin-top: var(--pad-sm);
+    padding: 6px var(--pad-sm);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    color: var(--danger);
+    font-size: var(--text-size-small);
+}
+
+.flow__response {
+    margin-top: var(--pad-sm);
+    padding-top: var(--pad-sm);
+    border-top: 1px solid var(--separator);
+}
+
+.flow__response-body {
+    max-height: 320px;
+    overflow: auto;
+    padding: var(--pad-xs) 0;
+}
+
+.flow__summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+    align-items: flex-start;
+    padding: var(--pad-sm) var(--pad-md);
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+}
+
+.kv {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+    align-items: flex-start;
+}
+
+.kv .row {
+    width: 100%;
+}
+
+/* Кнопка появляется только при наведении: иначе она мельтешит в каждой строке. */
+.json-pick {
+    margin-left: 4px;
+    width: 18px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-tertiary);
+    opacity: 0;
+    flex: 0 0 auto;
+    transition: opacity var(--duration-fast) var(--ease);
+}
+
+.json-row:hover .json-pick {
+    opacity: 1;
+}
+
+.json-pick:hover {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+
+.text-tertiary {
+    color: var(--text-tertiary);
+}
+
+/* ── Прочее ──────────────────────────────────────────────────────────────── */
+
+.selectable {
+    user-select: text;
+}
+
+.mono {
+    font-family: var(--font-mono);
+    font-size: var(--code-size);
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+}
+
+.scroll {
+    overflow: auto;
+    height: 100%;
+}
+
+/* ── Пустое состояние панели ответа ──────────────────────────────────────── */
+
+.idle {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-sm);
+    padding: var(--pad-md);
+    color: var(--text-tertiary);
+}
+
+.idle__hint {
+    text-align: center;
+    padding: var(--pad-md) 0;
+}
+
+.idle__list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.idle__row {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    padding: 3px var(--pad-sm);
+    border-radius: var(--radius-sm);
+}
+
+.idle__row:hover {
+    background: var(--surface-hover);
+}
+
+.idle__time {
+    flex: 1;
+    font-size: var(--text-size-small);
+    color: var(--text-secondary);
+}
+
+/* ── Журнал действий агента ──────────────────────────────────────────────── */
+
+.dialog--full {
+    width: min(1180px, 94vw);
+    height: min(820px, 88vh);
+    display: flex;
+    flex-direction: column;
+}
+
+.activity__head {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    padding: var(--pad-md) var(--pad-lg);
+    border-bottom: 1px solid var(--separator);
+    flex: 0 0 auto;
+}
+
+.activity__body {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(320px, 42%) 1fr;
+}
+
+.activity__timeline {
+    overflow-y: auto;
+    border-right: 1px solid var(--separator);
+    padding: var(--pad-sm);
+}
+
+.activity__details {
+    overflow-y: auto;
+    padding: var(--pad-md) var(--pad-lg);
+}
+
+.activity__plan {
+    padding: var(--pad-sm) var(--pad-md);
+    margin-bottom: var(--pad-sm);
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+}
+
+.activity__goal {
+    font-size: var(--text-size);
+    margin: var(--pad-xs) 0;
+}
+
+.activity__steps {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+/*
+ * Строка хронологии: слева номер, дальше намерение крупно, метаданные мельче.
+ * Читается сверху вниз как рассказ о том, что делал агент.
+ */
+.activity__row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--pad-sm);
+    padding: 6px var(--pad-sm);
+    border-radius: var(--radius-sm);
+    border-left: 2px solid transparent;
+}
+
+.activity__row:hover {
+    background: var(--surface-hover);
+}
+
+.activity__row--active {
+    background: var(--surface-active);
+    border-left-color: var(--accent);
+}
+
+.activity__row--failed {
+    border-left-color: var(--danger);
+}
+
+.activity__row--note {
+    border-left-color: var(--text-tertiary);
+    background: color-mix(in srgb, var(--text-tertiary) 6%, transparent);
+}
+
+.activity__seq {
+    min-width: 22px;
+    text-align: right;
+    color: var(--text-tertiary);
+    font-size: var(--text-size-small);
+    padding-top: 2px;
+}
+
+.activity__main {
+    flex: 1;
+    min-width: 0;
+}
+
+.activity__intent {
+    color: var(--text-primary);
+    line-height: 1.4;
+}
+
+.activity__meta {
+    display: flex;
+    gap: var(--pad-sm);
+    font-size: var(--text-size-small);
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
+/* Шаг плана — контекст, а не действие: приглушён, чтобы не читался ссылкой. */
+.activity__step {
+    font-size: var(--text-size-small);
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
+.activity__step::before {
+    content: '↳ ';
+}
+
+.activity__detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-sm);
+    align-items: flex-start;
+}
+
+.activity__note {
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+
+/* ── Контекстное меню ────────────────────────────────────────────────────── */
+
+.context-menu__layer {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+}
+
+.context-menu {
+    position: absolute;
+    min-width: 210px;
+    padding: var(--pad-xs);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--separator-strong);
+    background: var(--surface-overlay);
+    backdrop-filter: blur(30px) saturate(180%);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.context-menu__item {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    width: 100%;
+    height: 24px;
+    padding: 0 var(--pad-sm);
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.context-menu__item:hover {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+
+.context-menu__item:hover .palette__hint {
+    color: inherit;
+    opacity: 0.8;
+}
+
+.context-menu__item--separated {
+    margin-top: var(--pad-xs);
+    border-top: 1px solid var(--separator);
+    padding-top: 1px;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+/* ── Унаследованные заголовки ────────────────────────────────────────────── */
+
+.inherited {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: var(--pad-md);
+    padding-bottom: var(--pad-sm);
+    border-bottom: 1px solid var(--separator);
+}
+
+.inherited__row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--pad-sm);
+    color: var(--text-secondary);
+}
+
+.inherited__name {
+    flex: 0 0 auto;
+}
+
+.inherited__value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-tertiary);
+}
+
+/* Предупреждение в панели ответа: не ошибка, но требует действия. */
+.notice {
+    margin-bottom: var(--pad-md);
+    padding: var(--pad-sm) var(--pad-md);
+    border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+/* ── Восстановление в настройках окружения ───────────────────────────────── */
+
+.recovery {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-sm);
+}
+
+/*
+ * Параметры обновления — отдельный блок.
+ *
+ * Вперемешку с заголовками и переменными окружения они читались как ещё одна
+ * пара «ключ — значение», хотя относятся только к выбранной цепочке.
+ */
+.recovery__params {
+    padding: var(--pad-sm) var(--pad-md);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+}
+
+/* Подпись и поле в одной сетке: строки с разной шириной полей разъезжались. */
+.recovery__grid {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: var(--pad-xs) var(--pad-sm);
+    align-items: center;
+}
+
+/*
+ * Одна ширина на все текстовые поля блока: четыре разные ширины в столбце
+ * выглядели случайными, хотя за ними не стояло никакого смысла.
+ */
+.recovery__grid .input {
+    max-width: 320px;
+}
+
+.recovery__grid .input--narrow {
+    max-width: 90px;
+}
+
+.input--name {
+    max-width: 260px;
+}
+
+/* ── Состояние токена ────────────────────────────────────────────────────── */
+
+.token-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 var(--pad-sm);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-sm);
+    background: var(--control-bg);
+    color: var(--text-secondary);
+    font-size: var(--text-size-small);
+    white-space: nowrap;
+}
+
+.token-status:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+}
+
+.token-status:disabled {
+    opacity: 0.6;
+}
+
+.token-status__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+}
+
+.token-status--soon .token-status__dot {
+    background: var(--warning);
+}
+
+/* Срок неизвестен: токена ещё не получали — состояние нейтральное. */
+.token-status--unknown .token-status__dot {
+    background: var(--text-tertiary);
+}
+
+.token-status--expired {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.token-status--expired .token-status__dot {
+    background: var(--danger);
+}
+
+/* Замечание о переменной: путь и причина в одну строку. */
+.problem {
+    display: flex;
+    align-items: baseline;
+    gap: var(--pad-sm);
+    padding: 2px 0;
+    color: var(--text-secondary);
+}
+
+.problem__path {
+    flex: 0 0 auto;
+    color: var(--danger);
+}
+
+/* ── Подпись рядом с элементом управления в шапке панели ─────────────────── */
+
+.panel__label {
+    font-size: var(--text-size-small);
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+/*
+ * Сочетание клавиш на самой кнопке.
+ *
+ * В подсказке `title` шорткат виден только через секунду наведения, поэтому
+ * основные действия печатают его рядом с названием.
+ */
+.btn__key {
+    font-family: var(--font-ui);
+    font-size: var(--text-size-small);
+    color: var(--text-tertiary);
+    letter-spacing: 0.02em;
+}
+
+.btn--primary .btn__key {
+    color: color-mix(in srgb, var(--accent-contrast) 70%, transparent);
+}
+
+/* Кнопка-переключатель во включённом состоянии. */
+.btn--on {
+    background: var(--surface-active);
+    color: var(--text-primary);
+}
+
+/* ── Поиск по ответу ─────────────────────────────────────────────────────── */
+
+.searchbar {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    padding: var(--pad-xs) var(--pad-sm) var(--pad-xs) var(--pad-md);
+    border-bottom: 1px solid var(--separator);
+    background: var(--surface-header);
+    flex: 0 0 auto;
+}
+
+.searchbar__input {
+    flex: 1;
+    min-width: 0;
+}
+
+.searchbar__count {
+    font-size: var(--text-size-small);
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Ноль совпадений — не ошибка, но результат должен читаться сразу. */
+.searchbar__count--empty {
+    color: var(--danger);
+}
+
+.json-match {
+    background: var(--highlight);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+/* Селект подготовки не должен вытеснять кнопки запуска из шапки. */
+.select--compact {
+    max-width: 150px;
+}
+
+/* Поле под короткое перечисление: во всю ширину оно выглядит случайно. */
+.input--medium {
+    max-width: 220px;
+}
+
+/* Значение-секрет в редакторе переменных: бейдж вместо поля ввода. */
+.kv__secret {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    height: 24px;
+    padding: 0 var(--pad-sm);
+    font-size: var(--text-size-small);
+}
+
+/* ── Боевое окружение ────────────────────────────────────────────────────── */
+
+.badge--prod {
+    background: color-mix(in srgb, var(--danger) 18%, transparent);
+    color: var(--danger);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+
+.select--prod {
+    border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.dialog--danger {
+    border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.dialog__text {
+    margin: 0;
+    line-height: 1.5;
+}
+
+.btn--danger {
+    background: var(--danger);
+    border-color: transparent;
+    color: #fff;
+}
+
+.btn--danger:hover {
+    background: color-mix(in srgb, var(--danger) 85%, #000);
+}
+
+/* Кликабельный элемент статусной строки: выглядит текстом, ведёт себя кнопкой. */
+.statusbar__action {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 0;
+    cursor: pointer;
+}
+
+.statusbar__action:hover {
+    color: var(--text-primary);
+    text-decoration: underline;
+    text-decoration-color: var(--text-tertiary);
+}
+
+.statusbar__action--warn {
+    color: var(--warning);
+}
+
+/* ── Отчёт о прогоне цепочек ─────────────────────────────────────────────── */
+
+.report {
+    padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-sm);
+    max-width: 960px;
+}
+
+.report__summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--pad-lg);
+    padding-bottom: var(--pad-sm);
+    border-bottom: 1px solid var(--separator);
+    margin-bottom: var(--pad-xs);
+}
+
+.report__stat b {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.report__stat--ok b {
+    color: var(--success);
+}
+
+.report__stat--fail b {
+    color: var(--danger);
+}
+
+.report__entry {
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+}
+
+.report__entry--fail {
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.report__head {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    padding: var(--pad-xs) var(--pad-sm) var(--pad-xs) var(--pad-md);
+    cursor: default;
+}
+
+.report__name {
+    font-weight: 600;
+}
+
+.report__steps {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-sm);
+    padding: 0 var(--pad-md) var(--pad-md) 34px;
+}
+
+.report__step {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+}

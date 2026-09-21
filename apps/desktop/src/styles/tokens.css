@@ -1,0 +1,169 @@
+/*
+ * Токены оформления.
+ *
+ * Палитра построена на полупрозрачных слоях: под окном работает нативное
+ * размытие (NSVisualEffectView), поэтому сплошные фоны здесь недопустимы —
+ * они закрыли бы материал и превратили окно в обычную непрозрачную панель.
+ * По той же причине не используются тени: поверх размытия они выглядят грязно.
+ */
+
+:root {
+    color-scheme: light dark;
+
+    /* Системный акцент macOS; значение подхватывается из настроек системы. */
+    --accent: AccentColor;
+    --accent-contrast: AccentColorText;
+
+    --font-ui:
+        -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+    --font-mono: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
+
+    --text-size: 13px;
+    --text-size-small: 11px;
+    --code-size: 12.5px;
+
+    --radius-sm: 5px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+
+    --pad-xs: 4px;
+    --pad-sm: 8px;
+    --pad-md: 12px;
+    --pad-lg: 16px;
+
+    --titlebar-height: 38px;
+    --tabstrip-height: 34px;
+    --statusbar-height: 24px;
+
+    --duration-fast: 90ms;
+    --duration-normal: 160ms;
+    --ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+    /*
+     * Плотность фона окна поверх нативного размытия, в процентах.
+     * 0 — виден только материал NSVisualEffectView, 100 — сплошной фон.
+     */
+    --window-opacity: 0;
+    --window-base: #ffffff;
+}
+
+/* Светлая тема — значения по умолчанию. */
+:root {
+    --text-primary: rgba(0, 0, 0, 0.92);
+    --text-secondary: rgba(0, 0, 0, 0.56);
+    --text-tertiary: rgba(0, 0, 0, 0.36);
+
+    --surface-raised: rgba(255, 255, 255, 0.72);
+    /* Фон модальных окон: содержимое под ними не должно просвечивать. */
+    --surface-overlay: rgba(250, 250, 252, 0.97);
+    --surface-sunken: rgba(0, 0, 0, 0.05);
+    --surface-hover: rgba(0, 0, 0, 0.05);
+    --surface-active: rgba(0, 0, 0, 0.09);
+    /*
+     * Фон шапок панелей. В светлой теме без него панели сливаются в один белый
+     * лист: одной разделительной линии не хватает, чтобы отделить редактор от
+     * ответа и сайдбара.
+     */
+    --surface-header: rgba(0, 0, 0, 0.028);
+    --highlight: rgba(255, 214, 10, 0.45);
+
+    --separator: rgba(0, 0, 0, 0.14);
+    --separator-strong: rgba(0, 0, 0, 0.22);
+
+    --control-bg: rgba(255, 255, 255, 0.8);
+    --control-border: rgba(0, 0, 0, 0.12);
+
+    --success: #1a7f37;
+    --warning: #9a6700;
+    --danger: #c4314b;
+
+    --syntax-keyword: #ad3da4;
+    --syntax-field: #0f68a0;
+    --syntax-string: #c41a16;
+    --syntax-number: #1c00cf;
+    --syntax-variable: #3e8087;
+    --syntax-comment: rgba(0, 0, 0, 0.42);
+    --syntax-punctuation: rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+    /*
+     * Исключение для явно выбранной светлой темы обязательно: без него
+     * системная тёмная схема перекрывала выбор пользователя, и в «светлом»
+     * режиме оставался белый фон с белым же текстом.
+     */
+    :root:not([data-theme='light']) {
+        --window-base: #1b1b1f;
+        --text-primary: rgba(255, 255, 255, 0.92);
+        --text-secondary: rgba(255, 255, 255, 0.58);
+        --text-tertiary: rgba(255, 255, 255, 0.36);
+
+        --surface-raised: rgba(255, 255, 255, 0.08);
+        --surface-overlay: rgba(32, 32, 36, 0.97);
+        --surface-sunken: rgba(0, 0, 0, 0.22);
+        --surface-hover: rgba(255, 255, 255, 0.07);
+        --surface-active: rgba(255, 255, 255, 0.12);
+        --surface-header: rgba(255, 255, 255, 0.03);
+        --highlight: rgba(255, 214, 10, 0.32);
+
+        --separator: rgba(255, 255, 255, 0.11);
+        --separator-strong: rgba(255, 255, 255, 0.2);
+
+        --control-bg: rgba(255, 255, 255, 0.08);
+        --control-border: rgba(255, 255, 255, 0.14);
+
+        --success: #3fb950;
+        --warning: #d29922;
+        --danger: #ff6b7f;
+
+        --syntax-keyword: #ff7ab2;
+        --syntax-field: #6bb8ff;
+        --syntax-string: #ff8170;
+        --syntax-number: #d9c97c;
+        --syntax-variable: #78c2b3;
+        --syntax-comment: rgba(255, 255, 255, 0.38);
+        --syntax-punctuation: rgba(255, 255, 255, 0.5);
+    }
+}
+
+/* Явный выбор темы в настройках приложения перекрывает системный. */
+:root[data-theme='light'] {
+    color-scheme: light;
+
+    --window-base: #ffffff;
+}
+
+:root[data-theme='dark'] {
+    color-scheme: dark;
+
+    --window-base: #1b1b1f;
+    --surface-overlay: rgba(32, 32, 36, 0.97);
+    --text-primary: rgba(255, 255, 255, 0.92);
+    --text-secondary: rgba(255, 255, 255, 0.58);
+    --text-tertiary: rgba(255, 255, 255, 0.36);
+
+    --surface-raised: rgba(255, 255, 255, 0.08);
+    --surface-sunken: rgba(0, 0, 0, 0.22);
+    --surface-hover: rgba(255, 255, 255, 0.07);
+    --surface-active: rgba(255, 255, 255, 0.12);
+    --surface-header: rgba(255, 255, 255, 0.03);
+    --highlight: rgba(255, 214, 10, 0.32);
+
+    --separator: rgba(255, 255, 255, 0.11);
+    --separator-strong: rgba(255, 255, 255, 0.2);
+
+    --control-bg: rgba(255, 255, 255, 0.08);
+    --control-border: rgba(255, 255, 255, 0.14);
+
+    --success: #3fb950;
+    --warning: #d29922;
+    --danger: #ff6b7f;
+
+    --syntax-keyword: #ff7ab2;
+    --syntax-field: #6bb8ff;
+    --syntax-string: #ff8170;
+    --syntax-number: #d9c97c;
+    --syntax-variable: #78c2b3;
+    --syntax-comment: rgba(255, 255, 255, 0.38);
+    --syntax-punctuation: rgba(255, 255, 255, 0.5);
+}

@@ -1,0 +1,528 @@
+import { useEffect, useRef, useState } from 'react'
+
+import type { IVariableProblem } from '@resolvr/core'
+
+import { ERRORS, EVENTS, LINES, pluralize } from '../lib/plural.js'
+import { extractOperationName, useAppStore, type ITabRun } from '../state/store.js'
+import { countMatches } from './json-search.js'
+import { JsonViewer } from './JsonViewer.js'
+import { SaveValueDialog } from './SaveValueDialog.js'
+
+const RESPONSE_TABS = [
+    { id: 'response', label: 'Ответ' },
+    { id: 'raw', label: 'Сырой' },
+    { id: 'headers', label: 'Заголовки' },
+    { id: 'trace', label: 'Трейс' },
+] as const
+
+/** Панель результата: данные, ошибки, заголовки и тайминги. */
+export function ResponsePane(): React.JSX.Element {
+    const activeTabId = useAppStore((state) => state.activeTabId)
+    const tab = useAppStore((state) => state.tabs.find((item) => item.id === state.activeTabId))
+    const run = useAppStore((state) => (state.activeTabId ? state.runs[state.activeTabId] : undefined))
+    const setResponseTab = useAppStore((state) => state.setResponseTab)
+    const expandDepth = useAppStore((state) => state.settings.response.expandDepth)
+    const [saving, setSaving] = useState<{ path: string; value: string } | undefined>()
+    const [search, setSearch] = useState('')
+    const [searchOpen, setSearchOpen] = useState(false)
+    const searchInput = useRef<HTMLInputElement>(null)
+
+    // ⌘F ищет по ответу, но только когда фокус не в редакторе: там это
+    // сочетание принадлежит поиску по тексту запроса.
+    useEffect(() => {
+        function onKeyDown(event: KeyboardEvent): void {
+            if (event.key !== 'f' || !event.metaKey) return
+
+            // Цель события — не всегда элемент: при отсутствии фокуса им
+            // оказывается сам документ, у которого нет `closest`.
+            const target = event.target
+            if (target instanceof HTMLElement && target.closest('.cm-editor')) return
+
+            event.preventDefault()
+            setSearchOpen(true)
+            searchInput.current?.focus()
+            searchInput.current?.select()
+        }
+
+        window.addEventListener('keydown', onKeyDown)
+
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [])
+
+    // Поиск относится к конкретному ответу: при переходе на другую вкладку
+    // прежний запрос фильтровал бы чужие данные.
+    useEffect(() => {
+        setSearch('')
+    }, [activeTabId])
+
+    if (!activeTabId || !tab) return <div className="empty">Нет активной вкладки</div>
+
+    return (
+        <div className="panel">
+            <div className="panel__header">
+                <div className="segmented">
+                    {RESPONSE_TABS.map((item) => (
+                        <button
+                            key={item.id}
+                            type="button"
+                            className={`segmented__item${
+                                tab.responseTab === item.id ? ' segmented__item--active' : ''
+                            }`}
+                            onClick={() => setResponseTab(activeTabId, item.id)}
+                        >
+                            {item.label}
+                        </button>
+                    ))}
+                </div>
+
+                <span className="panel__spacer" />
+
+                <button
+                    type="button"
+                    className={`btn btn--quiet btn--icon${searchOpen ? ' btn--on' : ''}`}
+                    onClick={() => {
+                        setSearchOpen((current) => !current)
+                        if (!searchOpen) window.setTimeout(() => searchInput.current?.focus(), 0)
+                    }}
+                    title="Поиск по ответу (⌘F)"
+                    aria-label="Поиск по ответу"
+                >
+                    <SearchIcon />
+                </button>
+
+                <ResponseStatus run={run} />
+            </div>
+
+            {searchOpen && (
+                <SearchBar
+                    inputRef={searchInput}
+                    value={search}
+                    matches={countMatches(
+                        { data: run?.result?.data, errors: run?.result?.errors },
+                        search.trim().toLowerCase(),
+                    )}
+                    onChange={setSearch}
+                    onClose={() => {
+                        setSearchOpen(false)
+                        setSearch('')
+                    }}
+                />
+            )}
+
+            <div className="panel__content">
+                <ResponseBody
+                    run={run}
+                    view={tab.responseTab}
+                    expandDepth={expandDepth}
+                    search={search}
+                    onSaveValue={setSaving}
+                />
+            </div>
+
+            {saving && (
+                <SaveValueDialog
+                    path={saving.path}
+                    value={saving.value}
+                    onClose={() => setSaving(undefined)}
+                />
+            )}
+        </div>
+    )
+}
+
+function ResponseStatus({ run }: { run: ITabRun | undefined }): React.JSX.Element | null {
+    if (!run) return null
+
+    if (run.status === 'running') return <span className="badge">выполняется…</span>
+    if (run.status === 'streaming') {
+        return (
+            <span className="row">
+                <span className="statusbar__dot statusbar__dot--live" />
+                <span className="badge">{pluralize(run.events.length, EVENTS)}</span>
+            </span>
+        )
+    }
+    if (run.status === 'invalid') return <span className="badge badge--fail">не отправлен</span>
+    if (run.status === 'error') return <span className="badge badge--fail">ошибка</span>
+    if (!run.result) return null
+
+    const { result } = run
+
+    return (
+        <span className="row">
+            <span className={`badge ${result.ok ? 'badge--ok' : 'badge--fail'}`}>
+                {result.status}
+            </span>
+            <span className="badge">{Math.round(result.durationMs)} мс</span>
+            <span className="badge">{formatBytes(result.responseBytes)}</span>
+            {result.errors && result.errors.length > 0 && (
+                <span className="badge badge--fail">{pluralize(result.errors.length, ERRORS)}</span>
+            )}
+        </span>
+    )
+}
+
+interface IResponseBodyProps {
+    run: ITabRun | undefined
+    view: 'response' | 'raw' | 'headers' | 'trace'
+    expandDepth: number
+    search: string
+    onSaveValue: (input: { path: string; value: string }) => void
+}
+
+function ResponseBody({
+    run,
+    view,
+    expandDepth,
+    search,
+    onSaveValue,
+}: IResponseBodyProps): React.JSX.Element {
+    if (!run || run.status === 'idle') {
+        return <IdleResponse />
+    }
+
+    if (run.status === 'invalid') {
+        return <InvalidVariables problems={run.problems ?? []} />
+    }
+
+    if (run.status === 'error') {
+        return (
+            <div className="empty selectable" style={{ color: 'var(--danger)', textAlign: 'left' }}>
+                {run.error}
+            </div>
+        )
+    }
+
+    // Поток подписки показывается как лог событий: последнее сверху, чтобы
+    // не приходилось прокручивать за каждым новым сообщением.
+    if (run.status === 'streaming' || run.events.length > 0) {
+        if (run.events.length === 0) {
+            return <div className="empty">Подписка активна, событий пока нет…</div>
+        }
+
+        return (
+            <div style={{ padding: 'var(--pad-sm) var(--pad-md)' }}>
+                {[...run.events].reverse().map((event, index) => (
+                    <div key={`${event.at}-${index}`} className="event">
+                        <div className="event__time mono">
+                            {new Date(event.at).toLocaleTimeString()}
+                        </div>
+                        <JsonViewer
+                            value={event.payload}
+                            defaultExpandDepth={expandDepth}
+                            onSaveValue={onSaveValue}
+                        />
+                    </div>
+                ))}
+            </div>
+        )
+    }
+
+    if (run.status === 'running' || !run.result) {
+        return <div className="empty">Запрос выполняется…</div>
+    }
+
+    const { result } = run
+
+    if (view === 'raw') {
+        return <pre className="raw mono selectable">{formatRaw(result.body)}</pre>
+    }
+
+    if (view === 'headers') {
+        return (
+            <div style={{ padding: 'var(--pad-sm) var(--pad-md)' }}>
+                <JsonViewer value={result.headers} defaultExpandDepth={expandDepth} />
+            </div>
+        )
+    }
+
+    if (view === 'trace') {
+        return (
+            <div style={{ padding: 'var(--pad-sm) var(--pad-md)' }}>
+                <JsonViewer
+                    value={{
+                        endpointId: result.endpointId,
+                        environmentId: result.environmentId,
+                        kind: result.kind,
+                        status: `${result.status} ${result.statusText}`,
+                        totalMs: Math.round(result.durationMs),
+                        firstByteMs: result.firstByteMs ? Math.round(result.firstByteMs) : undefined,
+                        responseBytes: result.responseBytes,
+                        requestHeaders: result.requestHeaders,
+                    }}
+                    defaultExpandDepth={expandDepth}
+                />
+            </div>
+        )
+    }
+
+    return (
+        <div style={{ padding: 'var(--pad-sm) var(--pad-md)' }}>
+            {result.unresolvedHeaders && result.unresolvedHeaders.length > 0 && (
+                <UnresolvedHeadersNotice headers={result.unresolvedHeaders} />
+            )}
+
+            {result.errors &&
+                result.errors.length > 0 &&
+                // При активном поиске блок ошибок скрывается, если совпадений
+                // в нём нет: иначе он занимает экран целиком и прячет результат.
+                (search.trim().length === 0 ||
+                    countMatches(result.errors, search.trim().toLowerCase()) > 0) && (
+                    <div className="errors">
+                        <div className="errors__title">Ошибки GraphQL</div>
+                        <JsonViewer
+                            value={result.errors}
+                            defaultExpandDepth={expandDepth + 1}
+                            search={search}
+                        />
+                    </div>
+                )}
+
+            {result.data === undefined ? (
+                <pre className="raw mono selectable">{formatRaw(result.body)}</pre>
+            ) : (
+                <JsonViewer
+                    value={result.data}
+                    defaultExpandDepth={expandDepth}
+                    rootPath="data"
+                    search={search}
+                    onSaveValue={onSaveValue}
+                />
+            )}
+        </div>
+    )
+}
+
+/**
+ * Предупреждение о заголовках, ушедших без значения.
+ *
+ * Причина почти всегда одна — не получен токен, поэтому починка предлагается
+ * прямо здесь: возвращаться за ней в шапку окна или в настройки не нужно.
+ */
+function UnresolvedHeadersNotice({ headers }: { headers: string[] }): React.JSX.Element {
+    const workspace = useAppStore((state) => state.workspace)
+    const tab = useAppStore((state) => state.tabs.find((item) => item.id === state.activeTabId))
+    const refreshToken = useAppStore((state) => state.refreshToken)
+    const refreshing = useAppStore((state) => state.tokenRefreshing)
+    const setDialog = useAppStore((state) => state.setDialog)
+
+    const environment = workspace?.environments.find(
+        (item) => item.id === (tab?.environmentId ?? workspace.defaultEnvironmentId),
+    )
+    const canRefresh = Boolean(environment?.recovery?.flowId)
+
+    return (
+        <div className="notice">
+            <b>Запрос ушёл без заголовков:</b>{' '}
+            <span className="mono">{headers.join(', ')}</span>
+            <div className="inspector__hint">
+                {canRefresh
+                    ? 'В их значениях остались нераскрытые переменные: токен ещё не получен или истёк.'
+                    : 'В их значениях остались нераскрытые переменные, а цепочка получения токена не выбрана.'}
+            </div>
+
+            <div className="row" style={{ marginTop: 'var(--pad-sm)' }}>
+                {canRefresh && (
+                    <button
+                        type="button"
+                        className="btn btn--primary"
+                        disabled={refreshing}
+                        onClick={() => void refreshToken()}
+                    >
+                        {refreshing ? 'Получаю токен…' : 'Получить токен'}
+                    </button>
+                )}
+                <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setDialog('workspaceSettings')}
+                >
+                    Настроить авторизацию…
+                </button>
+            </div>
+        </div>
+    )
+}
+
+/**
+ * Строка поиска по ответу.
+ *
+ * Показывает число совпадений: без счётчика пустой экран после ввода
+ * неотличим от сломанного фильтра.
+ */
+function SearchBar(props: {
+    inputRef: React.RefObject<HTMLInputElement | null>
+    value: string
+    matches: number
+    onChange: (value: string) => void
+    onClose: () => void
+}): React.JSX.Element {
+    const active = props.value.trim().length > 0
+
+    return (
+        <div className="searchbar">
+            <input
+                ref={props.inputRef}
+                className="input searchbar__input"
+                value={props.value}
+                placeholder="Поиск по ответу: поле или значение"
+                onChange={(event) => props.onChange(event.target.value)}
+                onKeyDown={(event) => {
+                    if (event.key === 'Escape') props.onClose()
+                }}
+            />
+
+            <span
+                className={`searchbar__count${active && props.matches === 0 ? ' searchbar__count--empty' : ''}`}
+                title="Число строк ответа, в которых есть совпадение"
+            >
+                {active ? pluralize(props.matches, LINES) : 'весь ответ'}
+            </span>
+
+            <button type="button" className="btn btn--quiet" onClick={props.onClose}>
+                Закрыть
+            </button>
+        </div>
+    )
+}
+
+/** Лупа: значок кнопки поиска в шапке панели. */
+function SearchIcon(): React.JSX.Element {
+    return (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.2" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M10.2 10.2 13.6 13.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+    )
+}
+
+/**
+ * Запрос не отправлен: переменные не прошли проверку.
+ *
+ * Показывается вместо ответа — это дешевле круга до сервера и обратно, а
+ * причина видна сразу и с путём до конкретного поля.
+ */
+function InvalidVariables({ problems }: { problems: IVariableProblem[] }): React.JSX.Element {
+    const runActiveTab = useAppStore((state) => state.runActiveTab)
+    const setBottomTab = useAppStore((state) => state.setBottomTab)
+    const activeTabId = useAppStore((state) => state.activeTabId)
+
+    return (
+        <div style={{ padding: 'var(--pad-md)' }}>
+            <div className="errors">
+                <div className="errors__title">Запрос не отправлен</div>
+                {problems.map((problem) => (
+                    <div key={problem.path} className="problem">
+                        <span className="mono problem__path">{problem.path}</span>
+                        <span>{problem.message}</span>
+                    </div>
+                ))}
+            </div>
+
+            <div className="row" style={{ marginTop: 'var(--pad-md)' }}>
+                <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => {
+                        if (activeTabId) setBottomTab(activeTabId, 'variables')
+                    }}
+                >
+                    К переменным
+                </button>
+                <button
+                    type="button"
+                    className="btn"
+                    onClick={() => void runActiveTab({ force: true })}
+                    title="Отправить запрос несмотря на замечания"
+                >
+                    Всё равно выполнить
+                </button>
+            </div>
+        </div>
+    )
+}
+
+/**
+ * Пустое состояние панели ответа.
+ *
+ * Панель занимает треть окна и до первого запуска простаивала. Здесь показаны
+ * последние запуски текущей операции: видно, работала ли она раньше, сколько
+ * занимала и с каким статусом — по клику запуск открывается отдельной вкладкой.
+ */
+function IdleResponse(): React.JSX.Element {
+    const history = useAppStore((state) => state.history)
+    const tabs = useAppStore((state) => state.tabs)
+    const activeTabId = useAppStore((state) => state.activeTabId)
+    const contents = useAppStore((state) => state.contents)
+    const openTab = useAppStore((state) => state.openTab)
+
+    const activeTab = tabs.find((item) => item.id === activeTabId)
+    const operationName = activeTab
+        ? extractOperationName(contents[activeTab.id]?.query ?? '')
+        : undefined
+
+    const related = history
+        .filter((entry) => (operationName ? entry.operationName === operationName : true))
+        .slice(0, 8)
+
+    return (
+        <div className="idle">
+            <div className="idle__hint">
+                Выполнить — <span className="mono">⌘↩</span>
+            </div>
+
+            {related.length > 0 && (
+                <>
+                    <div className="settings__caption">
+                        {operationName ? `Последние запуски ${operationName}` : 'Последние запуски'}
+                    </div>
+
+                    <div className="idle__list">
+                        {related.map((entry) => (
+                            <div
+                                key={entry.id}
+                                className="idle__row"
+                                title={entry.responsePreview}
+                                onClick={() =>
+                                    void openTab({
+                                        query: entry.query,
+                                        title: entry.operationName ?? 'Из истории',
+                                    })
+                                }
+                            >
+                                <span className={`badge ${entry.ok ? 'badge--ok' : 'badge--fail'}`}>
+                                    {entry.status}
+                                </span>
+                                <span className="idle__time">
+                                    {new Date(entry.ts).toLocaleTimeString()}
+                                </span>
+                                <span className="badge">{Math.round(entry.durationMs)} мс</span>
+                                {entry.errorCount > 0 && (
+                                    <span className="badge badge--fail">
+                                        {pluralize(entry.errorCount, ERRORS)}
+                                    </span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
+        </div>
+    )
+}
+
+/** Форматирует тело ответа, если это JSON; иначе показывает как есть. */
+function formatRaw(body: string): string {
+    try {
+        return JSON.stringify(JSON.parse(body), null, 2)
+    } catch {
+        return body
+    }
+}
+
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} Б`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`
+
+    return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
+}

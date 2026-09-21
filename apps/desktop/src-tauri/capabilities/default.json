@@ -1,0 +1,43 @@
+{
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "default",
+    "description": "Права главного окна: файлы библиотеки, системные диалоги и окно",
+    "windows": [
+        "main"
+    ],
+    "permissions": [
+        "core:default",
+        "core:window:allow-start-dragging",
+        "core:window:allow-set-title",
+        "core:window:allow-show",
+        "core:webview:allow-internal-toggle-devtools",
+        "os:default",
+        "dialog:default",
+        "opener:default",
+        "deep-link:default",
+        {
+            "identifier": "fs:scope",
+            "allow": [
+                {
+                    "path": "$HOME/Resolvr"
+                },
+                {
+                    "path": "$HOME/Resolvr/**"
+                },
+                {
+                    "path": "$HOME/GraphQLAI"
+                },
+                {
+                    "path": "$HOME/GraphQLAI/**"
+                }
+            ]
+        },
+        "fs:allow-read-text-file",
+        "fs:allow-write-text-file",
+        "fs:allow-read-dir",
+        "fs:allow-mkdir",
+        "fs:allow-remove",
+        "fs:allow-rename",
+        "fs:allow-exists"
+    ]
+}
