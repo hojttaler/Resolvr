@@ -11,7 +11,8 @@
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
         "shots": "node scripts/shots.mjs",
-        "build:universal": "tauri build --target universal-apple-darwin"
+        "build:universal": "tauri build --target universal-apple-darwin",
+        "tauri": "tauri"
     },
     "dependencies": {
         "@codemirror/autocomplete": "^6.20.3",

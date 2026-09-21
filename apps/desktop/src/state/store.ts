@@ -1698,7 +1698,9 @@ function scheduleDraftSave(tabId: string, get: () => IAppStore): void {
 
     saver.schedule(async () => {
         const content = get().contents[tabId]
-        if (!content) return
+        // Вне Tauri (витрина, тесты) диска нет: отложенная запись стреляла бы
+        // после завершения теста и падала на несуществующем `invoke`.
+        if (!content || !isTauri()) return
 
         const context = await getAppContext()
         await context.sessions.writeDraftQuery(tabId, content.query)
@@ -1711,6 +1713,8 @@ function scheduleDraftSave(tabId: string, get: () => IAppStore): void {
 
 function scheduleSessionSave(get: () => IAppStore): void {
     sessionSaver.schedule(async () => {
+        if (!isTauri()) return
+
         const state = get()
         const context = await getAppContext()
 
