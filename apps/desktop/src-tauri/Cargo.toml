@@ -1,6 +1,6 @@
 [package]
 name = "resolvr"
-version = "0.1.0"
+version = "0.1.1"
 description = "GraphQL-клиент для macOS с сохранением состояния и доступом для агента"
 authors = ["hojttaler"]
 edition = "2021"

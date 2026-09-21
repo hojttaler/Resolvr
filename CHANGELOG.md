@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 — 2026-09-21
+
+- Interface language: System / English / Russian (Settings → Appearance). The native
+  menu follows the choice.
+- Keyboard shortcuts follow the platform: ⌘ on macOS, Ctrl on Windows and Linux; menu
+  accelerators use CmdOrCtrl.
+- Opaque window by default on every platform. Transparency and blur material remain a
+  macOS-only option; on Windows the menu bar and window are no longer see-through.
+- Release notes for 0.1.0 added to `docs/releases/`.
+
 ## 0.1.0 — 2026-09-21
 
 First public version.
