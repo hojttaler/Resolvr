@@ -98,6 +98,11 @@ textarea {
     transition: background-color var(--duration-normal) var(--ease);
 }
 
+/* Вне macOS нативного размытия нет: окно всегда плотное, ползунок не действует. */
+:root:not([data-platform='macos']) .app {
+    background-color: var(--window-base);
+}
+
 .app__body {
     flex: 1;
     min-height: 0;

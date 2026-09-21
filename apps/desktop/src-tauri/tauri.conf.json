@@ -10,7 +10,6 @@
         "frontendDist": "../dist"
     },
     "app": {
-        "macOSPrivateApi": true,
         "windows": [
             {
                 "label": "main",
@@ -21,12 +20,10 @@
                 "minHeight": 600,
                 "resizable": true,
                 "fullscreen": false,
-                "transparent": true,
-                "titleBarStyle": "Overlay",
-                "hiddenTitle": true,
                 "acceptFirstMouse": true,
                 "dragDropEnabled": true,
-                "visible": false
+                "visible": false,
+                "transparent": false
             }
         ],
         "security": {

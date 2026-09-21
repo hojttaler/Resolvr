@@ -89,6 +89,8 @@ describe('диалоги', () => {
     })
 
     it('настройки показывают все разделы', () => {
+        // Прозрачность и материал — только на macOS; тест проверяет полный набор.
+        document.documentElement.setAttribute('data-platform', 'macos')
         render(<SettingsDialog onClose={() => undefined} />)
 
         expect(screen.getByText('Внешний вид')).toBeTruthy()

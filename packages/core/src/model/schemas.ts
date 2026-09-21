@@ -316,11 +316,13 @@ export const SettingsSchema = z.object({
             material: WindowMaterialSchema.default('hud'),
             /**
              * Плотность фона поверх размытия, в процентах: 0 — только нативный
-             * материал, 100 — полностью непрозрачное окно.
+             * материал, 100 — полностью непрозрачное окно. По умолчанию окно
+             * плотное: прозрачность — осознанный выбор, а не сюрприз при
+             * первом запуске. Действует только на macOS.
              */
-            opacity: z.number().int().min(0).max(100).default(0),
+            opacity: z.number().int().min(0).max(100).default(100),
         })
-        .default({ material: 'hud', opacity: 0 }),
+        .default({ material: 'hud', opacity: 100 }),
     editor: z
         .object({
             fontSize: z.number().int().min(9).max(24).default(13),

@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 
 import { formatDiagnostics, readAboutInfo, type IAboutInfo } from '../platform/about.js'
 
+/** Размытие и прозрачность окна существуют только на macOS. */
+function isMacOs(): boolean {
+    return document.documentElement.getAttribute('data-platform') === 'macos'
+}
+
 import { useAppStore } from '../state/store.js'
 
 export interface ISettingsDialogProps {
@@ -62,58 +67,62 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                             </div>
                         </SettingRow>
 
-                        <SettingRow
-                            label="Прозрачность окна"
-                            hint={
-                                settings.appearance.opacity === 0
-                                    ? 'Только нативное размытие — фон полностью прозрачный'
-                                    : settings.appearance.opacity === 100
-                                      ? 'Сплошной фон, содержимое под окном не просвечивает'
-                                      : `Плотность фона ${settings.appearance.opacity} %`
-                            }
-                        >
-                            <input
-                                type="range"
-                                min={0}
-                                max={100}
-                                step={5}
-                                value={settings.appearance.opacity}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        appearance: {
-                                            ...settings.appearance,
-                                            opacity: Number(event.target.value),
-                                        },
-                                    })
-                                }
-                            />
-                        </SettingRow>
+                        {isMacOs() && (
+                            <>
+                                <SettingRow
+                                    label="Прозрачность окна"
+                                    hint={
+                                        settings.appearance.opacity === 0
+                                            ? 'Только нативное размытие — фон полностью прозрачный'
+                                            : settings.appearance.opacity === 100
+                                              ? 'Сплошной фон, содержимое под окном не просвечивает'
+                                              : `Плотность фона ${settings.appearance.opacity} %`
+                                    }
+                                >
+                                    <input
+                                        type="range"
+                                        min={0}
+                                        max={100}
+                                        step={5}
+                                        value={settings.appearance.opacity}
+                                        onChange={(event) =>
+                                            void updateSettings({
+                                                appearance: {
+                                                    ...settings.appearance,
+                                                    opacity: Number(event.target.value),
+                                                },
+                                            })
+                                        }
+                                    />
+                                </SettingRow>
 
-                        <SettingRow
-                            label="Материал размытия"
-                            hint="Плотность нативного эффекта под окном"
-                        >
-                            <select
-                                className="select"
-                                value={settings.appearance.material}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        appearance: {
-                                            ...settings.appearance,
-                                            material: event.target
-                                                .value as typeof settings.appearance.material,
-                                        },
-                                    })
-                                }
-                            >
-                                <option value="hud">Нейтральный</option>
-                                <option value="sidebar">Как у сайдбара</option>
-                                <option value="under-window">Максимально прозрачный</option>
-                                <option value="popover">Как у поповера</option>
-                                <option value="window">Как у окна</option>
-                                <option value="none">Без размытия</option>
-                            </select>
-                        </SettingRow>
+                                <SettingRow
+                                    label="Материал размытия"
+                                    hint="Плотность нативного эффекта под окном"
+                                >
+                                    <select
+                                        className="select"
+                                        value={settings.appearance.material}
+                                        onChange={(event) =>
+                                            void updateSettings({
+                                                appearance: {
+                                                    ...settings.appearance,
+                                                    material: event.target
+                                                        .value as typeof settings.appearance.material,
+                                                },
+                                            })
+                                        }
+                                    >
+                                        <option value="hud">Нейтральный</option>
+                                        <option value="sidebar">Как у сайдбара</option>
+                                        <option value="under-window">Максимально прозрачный</option>
+                                        <option value="popover">Как у поповера</option>
+                                        <option value="window">Как у окна</option>
+                                        <option value="none">Без размытия</option>
+                                    </select>
+                                </SettingRow>
+                            </>
+                        )}
 
                         <SettingRow
                             label="Размер шрифта в редакторе"
