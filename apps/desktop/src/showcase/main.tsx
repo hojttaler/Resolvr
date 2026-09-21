@@ -10,9 +10,17 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout.js'
 import { WorkspaceSettings } from '../components/WorkspaceSettings.js'
 import { useAppStore } from '../state/store.js'
 import '../styles/global.css'
+import { setLanguage, tn, useT } from '../i18n/index.js'
 import { seedReport, seedShowcase } from './fixtures.js'
 
 document.documentElement.setAttribute('data-platform', 'macos')
+
+// Язык и платформа витрины — из адреса: `?lang=en&platform=windows`.
+const showcaseParams = new URLSearchParams(location.search)
+setLanguage(showcaseParams.get('lang') === 'en' ? 'en' : 'ru')
+if (showcaseParams.get('platform')) {
+    document.documentElement.setAttribute('data-platform', showcaseParams.get('platform') ?? 'macos')
+}
 
 /**
  * Витрина интерфейса.
@@ -104,16 +112,17 @@ function PaletteScreen(): React.JSX.Element {
 function StatusBar(): React.JSX.Element {
     const workspace = useAppStore((state) => state.workspace)
     const preset = useAppStore((state) => state.layoutPreset)
+    const t = useT()
 
     return (
         <div className="statusbar">
             <span className="statusbar__dot statusbar__dot--ok" />
             <span>{workspace?.name}</span>
-            <span>схема загружена</span>
+            <span>{t('schema loaded')}</span>
             <span className="mono">authorization/Products</span>
             <span className="panel__spacer" style={{ flex: 1 }} />
-            <span>1 черновик</span>
-            <span>лейаут: {preset}</span>
+            <span>{tn(1, 'draft|drafts')}</span>
+            <span>{t('layout: {preset}', { preset })}</span>
         </div>
     )
 }

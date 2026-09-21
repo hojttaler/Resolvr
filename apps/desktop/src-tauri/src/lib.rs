@@ -31,7 +31,9 @@ pub fn run() {
             let handle = app.handle();
             watcher::init(handle);
 
-            let menu = menu::build_menu(handle)?;
+            // Стартовый язык — английский; интерфейс сразу переключит на
+            // выбранный в настройках.
+            let menu = menu::build_menu(handle, "en")?;
             app.set_menu(menu)?;
 
             if let Some(main_window) = app.get_webview_window("main") {
@@ -62,6 +64,7 @@ pub fn run() {
             window::start_window_drag,
             window::show_main_window,
             window::set_window_material,
+            menu::set_menu_language,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить приложение");

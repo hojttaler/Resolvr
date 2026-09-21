@@ -1,6 +1,7 @@
 import type { ISchemaChange } from '@resolvr/core'
 
 import { useAppStore } from '../state/store.js'
+import { tn, useT } from '../i18n/index.js'
 
 /**
  * Правая панель: сведения о схеме и о том, что в ней изменилось.
@@ -20,42 +21,46 @@ export function Inspector(): React.JSX.Element {
     const diffError = useAppStore((state) => state.schemaDiffNote)
 
     const activeTab = tabs.find((tab) => tab.id === activeTabId)
+    const t = useT()
 
     return (
         <div className="panel">
             <div className="panel__header">
-                <span className="panel__title">Инспектор</span>
+                <span className="panel__title">{t('Inspector')}</span>
                 <span className="panel__spacer" />
                 <button type="button" className="btn btn--quiet" onClick={() => void refreshSchema()}>
-                    Обновить схему
+                    {t('Refresh schema')}
                 </button>
             </div>
 
             <div className="panel__content" style={{ padding: 'var(--pad-md)' }}>
                 <div className="inspector__section">
-                    <div className="inspector__label">Схема</div>
+                    <div className="inspector__label">{t('Schema')}</div>
                     <div className="inspector__value">
                         {schema
-                            ? `${Object.keys(schema.getTypeMap()).filter((name) => !name.startsWith('__')).length} типов`
-                            : 'не загружена'}
+                            ? tn(
+                                  Object.keys(schema.getTypeMap()).filter((name) => !name.startsWith('__')).length,
+                                  'type|types',
+                              )
+                            : t('not loaded')}
                     </div>
                     {schemaFetchedAt && (
                         <div className="inspector__hint">
-                            обновлена {new Date(schemaFetchedAt).toLocaleString()}
+                            {t('updated {date}', { date: new Date(schemaFetchedAt).toLocaleString() })}
                         </div>
                     )}
                 </div>
 
                 <div className="inspector__section">
-                    <div className="inspector__label">Изменения после деплоя</div>
+                    <div className="inspector__label">{t('Changes after deploy')}</div>
                     <button type="button" className="btn" onClick={() => void compareSchema()}>
-                        Сравнить со снимком
+                        {t('Compare with snapshot')}
                     </button>
 
                     {diffError && <div className="inspector__hint">{diffError}</div>}
 
                     {changes && changes.length === 0 && !diffError && (
-                        <div className="inspector__hint">Схема не менялась.</div>
+                        <div className="inspector__hint">{t('Schema unchanged.')}</div>
                     )}
 
                     {changes && changes.length > 0 && (
@@ -77,7 +82,7 @@ export function Inspector(): React.JSX.Element {
                 </div>
 
                 <div className="inspector__section">
-                    <div className="inspector__label">Окружение</div>
+                    <div className="inspector__label">{t('Environment')}</div>
                     <div className="inspector__value">
                         {workspace?.environments.find(
                             (environment) =>
@@ -86,7 +91,7 @@ export function Inspector(): React.JSX.Element {
                         )?.name ?? '—'}
                     </div>
                     <div className="inspector__hint">
-                        Секреты хранятся в Keychain и не попадают в файлы и историю.
+                        {t('Secrets never land in workspace files or history.')}
                     </div>
                 </div>
             </div>

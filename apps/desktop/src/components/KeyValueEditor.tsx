@@ -1,6 +1,8 @@
 import { isSecretRef } from '@resolvr/core'
 import { useEffect, useRef, useState } from 'react'
 
+import { useT } from '../i18n/index.js'
+
 export interface IKeyValueEditorProps {
     value: Record<string, string>
     onChange: (value: Record<string, string>) => void
@@ -42,6 +44,7 @@ function createRow(key: string, value: string): IRow {
  * пересоздавалось бы на каждый символ и теряло фокус — печатать было невозможно.
  */
 export function KeyValueEditor(props: IKeyValueEditorProps): React.JSX.Element {
+    const t = useT()
     const [rows, setRows] = useState<IRow[]>(() =>
         Object.entries(props.value).map(([key, value]) => createRow(key, value)),
     )
@@ -107,7 +110,7 @@ export function KeyValueEditor(props: IKeyValueEditorProps): React.JSX.Element {
 
                     {props.secretHint && isSecretRef(row.value) ? (
                         <span className="kv__secret" title={row.value}>
-                            <span className="badge">секрет</span>
+                            <span className="badge">{t('secret')}</span>
                             <span className="text-tertiary">{props.secretHint}</span>
                         </span>
                     ) : (
@@ -135,7 +138,7 @@ export function KeyValueEditor(props: IKeyValueEditorProps): React.JSX.Element {
                         type="button"
                         className="btn btn--quiet btn--icon"
                         onClick={() => emit(rows.filter((_, position) => position !== index))}
-                        title="Удалить"
+                        title={t('Delete')}
                     >
                         ×
                     </button>
@@ -147,7 +150,7 @@ export function KeyValueEditor(props: IKeyValueEditorProps): React.JSX.Element {
                 className="btn btn--quiet"
                 onClick={() => emit([...rows, createRow('', '')])}
             >
-                {props.addLabel ?? '+ Добавить'}
+                {props.addLabel ?? t('+ Add')}
             </button>
         </div>
     )

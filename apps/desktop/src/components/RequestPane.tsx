@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Group, Panel, Separator, type GroupImperativeHandle } from 'react-resizable-panels'
 
+import { useT } from '../i18n/index.js'
+import { kbd } from '../lib/keys.js'
 import { useAppStore, parseVariables } from '../state/store.js'
 import { CodeEditor } from './editor/CodeEditor.js'
 import { buildVariablesSkeleton } from './editor/variables-completion.js'
@@ -39,6 +41,7 @@ export function RequestPane(): React.JSX.Element {
     const activeTabAsCurl = useAppStore((state) => state.activeTabAsCurl)
     const linkTo = useAppStore((state) => state.linkTo)
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
+    const t = useT()
 
     const prerequisiteFlow = tree
         .flatMap((node) => node.operations)
@@ -81,7 +84,7 @@ export function RequestPane(): React.JSX.Element {
     }, [activeTabId])
 
     if (!activeTabId || !tab || !content) {
-        return <div className="empty">Откройте вкладку — ⌘T</div>
+        return <div className="empty">{t('Open a tab — {keys}', { keys: kbd('T') })}</div>
     }
 
     const run = runs[activeTabId]
@@ -101,16 +104,16 @@ export function RequestPane(): React.JSX.Element {
             <Panel id="query" minSize="25">
                 <div className="panel">
                     <div className="panel__header">
-                        <span className="panel__title">Запрос</span>
+                        <span className="panel__title">{t('Query')}</span>
                         <span className="panel__spacer" />
 
                         <button
                             type="button"
                             className="btn btn--quiet"
                             onClick={() => useAppStore.getState().formatActiveQuery()}
-                            title="Отформатировать запрос (⌘⇧F)"
+                            title={t('Format query ({keys})', { keys: kbd('Shift+F') })}
                         >
-                            Формат
+                            {t('Format')}
                         </button>
 
                         <button
@@ -123,18 +126,18 @@ export function RequestPane(): React.JSX.Element {
                             }
                             title={
                                 tab.operationRef
-                                    ? `Сохранить в ${tab.operationRef} (⌘S)`
-                                    : 'Сохранить в коллекцию (⌘S)'
+                                    ? t('Save to {ref} ({keys})', { ref: tab.operationRef, keys: kbd('S') })
+                                    : t('Save to collection ({keys})', { keys: kbd('S') })
                             }
                         >
-                            {tab.dirty ? 'Сохранить •' : 'Сохранить'}
+                            {tab.dirty ? t('Save •') : t('Save')}
                         </button>
 
                         <button
                             type="button"
                             className="btn btn--quiet btn--icon"
-                            aria-label="Ещё действия"
-                            title="Ещё: curl, сохранить как…"
+                            aria-label={t('More actions')}
+                            title={t('More: curl, save as…')}
                             onClick={(event) => {
                                 const rect = event.currentTarget.getBoundingClientRect()
                                 setMenu({
@@ -142,16 +145,16 @@ export function RequestPane(): React.JSX.Element {
                                     y: rect.bottom + 4,
                                     items: [
                                         {
-                                            label: 'Копировать как curl',
-                                            hint: 'с токеном',
+                                            label: t('Copy as curl'),
+                                            hint: t('with token'),
                                             run: async () =>
                                                 navigator.clipboard.writeText(
                                                     await activeTabAsCurl({ maskSecrets: false }),
                                                 ),
                                         },
                                         {
-                                            label: 'Копировать как curl без секретов',
-                                            hint: 'для баг-репорта',
+                                            label: t('Copy as curl without secrets'),
+                                            hint: t('for a bug report'),
                                             run: async () =>
                                                 navigator.clipboard.writeText(
                                                     await activeTabAsCurl({ maskSecrets: true }),
@@ -160,7 +163,7 @@ export function RequestPane(): React.JSX.Element {
                                         ...(tab.operationRef
                                             ? [
                                                   {
-                                                      label: 'Копировать ссылку',
+                                                      label: t('Copy link'),
                                                       hint: 'resolvr://',
                                                       separated: true,
                                                       run: () =>
@@ -173,9 +176,9 @@ export function RequestPane(): React.JSX.Element {
                                               ]
                                             : []),
                                         {
-                                            label: 'Сохранить как…',
+                                            label: t('Save as…'),
                                             separated: !tab.operationRef,
-                                            hint: 'другая коллекция или имя',
+                                            hint: t('another collection or name'),
                                             run: () => setDialog('save'),
                                         },
                                         // Цепочка-предусловие выбирается здесь, а не
@@ -183,7 +186,7 @@ export function RequestPane(): React.JSX.Element {
                                         ...(tab.operationRef && flows.length > 0
                                             ? [
                                                   {
-                                                      label: 'Перед запуском: ничего',
+                                                      label: t('Before run: nothing'),
                                                       separated: true,
                                                       hint: prerequisiteFlow ? undefined : '✓',
                                                       run: () =>
@@ -193,7 +196,7 @@ export function RequestPane(): React.JSX.Element {
                                                           ),
                                                   },
                                                   ...flows.map((flow) => ({
-                                                      label: `Перед запуском: ${flow.name}`,
+                                                      label: t('Before run: {flow}', { flow: flow.name }),
                                                       hint: prerequisiteFlow === flow.id ? '✓' : undefined,
                                                       run: () =>
                                                           setPrerequisiteFlow(
@@ -215,20 +218,20 @@ export function RequestPane(): React.JSX.Element {
                                 type="button"
                                 className="btn"
                                 onClick={() => stopActiveTab()}
-                                title="Остановить (⌘.)"
+                                title={t('Stop ({keys})', { keys: kbd('.') })}
                             >
-                                Остановить
+                                {t('Stop')}
                             </button>
                         ) : (
                             <button
                                 type="button"
                                 className="btn btn--primary"
                                 onClick={() => void runActiveTab()}
-                                title="Выполнить (⌘↩)"
+                                title={t('Run ({keys})', { keys: kbd('Enter') })}
                             >
                                 <PlayIcon />
-                                Выполнить
-                                <kbd className="btn__key">⌘↩</kbd>
+                                {t('Run')}
+                                <kbd className="btn__key">{kbd('Enter')}</kbd>
                             </button>
                         )}
                     </div>
@@ -266,7 +269,7 @@ export function RequestPane(): React.JSX.Element {
 
             <Separator
                 className="resize-handle"
-                title="Потяните, чтобы изменить высоту. Двойной клик — подогнать под запрос"
+                title={t('Drag to resize. Double-click — fit to query')}
                 onDoubleClick={fitToContent}
             />
 
@@ -281,7 +284,7 @@ export function RequestPane(): React.JSX.Element {
                                 }`}
                                 onClick={() => setBottomTab(activeTabId, 'variables')}
                             >
-                                Переменные
+                                {t('Variables')}
                             </button>
                             <button
                                 type="button"
@@ -290,7 +293,7 @@ export function RequestPane(): React.JSX.Element {
                                 }`}
                                 onClick={() => setBottomTab(activeTabId, 'headers')}
                             >
-                                Заголовки
+                                {t('Headers')}
                                 {Object.keys(content.headers).length > 0
                                     ? ` (${Object.keys(content.headers).length})`
                                     : ''}
@@ -303,7 +306,7 @@ export function RequestPane(): React.JSX.Element {
                             <button
                                 type="button"
                                 className="btn btn--quiet"
-                                title="Подставить переменные запроса со значениями по типу из схемы"
+                                title={t('Insert the query variables with values by schema type')}
                                 onClick={() => {
                                     const parsed = parseVariables(content.variables)
                                     const skeleton = buildVariablesSkeleton(
@@ -318,7 +321,7 @@ export function RequestPane(): React.JSX.Element {
                                     )
                                 }}
                             >
-                                Заполнить из запроса
+                                {t('Fill from query')}
                             </button>
                         )}
                     </div>
@@ -342,8 +345,8 @@ export function RequestPane(): React.JSX.Element {
                                     value={content.headers}
                                     onChange={(headers) => updateHeaders(activeTabId, headers)}
                                     keyPlaceholder="header-name"
-                                    valuePlaceholder="значение или {{переменная}}"
-                                    addLabel="+ Заголовок"
+                                    valuePlaceholder={t('value or {{variable}}')}
+                                    addLabel={t('+ Header')}
                                 />
                             </div>
                         )}
@@ -366,6 +369,7 @@ function InheritedHeaders(): React.JSX.Element | null {
     const tree = useAppStore((state) => state.tree)
     const tab = useAppStore((state) => state.tabs.find((item) => item.id === state.activeTabId))
     const setDialog = useAppStore((state) => state.setDialog)
+    const t = useT()
 
     if (!workspace || !tab) return null
 
@@ -381,17 +385,17 @@ function InheritedHeaders(): React.JSX.Element | null {
 
     const rows: Array<{ source: string; name: string; value: string }> = [
         ...Object.entries(endpoint?.headers ?? {}).map(([name, value]) => ({
-            source: 'эндпоинт',
+            source: t('endpoint'),
             name,
             value,
         })),
         ...Object.entries(environment?.headers ?? {}).map(([name, value]) => ({
-            source: 'окружение',
+            source: t('environment'),
             name,
             value,
         })),
         ...Object.entries(collection?.headers ?? {}).map(([name, value]) => ({
-            source: 'коллекция',
+            source: t('collection'),
             name,
             value,
         })),
@@ -400,20 +404,21 @@ function InheritedHeaders(): React.JSX.Element | null {
     return (
         <div className="inherited">
             <div className="row">
-                <span className="settings__caption">Наследуются</span>
+                <span className="settings__caption">{t('Inherited')}</span>
                 <button
                     type="button"
                     className="btn btn--quiet"
                     onClick={() => setDialog('workspaceSettings')}
                 >
-                    Настроить
+                    {t('Configure')}
                 </button>
             </div>
 
             {rows.length === 0 ? (
                 <div className="inspector__hint">
-                    Общих заголовков нет. Задайте их на окружении, чтобы не копировать в каждый
-                    запрос.
+                    {t(
+                        'No shared headers. Set them on the environment so you do not copy them into every request.',
+                    )}
                 </div>
             ) : (
                 rows.map((row) => (

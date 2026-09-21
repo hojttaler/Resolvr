@@ -1,6 +1,7 @@
 import type { IEndpoint, IEnvironment, IWorkspace } from '@resolvr/core'
 import { useEffect, useState } from 'react'
 
+import { useT } from '../i18n/index.js'
 import { useAppStore } from '../state/store.js'
 import { KeyValueEditor } from './KeyValueEditor.js'
 
@@ -21,6 +22,7 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
     const flows = useAppStore((state) => state.flows)
     const secretStorage = useAppStore((state) => state.settings.secrets.storage)
     const saveWorkspace = useAppStore((state) => state.saveWorkspaceSettings)
+    const t = useT()
 
     const [draft, setDraft] = useState<IWorkspace | undefined>(workspace)
     const [tab, setTab] = useState<'environments' | 'endpoints'>('environments')
@@ -43,7 +45,7 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
         return (
             <div className="overlay" onMouseDown={props.onClose}>
                 <div className="dialog" onMouseDown={(event) => event.stopPropagation()}>
-                    <div className="empty">Сначала создайте workspace</div>
+                    <div className="empty">{t('Create a workspace first')}</div>
                 </div>
             </div>
         )
@@ -89,7 +91,7 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                             }`}
                             onClick={() => setTab('environments')}
                         >
-                            Окружения
+                            {t('Environments')}
                         </button>
                         <button
                             type="button"
@@ -98,7 +100,7 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                             }`}
                             onClick={() => setTab('endpoints')}
                         >
-                            Эндпоинты
+                            {t('Endpoints')}
                         </button>
                     </div>
 
@@ -117,13 +119,13 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                         }
                                     />
                                     {draft.defaultEnvironmentId === environment.id && (
-                                        <span className="badge badge--ok">по умолчанию</span>
+                                        <span className="badge badge--ok">{t('default')}</span>
                                     )}
                                 </div>
 
                                 <div className="flow__grid">
                                     <label className="field__label">
-                                        Боевое
+                                        {t('Production')}
                                         <div className="inspector__hint">prod-guard</div>
                                     </label>
                                     <label className="row" style={{ alignSelf: 'center' }}>
@@ -137,15 +139,15 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                             }
                                         />
                                         <span>
-                                            Помечать <span className="badge badge--prod">PROD</span>{' '}
-                                            и спрашивать подтверждение перед мутациями и цепочками
+                                            {t('Mark as')} <span className="badge badge--prod">PROD</span>{' '}
+                                            {t('and ask for confirmation before mutations and flows')}
                                         </span>
                                     </label>
 
                                     <label className="field__label">
-                                        Заголовки
+                                        {t('Headers')}
                                         <div className="inspector__hint">
-                                            для всех запросов окружения
+                                            {t('for all requests of the environment')}
                                         </div>
                                     </label>
                                     <KeyValueEditor
@@ -155,13 +157,13 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                         }
                                         keyPlaceholder="authorization"
                                         valuePlaceholder="Bearer {{token}}"
-                                        addLabel="+ Заголовок"
+                                        addLabel={t('+ Header')}
                                     />
 
                                     <label className="field__label">
-                                        Переменные
+                                        {t('Variables')}
                                         <div className="inspector__hint">
-                                            подстановка {'{{имя}}'}
+                                            {t('substitution {{name}}')}
                                         </div>
                                     </label>
                                     <KeyValueEditor
@@ -170,19 +172,19 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                             patchEnvironment(environment.id, { variables })
                                         }
                                         keyPlaceholder="token"
-                                        valuePlaceholder="значение"
-                                        addLabel="+ Переменная"
+                                        valuePlaceholder={t('value')}
+                                        addLabel={t('+ Variable')}
                                         secretHint={
                                             secretStorage === 'file'
-                                                ? 'хранится в файле'
-                                                : 'хранится в Keychain'
+                                                ? t('stored in the file')
+                                                : t('stored in Keychain')
                                         }
                                     />
 
                                     <label className="field__label">
-                                        Авторизация
+                                        {t('Authorization')}
                                         <div className="inspector__hint">
-                                            откуда берётся токен
+                                            {t('where the token comes from')}
                                         </div>
                                     </label>
                                     <RecoveryEditor
@@ -214,7 +216,7 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                 </div>
 
                                 <div className="flow__grid">
-                                    <label className="field__label">Адрес</label>
+                                    <label className="field__label">{t('URL')}</label>
                                     <input
                                         className="input mono"
                                         autoCorrect="off"
@@ -226,29 +228,30 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                         }
                                     />
 
-                                    <label className="field__label">Заголовки</label>
+                                    <label className="field__label">{t('Headers')}</label>
                                     <KeyValueEditor
                                         value={endpoint.headers}
                                         onChange={(headers) =>
                                             patchEndpoint(endpoint.id, { headers })
                                         }
                                         keyPlaceholder="x-api-key"
-                                        valuePlaceholder="значение или {{переменная}}"
-                                        addLabel="+ Заголовок"
+                                        valuePlaceholder={t('value or {{variable}}')}
+                                        addLabel={t('+ Header')}
                                     />
                                 </div>
                             </section>
                         ))}
 
                     <div className="inspector__hint">
-                        Порядок наложения заголовков: эндпоинт → окружение → коллекция → операция →
-                        вкладка. Авторизация из auth-профиля применяется последней.
+                        {t(
+                            'Header precedence: endpoint → environment → collection → operation → tab. The auth profile is applied last.',
+                        )}
                     </div>
                 </div>
 
                 <div className="dialog__footer">
                     <button type="button" className="btn" onClick={props.onClose}>
-                        Закрыть
+                        {t('Close')}
                     </button>
                     <button
                         type="button"
@@ -257,7 +260,7 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                             void saveWorkspace(draft).then(props.onClose)
                         }}
                     >
-                        Сохранить
+                        {t('Save')}
                     </button>
                 </div>
             </div>
@@ -281,12 +284,14 @@ interface IRecoveryEditorProps {
  */
 function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
     const recovery = props.environment.recovery
+    const t = useT()
 
     if (props.flowOptions.length === 0) {
         return (
             <div className="inspector__hint">
-                Сначала создайте цепочку авторизации в разделе «Цепочки»: например, логин, из
-                ответа которого извлекается токен.
+                {t(
+                    'First create an authorization flow in “Flows”: for example, a login whose response yields the token.',
+                )}
             </div>
         )
     }
@@ -325,7 +330,7 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
                         )
                     }
                 >
-                    <option value="">— токен не получаем —</option>
+                    <option value="">— {t('no token')} —</option>
                     {props.flowOptions.map((flow) => (
                         <option key={flow.id} value={flow.id}>
                             {flow.name}
@@ -336,16 +341,17 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
 
             {recovery && (
                 <div className="inspector__hint">
-                    Кнопка в шапке запускает эту цепочку. Токен из её ответа сохраняется в
-                    Keychain как <span className="mono">{tokenVariable}</span> и подставляется
-                    туда, где написано <span className="mono">{`{{${tokenVariable}}}`}</span>.
+                    {t('The header button runs this flow. The token from its response is saved as')}{' '}
+                    <span className="mono">{tokenVariable}</span>{' '}
+                    {t('and substituted wherever')}{' '}
+                    <span className="mono">{`{{${tokenVariable}}}`}</span> {t('is written.')}
                     {expiresAt && left !== undefined && (
                         <>
                             {' '}
-                            Сейчас:{' '}
+                            {t('Now:')}{' '}
                             {left > 0
-                                ? `действует ещё ${Math.round(left / 60_000)} мин`
-                                : 'истёк'}
+                                ? t('valid for {n} more min', { n: Math.round(left / 60_000) })
+                                : t('expired')}
                             {props.environment.tokenSubject
                                 ? ` · ${props.environment.tokenSubject}`
                                 : ''}
@@ -357,21 +363,19 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
 
             {recovery && (
                 <div className="recovery__params">
-                    <div className="settings__caption">Как обновлять</div>
+                    <div className="settings__caption">{t('How to refresh')}</div>
 
                     <div className="recovery__grid">
-                    <span className="inspector__hint">Имя переменной</span>
+                    <span className="inspector__hint">{t('Variable name')}</span>
                     <input
                         className="input mono"
                         autoCorrect="off"
                         autoCapitalize="off"
                         spellCheck={false}
-                        placeholder="как в extract цепочки"
-                        title={
-                            'Переменная, которую добывает цепочка. В её собственные запросы ' +
-                            'эта переменная не подставляется: прежний токен к моменту ' +
-                            'обновления уже истёк, и сервер отвергал бы им сам логин.'
-                        }
+                        placeholder={t('as in the flow extract')}
+                        title={t(
+                            'The variable the flow obtains. It is not substituted into the flow’s own requests: by refresh time the old token has expired and the server would reject the login itself.',
+                        )}
                         value={recovery.tokenVariable ?? ''}
                         onChange={(event) =>
                             props.onChange({
@@ -381,7 +385,7 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
                         }
                     />
 
-                    <span className="inspector__hint">Когда запускать</span>
+                    <span className="inspector__hint">{t('When to run')}</span>
                     <div className="row" style={{ flexWrap: 'wrap' }}>
                         <label className="row">
                             <input
@@ -391,7 +395,7 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
                                     props.onChange({ ...recovery, onExpiry: event.target.checked })
                                 }
                             />
-                            <span>до истечения</span>
+                            <span>{t('before expiry')}</span>
                         </label>
                         <label className="row">
                             <input
@@ -401,11 +405,11 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
                                     props.onChange({ ...recovery, onError: event.target.checked })
                                 }
                             />
-                            <span>при ошибке</span>
+                            <span>{t('on error')}</span>
                         </label>
                     </div>
 
-                    <span className="inspector__hint">Запас, сек</span>
+                    <span className="inspector__hint">{t('Margin, sec')}</span>
                     <input
                         className="input input--narrow"
                         type="number"
@@ -423,7 +427,7 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
                         }
                     />
 
-                    <span className="inspector__hint">Статусы</span>
+                    <span className="inspector__hint">{t('Statuses')}</span>
                     <input
                         className="input mono"
                         autoCorrect="off"
@@ -445,7 +449,7 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
                         }
                     />
 
-                    <span className="inspector__hint">Текст ошибки</span>
+                    <span className="inspector__hint">{t('Error text')}</span>
                     <input
                         className="input mono"
                         autoCorrect="off"
@@ -462,7 +466,7 @@ function RecoveryEditor(props: IRecoveryEditorProps): React.JSX.Element {
                         }
                     />
 
-                    <span className="inspector__hint">Повторов</span>
+                    <span className="inspector__hint">{t('Retries')}</span>
                     <input
                         className="input input--narrow"
                         type="number"

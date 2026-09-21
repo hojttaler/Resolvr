@@ -13,8 +13,9 @@ import { TabStrip, TitleBar, UpdateBanner } from './components/TitleBar.js'
 import { WorkspaceLayout } from './components/WorkspaceLayout.js'
 import { useAppEvents, useShowWindowWhenReady } from './hooks/use-app-events.js'
 import { useDeepLinks } from './hooks/use-deep-links.js'
+import { tn, useT } from './i18n/index.js'
+import { isModKey, kbd } from './lib/keys.js'
 import { useAppStore } from './state/store.js'
-import { DRAFTS, pluralize } from './lib/plural.js'
 
 export function App(): React.JSX.Element {
     const ready = useAppStore((state) => state.ready)
@@ -24,6 +25,7 @@ export function App(): React.JSX.Element {
     const initialize = useAppStore((state) => state.initialize)
     const dialog = useAppStore((state) => state.dialog)
     const setDialog = useAppStore((state) => state.setDialog)
+    const t = useT()
 
     useEffect(() => {
         void initialize()
@@ -113,7 +115,7 @@ export function App(): React.JSX.Element {
     // фокус не перехвачен редактором, а ⌘K и ⌘W нужны всегда.
     useEffect(() => {
         function onKeyDown(event: KeyboardEvent): void {
-            if (!event.metaKey) return
+            if (!isModKey(event)) return
 
             if (event.key === 'k') {
                 event.preventDefault()
@@ -144,7 +146,7 @@ export function App(): React.JSX.Element {
         return (
             <div className="app">
                 <div className="empty selectable" style={{ color: 'var(--danger)' }}>
-                    Не удалось запустить приложение: {initError}
+                    {t('Failed to start the app: {error}', { error: initError })}
                 </div>
             </div>
         )
@@ -163,9 +165,11 @@ export function App(): React.JSX.Element {
                     <div className="app__body">
                         {tabs.length === 0 ? (
                             <div className="empty">
-                                Нет открытых вкладок.
+                                {t('No open tabs.')}
                                 <br />
-                                Нажмите ⌘T или выберите операцию в коллекциях.
+                                {t('Press {keys} or pick an operation in the collections.', {
+                                    keys: kbd('T'),
+                                })}
                             </div>
                         ) : (
                             <WorkspaceLayout />
@@ -189,17 +193,20 @@ export function App(): React.JSX.Element {
 }
 
 function Onboarding({ onCreate }: { onCreate: () => void }): React.JSX.Element {
+    const t = useT()
+
     return (
         <div className="app__body" style={{ alignItems: 'center', justifyContent: 'center' }}>
             <div className="empty" style={{ maxWidth: 420 }}>
                 <div style={{ fontSize: 15, color: 'var(--text-primary)', marginBottom: 8 }}>
-                    Добро пожаловать в Resolvr
+                    {t('Welcome to Resolvr')}
                 </div>
-                Создайте workspace и укажите адрес GraphQL-эндпоинта — приложение выполнит
-                интроспекцию схемы и подготовит автокомплит.
+                {t(
+                    'Create a workspace: a name and the GraphQL endpoint URL. The schema is fetched by introspection.',
+                )}
                 <div style={{ marginTop: 16 }}>
                     <button type="button" className="btn btn--primary" onClick={onCreate}>
-                        Создать workspace
+                        {t('Create workspace')}
                     </button>
                 </div>
             </div>
@@ -222,6 +229,7 @@ function SchemaFreshness(props: {
     onRefresh: () => void
 }): React.JSX.Element {
     const [now, setNow] = useState(() => Date.now())
+    const t = useT()
 
     useEffect(() => {
         const timer = setInterval(() => setNow(Date.now()), 60_000)
@@ -239,29 +247,31 @@ function SchemaFreshness(props: {
             onClick={props.onRefresh}
             title={
                 props.fetchedAt
-                    ? `Схема получена ${new Date(props.fetchedAt).toLocaleString()}. Клик — обновить`
-                    : 'Схема не загружена. Клик — интроспекция'
+                    ? t('Schema fetched {date}. Click to refresh', {
+                          date: new Date(props.fetchedAt).toLocaleString(),
+                      })
+                    : t('Schema not loaded. Click to introspect')
             }
         >
             {!props.loaded
-                ? 'схема не загружена'
+                ? t('schema not loaded')
                 : age === undefined
-                  ? 'схема загружена'
-                  : `схема · ${formatAge(age)}`}
+                  ? t('schema loaded')
+                  : t('schema · {age}', { age: formatAge(age, t) })}
         </button>
     )
 }
 
 /** «5 мин назад», «2 ч назад», «3 дн назад». */
-function formatAge(milliseconds: number): string {
+function formatAge(milliseconds: number, t: ReturnType<typeof useT>): string {
     const minutes = Math.round(milliseconds / 60_000)
-    if (minutes < 1) return 'только что'
-    if (minutes < 60) return `${minutes} мин назад`
+    if (minutes < 1) return t('just now')
+    if (minutes < 60) return t('{n} min ago', { n: minutes })
 
     const hours = Math.round(minutes / 60)
-    if (hours < 24) return `${hours} ч назад`
+    if (hours < 24) return t('{n} h ago', { n: hours })
 
-    return `${Math.round(hours / 24)} дн назад`
+    return t('{n} d ago', { n: Math.round(hours / 24) })
 }
 
 function StatusBar(): React.JSX.Element {
@@ -273,6 +283,7 @@ function StatusBar(): React.JSX.Element {
     const activeTabId = useAppStore((state) => state.activeTabId)
     const run = useAppStore((state) => (state.activeTabId ? state.runs[state.activeTabId] : undefined))
     const preset = useAppStore((state) => state.layoutPreset)
+    const t = useT()
 
     const dirtyCount = tabs.filter((tab) => tab.dirty).length
     const activeTab = tabs.find((tab) => tab.id === activeTabId)
@@ -290,7 +301,7 @@ function StatusBar(): React.JSX.Element {
                             : ''
                 }`}
             />
-            <span>{workspace?.name ?? 'без workspace'}</span>
+            <span>{workspace?.name ?? t('no workspace')}</span>
             <SchemaFreshness
                 loaded={Boolean(schema)}
                 fetchedAt={schemaFetchedAt}
@@ -298,8 +309,8 @@ function StatusBar(): React.JSX.Element {
             />
             {activeTab?.operationRef && <span className="mono">{activeTab.operationRef}</span>}
             <span className="panel__spacer" style={{ flex: 1 }} />
-            {dirtyCount > 0 && <span>{pluralize(dirtyCount, DRAFTS)}</span>}
-            <span>лейаут: {preset}</span>
+            {dirtyCount > 0 && <span>{tn(dirtyCount, 'draft|drafts')}</span>}
+            <span>{t('layout: {preset}', { preset })}</span>
         </div>
     )
 }

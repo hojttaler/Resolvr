@@ -24,7 +24,7 @@ export async function readAboutInfo(): Promise<IAboutInfo> {
             osVersion: '—',
             arch: '—',
             libraryRoot: '~/Resolvr',
-            mcpCommand: 'claude mcp add resolvr -- node <путь>/mcp/index.js',
+            mcpCommand: 'claude mcp add resolvr -- node <path>/mcp/index.js',
         }
     }
 
@@ -52,10 +52,10 @@ export function formatDiagnostics(
     return [
         `Resolvr ${info.appVersion}`,
         `${info.platform} ${info.osVersion} (${info.arch})`,
-        `Библиотека: ${info.libraryRoot}`,
-        `Секреты: ${extra.secretStorage}`,
-        `Workspace: ${extra.workspaces}`,
-        extra.lastError ? `Последняя ошибка: ${extra.lastError}` : undefined,
+        `Library: ${info.libraryRoot}`,
+        `Secrets: ${extra.secretStorage}`,
+        `Workspaces: ${extra.workspaces}`,
+        extra.lastError ? `Last error: ${extra.lastError}` : undefined,
     ]
         .filter((line): line is string => Boolean(line))
         .join('\n')

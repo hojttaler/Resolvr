@@ -13,6 +13,8 @@ const OUT = process.env.SHOTS_DIR ?? '/tmp/gqlai-shots'
 const SCREENS = [
     { name: 'main-dark', query: '?theme=dark' },
     { name: 'main-light', query: '?theme=light' },
+    { name: 'main-en-windows', query: '?theme=dark&lang=en&platform=windows' },
+    { name: 'settings-en', query: '?screen=settings&theme=dark&lang=en' },
     { name: 'search', query: '?screen=search&theme=dark' },
     { name: 'search-light', query: '?screen=search&theme=light' },
     { name: 'palette', query: '?screen=palette&theme=dark' },

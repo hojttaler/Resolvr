@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 
 import { getAppContext } from '../platform/context.js'
 import { useAppStore } from '../state/store.js'
+import { useT } from '../i18n/index.js'
+import { isModKey } from '../lib/keys.js'
 
 export interface IDialogProps {
     onClose: () => void
@@ -10,6 +12,7 @@ export interface IDialogProps {
 
 /** Сохранение текущей вкладки в коллекцию. */
 export function SaveOperationDialog(props: IDialogProps): React.JSX.Element {
+    const t = useT()
     const tree = useAppStore((state) => state.tree)
     const workspace = useAppStore((state) => state.workspace)
     const tabs = useAppStore((state) => state.tabs)
@@ -40,7 +43,7 @@ export function SaveOperationDialog(props: IDialogProps): React.JSX.Element {
             }
 
             if (!targetCollection) {
-                setError('Выберите коллекцию или укажите название новой')
+                setError(t('Pick a collection or enter a name for a new one'))
 
                 return
             }
@@ -53,9 +56,9 @@ export function SaveOperationDialog(props: IDialogProps): React.JSX.Element {
     }
 
     return (
-        <Modal title="Сохранить операцию" onClose={props.onClose} onSubmit={submit}>
+        <Modal title={t('Save operation')} onClose={props.onClose} onSubmit={submit}>
             <div className="field">
-                <label className="field__label">Имя операции</label>
+                <label className="field__label">{t('Operation name')}</label>
                 <input
                     className="input"
                     value={name}
@@ -65,7 +68,7 @@ export function SaveOperationDialog(props: IDialogProps): React.JSX.Element {
             </div>
 
             <div className="field">
-                <label className="field__label">Коллекция</label>
+                <label className="field__label">{t('Collection')}</label>
                 <select
                     className="select"
                     style={{ maxWidth: 'none', width: '100%' }}
@@ -73,7 +76,7 @@ export function SaveOperationDialog(props: IDialogProps): React.JSX.Element {
                     onChange={(event) => setCollectionId(event.target.value)}
                     disabled={newCollection.trim().length > 0}
                 >
-                    {tree.length === 0 && <option value="">Нет коллекций</option>}
+                    {tree.length === 0 && <option value="">{t('No collections')}</option>}
                     {tree.map((node) => (
                         <option key={node.collection.id} value={node.collection.id}>
                             {node.collection.name}
@@ -83,10 +86,10 @@ export function SaveOperationDialog(props: IDialogProps): React.JSX.Element {
             </div>
 
             <div className="field">
-                <label className="field__label">…или создать новую</label>
+                <label className="field__label">{t('…or create a new one')}</label>
                 <input
                     className="input"
-                    placeholder="Например, Users"
+                    placeholder={t('For example, Users')}
                     value={newCollection}
                     onChange={(event) => setNewCollection(event.target.value)}
                 />
@@ -99,6 +102,7 @@ export function SaveOperationDialog(props: IDialogProps): React.JSX.Element {
 
 /** Создание workspace: имя и адрес эндпоинта. */
 export function CreateWorkspaceDialog(props: IDialogProps): React.JSX.Element {
+    const t = useT()
     const createWorkspace = useAppStore((state) => state.createWorkspace)
     const [name, setName] = useState('')
     const [url, setUrl] = useState('http://localhost:4000/graphql')
@@ -106,7 +110,7 @@ export function CreateWorkspaceDialog(props: IDialogProps): React.JSX.Element {
 
     async function submit(): Promise<void> {
         if (name.trim().length === 0) {
-            setError('Укажите название')
+            setError(t('Enter a name'))
 
             return
         }
@@ -120,9 +124,9 @@ export function CreateWorkspaceDialog(props: IDialogProps): React.JSX.Element {
     }
 
     return (
-        <Modal title="Новый workspace" onClose={props.onClose} onSubmit={submit}>
+        <Modal title={t('New workspace')} onClose={props.onClose} onSubmit={submit}>
             <div className="field">
-                <label className="field__label">Название</label>
+                <label className="field__label">{t('Name')}</label>
                 <input
                     className="input"
                     autoFocus
@@ -133,7 +137,7 @@ export function CreateWorkspaceDialog(props: IDialogProps): React.JSX.Element {
             </div>
 
             <div className="field">
-                <label className="field__label">GraphQL-эндпоинт</label>
+                <label className="field__label">{t('GraphQL endpoint')}</label>
                 <input
                     className="input mono"
                         autoCorrect="off"
@@ -143,7 +147,7 @@ export function CreateWorkspaceDialog(props: IDialogProps): React.JSX.Element {
                     onChange={(event) => setUrl(event.target.value)}
                 />
                 <span className="inspector__hint">
-                    После создания приложение выполнит интроспекцию схемы.
+                    {t('The schema will be fetched by introspection after creation.')}
                 </span>
             </div>
 
@@ -159,6 +163,7 @@ export function CreateWorkspaceDialog(props: IDialogProps): React.JSX.Element {
  * запустил мутацию, не должен её и подтверждать.
  */
 export function ConfirmDialog(): React.JSX.Element | null {
+    const t = useT()
     const confirm = useAppStore((state) => state.confirm)
     const dismiss = useAppStore((state) => state.dismissConfirm)
 
@@ -192,7 +197,7 @@ export function ConfirmDialog(): React.JSX.Element | null {
 
                 <div className="dialog__footer">
                     <button type="button" className="btn" onClick={dismiss} autoFocus>
-                        Отмена
+                        {t('Cancel')}
                     </button>
                     <button
                         type="button"
@@ -218,10 +223,11 @@ interface IModalProps {
 }
 
 function Modal(props: IModalProps): React.JSX.Element {
+    const t = useT()
     useEffect(() => {
         function onKeyDown(event: KeyboardEvent): void {
             if (event.key === 'Escape') props.onClose()
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void props.onSubmit()
+            if (event.key === 'Enter' && isModKey(event)) void props.onSubmit()
         }
 
         window.addEventListener('keydown', onKeyDown)
@@ -239,14 +245,14 @@ function Modal(props: IModalProps): React.JSX.Element {
 
                 <div className="dialog__footer">
                     <button type="button" className="btn" onClick={props.onClose}>
-                        Отмена
+                        {t('Cancel')}
                     </button>
                     <button
                         type="button"
                         className="btn btn--primary"
                         onClick={() => void props.onSubmit()}
                     >
-                        Сохранить
+                        {t('Save')}
                     </button>
                 </div>
             </div>

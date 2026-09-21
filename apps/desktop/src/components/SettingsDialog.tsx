@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { useT } from '../i18n/index.js'
 import { formatDiagnostics, readAboutInfo, type IAboutInfo } from '../platform/about.js'
 
 /** Размытие и прозрачность окна существуют только на macOS. */
@@ -23,6 +24,7 @@ export interface ISettingsDialogProps {
 export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
     const settings = useAppStore((state) => state.settings)
     const updateSettings = useAppStore((state) => state.updateSettings)
+    const t = useT()
 
     useEffect(() => {
         function onKeyDown(event: KeyboardEvent): void {
@@ -41,12 +43,12 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <div className="dialog__body">
-                    <div className="dialog__title">Настройки</div>
+                    <div className="dialog__title">{t('Settings')}</div>
 
                     <section className="settings__group">
-                        <div className="settings__caption">Внешний вид</div>
+                        <div className="settings__caption">{t('Appearance')}</div>
 
-                        <SettingRow label="Тема" hint="Следовать системе или зафиксировать">
+                        <SettingRow label={t('Theme')} hint={t('Follow the system or fix')}>
                             <div className="segmented">
                                 {(['system', 'light', 'dark'] as const).map((theme) => (
                                     <button
@@ -58,10 +60,31 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                                         onClick={() => void updateSettings({ theme })}
                                     >
                                         {theme === 'system'
-                                            ? 'Системная'
+                                            ? t('System')
                                             : theme === 'light'
-                                              ? 'Светлая'
-                                              : 'Тёмная'}
+                                              ? t('Light')
+                                              : t('Dark')}
+                                    </button>
+                                ))}
+                            </div>
+                        </SettingRow>
+
+                        <SettingRow label={t('Language')} hint={t('Interface language; “System” follows the OS')}>
+                            <div className="segmented">
+                                {(['system', 'en', 'ru'] as const).map((language) => (
+                                    <button
+                                        key={language}
+                                        type="button"
+                                        className={`segmented__item${
+                                            settings.language === language ? ' segmented__item--active' : ''
+                                        }`}
+                                        onClick={() => void updateSettings({ language })}
+                                    >
+                                        {language === 'system'
+                                            ? t('System')
+                                            : language === 'en'
+                                              ? 'English'
+                                              : 'Русский'}
                                     </button>
                                 ))}
                             </div>
@@ -70,13 +93,13 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                         {isMacOs() && (
                             <>
                                 <SettingRow
-                                    label="Прозрачность окна"
+                                    label={t('Window transparency')}
                                     hint={
                                         settings.appearance.opacity === 0
-                                            ? 'Только нативное размытие — фон полностью прозрачный'
+                                            ? t('Native blur only — background fully transparent')
                                             : settings.appearance.opacity === 100
-                                              ? 'Сплошной фон, содержимое под окном не просвечивает'
-                                              : `Плотность фона ${settings.appearance.opacity} %`
+                                              ? t('Opaque window')
+                                              : t('Background density {n} %', { n: settings.appearance.opacity })
                                     }
                                 >
                                     <input
@@ -97,8 +120,8 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                                 </SettingRow>
 
                                 <SettingRow
-                                    label="Материал размытия"
-                                    hint="Плотность нативного эффекта под окном"
+                                    label={t('Blur material')}
+                                    hint={t('Density of the native effect under the window')}
                                 >
                                     <select
                                         className="select"
@@ -113,19 +136,19 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                                             })
                                         }
                                     >
-                                        <option value="hud">Нейтральный</option>
-                                        <option value="sidebar">Как у сайдбара</option>
-                                        <option value="under-window">Максимально прозрачный</option>
-                                        <option value="popover">Как у поповера</option>
-                                        <option value="window">Как у окна</option>
-                                        <option value="none">Без размытия</option>
+                                        <option value="hud">{t('HUD')}</option>
+                                        <option value="sidebar">{t('Sidebar')}</option>
+                                        <option value="under-window">{t('Under window')}</option>
+                                        <option value="popover">{t('Popover')}</option>
+                                        <option value="window">{t('Window')}</option>
+                                        <option value="none">{t('No blur')}</option>
                                     </select>
                                 </SettingRow>
                             </>
                         )}
 
                         <SettingRow
-                            label="Размер шрифта в редакторе"
+                            label={t('Editor font size')}
                             hint={`${settings.editor.fontSize} px`}
                         >
                             <input
@@ -146,9 +169,9 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                     </section>
 
                     <section className="settings__group">
-                        <div className="settings__caption">Редактор</div>
+                        <div className="settings__caption">{t('Editor')}</div>
 
-                        <SettingRow label="Размер отступа" hint="Пробелов на уровень вложенности">
+                        <SettingRow label={t('Indent size')} hint={t('Spaces per nesting level')}>
                             <input
                                 className="input input--narrow"
                                 type="number"
@@ -166,7 +189,7 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                             />
                         </SettingRow>
 
-                        <SettingRow label="Номера строк">
+                        <SettingRow label={t('Line numbers')}>
                             <Toggle
                                 checked={settings.editor.lineNumbers}
                                 onChange={(lineNumbers) =>
@@ -178,8 +201,8 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                         </SettingRow>
 
                         <SettingRow
-                            label="Переносить длинные строки"
-                            hint="Иначе появляется горизонтальная прокрутка"
+                            label={t('Wrap long lines')}
+                            hint={t('Otherwise horizontal scrolling appears')}
                         >
                             <Toggle
                                 checked={settings.editor.lineWrapping}
@@ -192,8 +215,8 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                         </SettingRow>
 
                         <SettingRow
-                            label="Глубина автозаполнения выборки"
-                            hint="На сколько уровней раскрывать вложенные типы при клике по полю схемы"
+                            label={t('Selection autofill depth')}
+                            hint={t('How many levels of nested types to expand when clicking a schema field')}
                         >
                             <input
                                 className="input input--narrow"
@@ -214,9 +237,9 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                     </section>
 
                     <section className="settings__group">
-                        <div className="settings__caption">Запросы и ответы</div>
+                        <div className="settings__caption">{t('Requests and responses')}</div>
 
-                        <SettingRow label="Таймаут запроса" hint="Миллисекунды">
+                        <SettingRow label={t('Request timeout')} hint={t('Milliseconds')}>
                             <input
                                 className="input input--narrow"
                                 type="number"
@@ -239,8 +262,8 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                         </SettingRow>
 
                         <SettingRow
-                            label="Раскрывать ответ на уровней"
-                            hint="Глубже этого узлы остаются свёрнутыми"
+                            label={t('Expand response to levels')}
+                            hint={t('Deeper nodes stay collapsed')}
                         >
                             <input
                                 className="input input--narrow"
@@ -259,8 +282,8 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                         </SettingRow>
 
                         <SettingRow
-                            label="Хранить историю, дней"
-                            hint="Старые файлы журнала удаляются при запуске"
+                            label={t('Keep history, days')}
+                            hint={t('Older log files are deleted at startup')}
                         >
                             <input
                                 className="input input--narrow"
@@ -284,14 +307,14 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                     </section>
 
                     <section className="settings__group">
-                        <div className="settings__caption">Токены и секреты</div>
+                        <div className="settings__caption">{t('Tokens and secrets')}</div>
 
                         <SettingRow
-                            label="Где хранить"
+                            label={t('Where to store')}
                             hint={
                                 settings.secrets.storage === 'file'
-                                    ? 'Файл ~/Resolvr/.secrets/, доступ только владельцу. Пароль не спрашивается.'
-                                    : 'macOS Keychain. После каждой переустановки приложения система снова спросит пароль.'
+                                    ? t('File ~/Resolvr/.secrets/, owner-only access. No password prompts.')
+                                    : t('macOS Keychain. After each reinstall the system asks for the password again.')
                             }
                         >
                             <select
@@ -305,27 +328,28 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
                                     })
                                 }
                             >
-                                <option value="file">В файле библиотеки</option>
-                                <option value="keychain">В macOS Keychain</option>
+                                <option value="file">{t('In the library file')}</option>
+                                <option value="keychain">{t('In macOS Keychain')}</option>
                             </select>
                         </SettingRow>
 
                         <div className="inspector__hint">
-                            Хранилища не синхронизируются: после переключения токен нужно получить
-                            заново кнопкой в шапке. Значения в файле не шифруются — как ключи SSH.
+                            {t(
+                                'Storages are not synchronized: after switching, obtain the token again with the button in the header. Values in the file are not encrypted — like SSH keys.',
+                            )}
                         </div>
                     </section>
 
                     <AboutSection secretStorage={settings.secrets.storage} />
 
                     <div className="inspector__hint">
-                        Настройки хранятся в <span className="mono">~/Resolvr/settings.json</span>
+                        {t('Settings are stored in')} <span className="mono">~/Resolvr/settings.json</span>
                     </div>
                 </div>
 
                 <div className="dialog__footer">
                     <button type="button" className="btn btn--primary" onClick={props.onClose}>
-                        Готово
+                        {t('Done')}
                     </button>
                 </div>
             </div>
@@ -348,6 +372,7 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
     const installUpdate = useAppStore((state) => state.installUpdate)
     const [info, setInfo] = useState<IAboutInfo | undefined>()
     const [copied, setCopied] = useState(false)
+    const t = useT()
 
     useEffect(() => {
         void readAboutInfo().then(setInfo)
@@ -355,7 +380,7 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
 
     return (
         <section className="settings__group">
-            <div className="settings__caption">О программе</div>
+            <div className="settings__caption">{t('About')}</div>
 
             <SettingRow
                 label={`Resolvr ${info?.appVersion ?? ''}`}
@@ -377,25 +402,25 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
                         setCopied(true)
                         window.setTimeout(() => setCopied(false), 1500)
                     }}
-                    title="Версия, система и путь библиотеки — приложите к сообщению о проблеме"
+                    title={t('Version, OS and library path — attach to a bug report')}
                 >
-                    {copied ? 'Скопировано' : 'Скопировать диагностику'}
+                    {copied ? t('Copied') : t('Copy diagnostics')}
                 </button>
             </SettingRow>
 
             <SettingRow
-                label="Обновления"
+                label={t('Updates')}
                 hint={
                     update
-                        ? `Доступна версия ${update.version}`
+                        ? t('Version {version} is available', { version: update.version })
                         : update === null
-                          ? 'Установлена последняя версия'
-                          : 'Проверяются автоматически после запуска'
+                          ? t('Latest version installed')
+                          : t('Checked automatically after launch')
                 }
             >
                 {update ? (
                     <button type="button" className="btn btn--primary" onClick={() => void installUpdate()}>
-                        Обновить
+                        {t('Update')}
                     </button>
                 ) : (
                     <button
@@ -404,14 +429,14 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
                         disabled={updateChecking}
                         onClick={() => void checkUpdates()}
                     >
-                        {updateChecking ? 'Проверяю…' : 'Проверить обновления'}
+                        {updateChecking ? t('Checking…') : t('Check for updates')}
                     </button>
                 )}
             </SettingRow>
 
             <SettingRow
-                label="Агент через MCP"
-                hint="Сервер вложен в приложение; команда регистрирует его в Claude Code"
+                label={t('Agent via MCP')}
+                hint={t('The server is bundled with the app; the command registers it in Claude Code')}
             >
                 <button
                     type="button"
@@ -422,7 +447,7 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
                     }}
                     title={info?.mcpCommand}
                 >
-                    Скопировать команду
+                    {t('Copy command')}
                 </button>
             </SettingRow>
         </section>

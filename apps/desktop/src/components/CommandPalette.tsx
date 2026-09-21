@@ -2,6 +2,8 @@ import { formatOperationRef } from '@resolvr/core'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAppStore } from '../state/store.js'
+import { t as translate, useT } from '../i18n/index.js'
+import { kbd } from '../lib/keys.js'
 import { pluralize, STEPS } from '../lib/plural.js'
 
 export interface ICommand {
@@ -20,6 +22,7 @@ export interface ICommand {
  * актуальные коллекции и окружения.
  */
 export function CommandPalette(): React.JSX.Element | null {
+    const t = useT()
     const open = useAppStore((state) => state.paletteOpen)
     const setPaletteOpen = useAppStore((state) => state.setPaletteOpen)
     const commands = useCommands()
@@ -58,7 +61,7 @@ export function CommandPalette(): React.JSX.Element | null {
                 <input
                     ref={inputRef}
                     className="palette__input"
-                    placeholder="Операция, флоу или команда…"
+                    placeholder={t('Operation, flow or command…')}
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     onKeyDown={(event) => {
@@ -78,7 +81,7 @@ export function CommandPalette(): React.JSX.Element | null {
                 />
 
                 <div className="palette__list">
-                    {filtered.length === 0 && <div className="empty">Ничего не найдено</div>}
+                    {filtered.length === 0 && <div className="empty">{t('Nothing found')}</div>}
 
                     {filtered.map((command, index) => (
                         <div
@@ -133,7 +136,7 @@ function useCommands(): ICommand[] {
         for (const flow of flows) {
             commands.push({
                 id: `flow:${flow.id}`,
-                label: `Запустить флоу: ${flow.name}`,
+                label: translate('Run flow: {name}', { name: flow.name }),
                 hint: pluralize(flow.steps.length, STEPS),
                 badge: '▶',
                 run: () => store.getState().runFlow(flow.id),
@@ -143,7 +146,7 @@ function useCommands(): ICommand[] {
         for (const environment of workspace?.environments ?? []) {
             commands.push({
                 id: `env:${environment.id}`,
-                label: `Окружение: ${environment.name}`,
+                label: translate('Environment: {name}', { name: environment.name }),
                 badge: 'ENV',
                 run: () => {
                     if (activeTabId) store.getState().setTabEnvironment(activeTabId, environment.id)
@@ -165,26 +168,26 @@ function useCommands(): ICommand[] {
         commands.push(
             {
                 id: 'action:activity',
-                label: 'Действия агента',
-                hint: '⌘⇧A',
+                label: translate('Agent activity'),
+                hint: kbd('Shift+A'),
                 run: () => store.getState().setDialog('activity'),
             },
             {
                 id: 'action:workspace-settings',
-                label: 'Настройки workspace',
-                hint: 'заголовки, окружения · ⌘⇧,',
+                label: translate('Workspace settings'),
+                hint: `${translate('headers, environments')} · ${kbd('Shift+,')}`,
                 run: () => store.getState().setDialog('workspaceSettings'),
             },
             {
                 id: 'action:settings',
-                label: 'Настройки',
-                hint: '⌘,',
+                label: translate('Settings'),
+                hint: kbd(','),
                 run: () => store.getState().setDialog('settings'),
             },
             {
                 id: 'action:save-operation',
-                label: 'Сохранить операцию',
-                hint: '⌘S',
+                label: translate('Save operation'),
+                hint: kbd('S'),
                 run: () =>
                     store
                         .getState()
@@ -195,62 +198,62 @@ function useCommands(): ICommand[] {
             },
             {
                 id: 'action:run-all-flows',
-                label: 'Запустить все цепочки (smoke-тест)',
-                hint: 'отчёт откроется вкладкой',
+                label: translate('Run all flows (smoke test)'),
+                hint: translate('the report opens as a tab'),
                 run: () => store.getState().runAllFlows(),
             },
             {
                 id: 'action:save-operation-as',
-                label: 'Сохранить операцию как…',
-                hint: 'в другую коллекцию или под другим именем',
+                label: translate('Save operation as…'),
+                hint: translate('another collection or name'),
                 run: () => store.getState().setDialog('save'),
             },
             {
                 id: 'action:new-workspace',
-                label: 'Новый workspace',
-                hint: '⌘N',
+                label: translate('New workspace'),
+                hint: kbd('N'),
                 run: () => store.getState().setDialog('workspace'),
             },
             {
                 id: 'action:run',
-                label: 'Выполнить операцию',
-                hint: '⌘↩',
+                label: translate('Run operation'),
+                hint: kbd('Enter'),
                 run: () => store.getState().runActiveTab(),
             },
             {
                 id: 'action:new-tab',
-                label: 'Новая вкладка',
-                hint: '⌘T',
+                label: translate('New tab'),
+                hint: kbd('T'),
                 run: () => store.getState().openTab(),
             },
             {
                 id: 'action:refresh-schema',
-                label: 'Обновить схему',
-                hint: '⌘R',
+                label: translate('Refresh schema'),
+                hint: kbd('R'),
                 run: () => store.getState().refreshSchema(),
             },
             {
                 id: 'action:layout-classic',
-                label: 'Лейаут: Classic',
-                hint: '⌘1',
+                label: translate('Layout: Classic'),
+                hint: kbd('1'),
                 run: () => store.getState().setLayoutPreset('classic'),
             },
             {
                 id: 'action:layout-inspector',
-                label: 'Лейаут: Inspector',
-                hint: '⌘2',
+                label: translate('Layout: Inspector'),
+                hint: kbd('2'),
                 run: () => store.getState().setLayoutPreset('inspector'),
             },
             {
                 id: 'action:layout-focus',
-                label: 'Лейаут: Focus',
-                hint: '⌘3',
+                label: translate('Layout: Focus'),
+                hint: kbd('3'),
                 run: () => store.getState().setLayoutPreset('focus'),
             },
             {
                 id: 'action:toggle-sidebar',
-                label: 'Показать/скрыть сайдбар',
-                hint: '⌘B',
+                label: translate('Toggle sidebar'),
+                hint: kbd('B'),
                 run: () => store.getState().toggleSidebar(),
             },
         )

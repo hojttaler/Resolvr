@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { useAppStore } from '../state/store.js'
+import { useT } from '../i18n/index.js'
 
 export interface ISaveValueDialogProps {
     /** Путь в ответе — из него предлагается имя переменной. */
@@ -20,6 +21,7 @@ const TOKEN_HINT = /token|secret|key|password|jwt/i
  * вкладки руками.
  */
 export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element {
+    const t = useT()
     const workspace = useAppStore((state) => state.workspace)
     const tabs = useAppStore((state) => state.tabs)
     const activeTabId = useAppStore((state) => state.activeTabId)
@@ -50,7 +52,7 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
 
     async function submit(): Promise<void> {
         if (name.trim().length === 0) {
-            setError('Укажите имя переменной')
+            setError(t('Enter a variable name'))
 
             return
         }
@@ -67,16 +69,16 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
         <div className="overlay" onMouseDown={props.onClose}>
             <div className="dialog" onMouseDown={(event) => event.stopPropagation()}>
                 <div className="dialog__body">
-                    <div className="dialog__title">Сохранить значение</div>
+                    <div className="dialog__title">{t('Save value')}</div>
 
                     <div className="inspector__hint">
-                        Из ответа: <span className="mono">{props.path}</span>
+                        {t('From response:')} <span className="mono">{props.path}</span>
                         <br />
-                        В окружение: <b>{environment?.name ?? '—'}</b>
+                        {t('To environment:')} <b>{environment?.name ?? '—'}</b>
                     </div>
 
                     <div className="field">
-                        <label className="field__label">Имя переменной</label>
+                        <label className="field__label">{t('Variable name')}</label>
                         <input
                             className="input mono"
                             autoFocus
@@ -87,8 +89,8 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
                             onChange={(event) => setName(event.target.value)}
                         />
                         <span className="inspector__hint">
-                            Использовать в заголовках и переменных как{' '}
-                            <span className="mono">{`{{${name || 'имя'}}}`}</span>
+                            {t('Use in headers and variables as')}{' '}
+                            <span className="mono">{`{{${name || t('name')}}}`}</span>
                         </span>
                     </div>
 
@@ -99,9 +101,9 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
                             onChange={(event) => setSecret(event.target.checked)}
                         />
                         <span>
-                            Секрет — хранить в Keychain
+                            {t('Secret — keep in the secret store')}
                             <div className="inspector__hint">
-                                в файлы попадёт только ссылка, значение маскируется в истории
+                                {t('only a reference goes to files; the value is masked in history')}
                             </div>
                         </span>
                     </label>
@@ -113,9 +115,9 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
                             onChange={(event) => setAsAuthHeader(event.target.checked)}
                         />
                         <span>
-                            Добавить заголовок окружения
+                            {t('Add environment header')}
                             <div className="inspector__hint mono">
-                                authorization: Bearer {`{{${name || 'имя'}}}`}
+                                authorization: Bearer {`{{${name || t('name')}}}`}
                             </div>
                         </span>
                     </label>
@@ -130,10 +132,10 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
 
                 <div className="dialog__footer">
                     <button type="button" className="btn" onClick={props.onClose}>
-                        Отмена
+                        {t('Cancel')}
                     </button>
                     <button type="button" className="btn btn--primary" onClick={() => void submit()}>
-                        Сохранить
+                        {t('Save')}
                     </button>
                 </div>
             </div>

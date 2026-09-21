@@ -2,17 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { IVariableProblem } from '@resolvr/core'
 
-import { ERRORS, EVENTS, LINES, pluralize } from '../lib/plural.js'
+import { t as translate, tn, useT } from '../i18n/index.js'
+import { isModKey, kbd } from '../lib/keys.js'
 import { extractOperationName, useAppStore, type ITabRun } from '../state/store.js'
 import { countMatches } from './json-search.js'
 import { JsonViewer } from './JsonViewer.js'
 import { SaveValueDialog } from './SaveValueDialog.js'
 
 const RESPONSE_TABS = [
-    { id: 'response', label: 'Ответ' },
-    { id: 'raw', label: 'Сырой' },
-    { id: 'headers', label: 'Заголовки' },
-    { id: 'trace', label: 'Трейс' },
+    { id: 'response', label: 'Response' },
+    { id: 'raw', label: 'Raw' },
+    { id: 'headers', label: 'Headers' },
+    { id: 'trace', label: 'Trace' },
 ] as const
 
 /** Панель результата: данные, ошибки, заголовки и тайминги. */
@@ -26,12 +27,13 @@ export function ResponsePane(): React.JSX.Element {
     const [search, setSearch] = useState('')
     const [searchOpen, setSearchOpen] = useState(false)
     const searchInput = useRef<HTMLInputElement>(null)
+    const t = useT()
 
     // ⌘F ищет по ответу, но только когда фокус не в редакторе: там это
     // сочетание принадлежит поиску по тексту запроса.
     useEffect(() => {
         function onKeyDown(event: KeyboardEvent): void {
-            if (event.key !== 'f' || !event.metaKey) return
+            if (event.key !== 'f' || !isModKey(event)) return
 
             // Цель события — не всегда элемент: при отсутствии фокуса им
             // оказывается сам документ, у которого нет `closest`.
@@ -55,7 +57,7 @@ export function ResponsePane(): React.JSX.Element {
         setSearch('')
     }, [activeTabId])
 
-    if (!activeTabId || !tab) return <div className="empty">Нет активной вкладки</div>
+    if (!activeTabId || !tab) return <div className="empty">{t('No active tab')}</div>
 
     return (
         <div className="panel">
@@ -70,7 +72,7 @@ export function ResponsePane(): React.JSX.Element {
                             }`}
                             onClick={() => setResponseTab(activeTabId, item.id)}
                         >
-                            {item.label}
+                            {t(item.label)}
                         </button>
                     ))}
                 </div>
@@ -84,8 +86,8 @@ export function ResponsePane(): React.JSX.Element {
                         setSearchOpen((current) => !current)
                         if (!searchOpen) window.setTimeout(() => searchInput.current?.focus(), 0)
                     }}
-                    title="Поиск по ответу (⌘F)"
-                    aria-label="Поиск по ответу"
+                    title={t('Search response ({keys})', { keys: kbd('F') })}
+                    aria-label={t('Search response')}
                 >
                     <SearchIcon />
                 </button>
@@ -131,19 +133,20 @@ export function ResponsePane(): React.JSX.Element {
 }
 
 function ResponseStatus({ run }: { run: ITabRun | undefined }): React.JSX.Element | null {
+    const t = useT()
     if (!run) return null
 
-    if (run.status === 'running') return <span className="badge">выполняется…</span>
+    if (run.status === 'running') return <span className="badge">{t('running…')}</span>
     if (run.status === 'streaming') {
         return (
             <span className="row">
                 <span className="statusbar__dot statusbar__dot--live" />
-                <span className="badge">{pluralize(run.events.length, EVENTS)}</span>
+                <span className="badge">{tn(run.events.length, 'event|events')}</span>
             </span>
         )
     }
-    if (run.status === 'invalid') return <span className="badge badge--fail">не отправлен</span>
-    if (run.status === 'error') return <span className="badge badge--fail">ошибка</span>
+    if (run.status === 'invalid') return <span className="badge badge--fail">{t('not sent')}</span>
+    if (run.status === 'error') return <span className="badge badge--fail">{t('error')}</span>
     if (!run.result) return null
 
     const { result } = run
@@ -153,10 +156,10 @@ function ResponseStatus({ run }: { run: ITabRun | undefined }): React.JSX.Elemen
             <span className={`badge ${result.ok ? 'badge--ok' : 'badge--fail'}`}>
                 {result.status}
             </span>
-            <span className="badge">{Math.round(result.durationMs)} мс</span>
+            <span className="badge">{t('{n} ms', { n: Math.round(result.durationMs) })}</span>
             <span className="badge">{formatBytes(result.responseBytes)}</span>
             {result.errors && result.errors.length > 0 && (
-                <span className="badge badge--fail">{pluralize(result.errors.length, ERRORS)}</span>
+                <span className="badge badge--fail">{tn(result.errors.length, 'error|errors')}</span>
             )}
         </span>
     )
@@ -197,7 +200,7 @@ function ResponseBody({
     // не приходилось прокручивать за каждым новым сообщением.
     if (run.status === 'streaming' || run.events.length > 0) {
         if (run.events.length === 0) {
-            return <div className="empty">Подписка активна, событий пока нет…</div>
+            return <div className="empty">{translate('Subscription active, no events yet…')}</div>
         }
 
         return (
@@ -219,7 +222,7 @@ function ResponseBody({
     }
 
     if (run.status === 'running' || !run.result) {
-        return <div className="empty">Запрос выполняется…</div>
+        return <div className="empty">{translate('Request is running…')}</div>
     }
 
     const { result } = run
@@ -269,7 +272,7 @@ function ResponseBody({
                 (search.trim().length === 0 ||
                     countMatches(result.errors, search.trim().toLowerCase()) > 0) && (
                     <div className="errors">
-                        <div className="errors__title">Ошибки GraphQL</div>
+                        <div className="errors__title">{translate('GraphQL errors')}</div>
                         <JsonViewer
                             value={result.errors}
                             defaultExpandDepth={expandDepth + 1}
@@ -305,6 +308,7 @@ function UnresolvedHeadersNotice({ headers }: { headers: string[] }): React.JSX.
     const refreshToken = useAppStore((state) => state.refreshToken)
     const refreshing = useAppStore((state) => state.tokenRefreshing)
     const setDialog = useAppStore((state) => state.setDialog)
+    const t = useT()
 
     const environment = workspace?.environments.find(
         (item) => item.id === (tab?.environmentId ?? workspace.defaultEnvironmentId),
@@ -313,12 +317,12 @@ function UnresolvedHeadersNotice({ headers }: { headers: string[] }): React.JSX.
 
     return (
         <div className="notice">
-            <b>Запрос ушёл без заголовков:</b>{' '}
+            <b>{t('Request sent without headers:')}</b>{' '}
             <span className="mono">{headers.join(', ')}</span>
             <div className="inspector__hint">
                 {canRefresh
-                    ? 'В их значениях остались нераскрытые переменные: токен ещё не получен или истёк.'
-                    : 'В их значениях остались нераскрытые переменные, а цепочка получения токена не выбрана.'}
+                    ? t('Their values contain unresolved variables: the token has not been obtained yet or has expired.')
+                    : t('Their values contain unresolved variables, and no token flow is selected.')}
             </div>
 
             <div className="row" style={{ marginTop: 'var(--pad-sm)' }}>
@@ -329,7 +333,7 @@ function UnresolvedHeadersNotice({ headers }: { headers: string[] }): React.JSX.
                         disabled={refreshing}
                         onClick={() => void refreshToken()}
                     >
-                        {refreshing ? 'Получаю токен…' : 'Получить токен'}
+                        {refreshing ? t('Getting token…') : t('Get token')}
                     </button>
                 )}
                 <button
@@ -337,7 +341,7 @@ function UnresolvedHeadersNotice({ headers }: { headers: string[] }): React.JSX.
                     className="btn"
                     onClick={() => setDialog('workspaceSettings')}
                 >
-                    Настроить авторизацию…
+                    {t('Configure authorization…')}
                 </button>
             </div>
         </div>
@@ -358,6 +362,7 @@ function SearchBar(props: {
     onClose: () => void
 }): React.JSX.Element {
     const active = props.value.trim().length > 0
+    const t = useT()
 
     return (
         <div className="searchbar">
@@ -365,7 +370,7 @@ function SearchBar(props: {
                 ref={props.inputRef}
                 className="input searchbar__input"
                 value={props.value}
-                placeholder="Поиск по ответу: поле или значение"
+                placeholder={t('Search response: field or value')}
                 onChange={(event) => props.onChange(event.target.value)}
                 onKeyDown={(event) => {
                     if (event.key === 'Escape') props.onClose()
@@ -374,13 +379,13 @@ function SearchBar(props: {
 
             <span
                 className={`searchbar__count${active && props.matches === 0 ? ' searchbar__count--empty' : ''}`}
-                title="Число строк ответа, в которых есть совпадение"
+                title={t('Number of response rows with a match')}
             >
-                {active ? pluralize(props.matches, LINES) : 'весь ответ'}
+                {active ? tn(props.matches, 'row|rows') : t('whole response')}
             </span>
 
             <button type="button" className="btn btn--quiet" onClick={props.onClose}>
-                Закрыть
+                {t('Close')}
             </button>
         </div>
     )
@@ -406,11 +411,12 @@ function InvalidVariables({ problems }: { problems: IVariableProblem[] }): React
     const runActiveTab = useAppStore((state) => state.runActiveTab)
     const setBottomTab = useAppStore((state) => state.setBottomTab)
     const activeTabId = useAppStore((state) => state.activeTabId)
+    const t = useT()
 
     return (
         <div style={{ padding: 'var(--pad-md)' }}>
             <div className="errors">
-                <div className="errors__title">Запрос не отправлен</div>
+                <div className="errors__title">{t('Request not sent')}</div>
                 {problems.map((problem) => (
                     <div key={problem.path} className="problem">
                         <span className="mono problem__path">{problem.path}</span>
@@ -427,15 +433,15 @@ function InvalidVariables({ problems }: { problems: IVariableProblem[] }): React
                         if (activeTabId) setBottomTab(activeTabId, 'variables')
                     }}
                 >
-                    К переменным
+                    {t('To variables')}
                 </button>
                 <button
                     type="button"
                     className="btn"
                     onClick={() => void runActiveTab({ force: true })}
-                    title="Отправить запрос несмотря на замечания"
+                    title={t('Send the request despite the warnings')}
                 >
-                    Всё равно выполнить
+                    {t('Run anyway')}
                 </button>
             </div>
         </div>
@@ -455,6 +461,7 @@ function IdleResponse(): React.JSX.Element {
     const activeTabId = useAppStore((state) => state.activeTabId)
     const contents = useAppStore((state) => state.contents)
     const openTab = useAppStore((state) => state.openTab)
+    const t = useT()
 
     const activeTab = tabs.find((item) => item.id === activeTabId)
     const operationName = activeTab
@@ -468,13 +475,13 @@ function IdleResponse(): React.JSX.Element {
     return (
         <div className="idle">
             <div className="idle__hint">
-                Выполнить — <span className="mono">⌘↩</span>
+                {t('Run — {keys}', { keys: kbd('Enter') })}
             </div>
 
             {related.length > 0 && (
                 <>
                     <div className="settings__caption">
-                        {operationName ? `Последние запуски ${operationName}` : 'Последние запуски'}
+                        {operationName ? t('Recent runs of {name}', { name: operationName }) : t('Recent runs')}
                     </div>
 
                     <div className="idle__list">
@@ -486,7 +493,7 @@ function IdleResponse(): React.JSX.Element {
                                 onClick={() =>
                                     void openTab({
                                         query: entry.query,
-                                        title: entry.operationName ?? 'Из истории',
+                                        title: entry.operationName ?? t('From history'),
                                     })
                                 }
                             >
@@ -496,10 +503,10 @@ function IdleResponse(): React.JSX.Element {
                                 <span className="idle__time">
                                     {new Date(entry.ts).toLocaleTimeString()}
                                 </span>
-                                <span className="badge">{Math.round(entry.durationMs)} мс</span>
+                                <span className="badge">{t('{n} ms', { n: Math.round(entry.durationMs) })}</span>
                                 {entry.errorCount > 0 && (
                                     <span className="badge badge--fail">
-                                        {pluralize(entry.errorCount, ERRORS)}
+                                        {tn(entry.errorCount, 'error|errors')}
                                     </span>
                                 )}
                             </div>
@@ -521,8 +528,8 @@ function formatRaw(body: string): string {
 }
 
 function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} Б`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`
+    if (bytes < 1024) return translate('{n} B', { n: bytes })
+    if (bytes < 1024 * 1024) return translate('{n} KB', { n: (bytes / 1024).toFixed(1) })
 
-    return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
+    return translate('{n} MB', { n: (bytes / (1024 * 1024)).toFixed(1) })
 }

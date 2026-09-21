@@ -1,6 +1,6 @@
 import { memo, useCallback, useState } from 'react'
 
-import { ITEMS, FIELDS, plural } from '../lib/plural.js'
+import { plural, t as translate, useT } from '../i18n/index.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { highlightParts, subtreeMatches } from './json-search.js'
 
@@ -58,6 +58,7 @@ export const JsonViewer = memo(function JsonViewer(props: IJsonViewerProps): Rea
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
     const needle = (props.search ?? '').trim().toLowerCase()
     const onSaveValue = props.onSaveValue
+    const t = useT()
 
     /**
      * Меню правой кнопки для узла.
@@ -75,14 +76,14 @@ export const JsonViewer = memo(function JsonViewer(props: IJsonViewerProps): Rea
             ...(onSaveValue && typeof request.value === 'string'
                 ? [
                       {
-                          label: 'Сохранить в переменную окружения…',
-                          hint: 'для {{подстановки}}',
+                          label: t('Save to environment variable…'),
+                          hint: t('for {{substitution}}'),
                           run: () => onSaveValue({ path: request.path, value: request.value as string }),
                       },
                   ]
                 : []),
             {
-                label: 'Копировать значение',
+                label: t('Copy value'),
                 separated: onSaveValue !== undefined,
                 run: () => navigator.clipboard.writeText(raw ?? ''),
             },
@@ -94,23 +95,23 @@ export const JsonViewer = memo(function JsonViewer(props: IJsonViewerProps): Rea
             items: [
                 ...items,
                 {
-                    label: 'Копировать как JSON',
+                    label: t('Copy as JSON'),
                     run: () =>
                         navigator.clipboard.writeText(JSON.stringify(request.value, null, 2) ?? ''),
                 },
                 {
-                    label: 'Копировать путь',
-                    hint: request.path || 'корень',
+                    label: t('Copy path'),
+                    hint: request.path || t('root'),
                     run: () => navigator.clipboard.writeText(request.path),
                 },
                 {
-                    label: 'Копировать «путь: значение»',
+                    label: t('Copy “path: value”'),
                     separated: true,
                     run: () => navigator.clipboard.writeText(`${request.path}: ${raw ?? ''}`),
                 },
             ],
         })
-    }, [onSaveValue])
+    }, [onSaveValue, t])
 
     return (
         <div className="json-viewer mono selectable">
@@ -249,12 +250,12 @@ function JsonNode(props: IJsonNodeProps): React.JSX.Element | null {
                 <span className="json-brace">{open ? openBrace : `${openBrace} … ${closeBrace}`}</span>
                 {!open && (
                     <span className="json-hint">
-                        {entries.length} {plural(entries.length, isArray ? ITEMS : FIELDS)}
+                        {entries.length} {plural(entries.length, isArray ? 'item|items' : 'field|fields')}
                     </span>
                 )}
                 {searching && visible.length < entries.length && (
                     <span className="json-hint">
-                        {visible.length} из {entries.length}
+                        {translate('{shown} of {total}', { shown: visible.length, total: entries.length })}
                     </span>
                 )}
                 <PickPathButton path={path} onPick={onPickPath} />
@@ -298,7 +299,7 @@ function PickPathButton(props: {
         <button
             type="button"
             className="json-pick"
-            title={`Взять путь: ${props.path}`}
+            title={translate('Take path: {path}', { path: props.path })}
             onClick={(event) => {
                 event.stopPropagation()
                 props.onPick?.(props.path, { alt: event.altKey })
@@ -383,7 +384,7 @@ function JsonString({ value, needle }: { value: string; needle: string }): React
             <span
                 className="json-string json-value"
                 onClick={long ? () => setExpanded(false) : undefined}
-                title={long ? 'Свернуть значение' : undefined}
+                title={long ? translate('Collapse value') : undefined}
             >
                 &quot;
                 <Highlighted text={value} needle={needle} />
@@ -403,9 +404,9 @@ function JsonString({ value, needle }: { value: string; needle: string }): React
                     event.stopPropagation()
                     setExpanded(true)
                 }}
-                title="Показать значение целиком"
+                title={translate('Show whole value')}
             >
-                …ещё {value.length - STRING_CLAMP}
+                {translate('…{n} more', { n: value.length - STRING_CLAMP })}
             </button>
             &quot;
         </span>

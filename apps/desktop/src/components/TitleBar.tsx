@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { detectOperationKind } from '@resolvr/core'
 import { useEffect, useState } from 'react'
 
+import { useT } from '../i18n/index.js'
+import { kbd } from '../lib/keys.js'
 import { useAppStore } from '../state/store.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { initials, LogoMark } from './Logo.js'
@@ -23,6 +25,7 @@ export function TitleBar(): React.JSX.Element {
     const setTabEndpoint = useAppStore((state) => state.setTabEndpoint)
     const setPaletteOpen = useAppStore((state) => state.setPaletteOpen)
     const setDialog = useAppStore((state) => state.setDialog)
+    const t = useT()
 
     const activeTab = tabs.find((tab) => tab.id === activeTabId)
     const activeEnvironment = workspace?.environments.find(
@@ -58,9 +61,9 @@ export function TitleBar(): React.JSX.Element {
                         value={workspace?.id ?? ''}
                         onMouseDown={(event) => event.stopPropagation()}
                         onChange={(event) => void selectWorkspace(event.target.value)}
-                        title="Workspace"
+                        title={t('Workspace')}
                     >
-                        {workspaces.length === 0 && <option value="">Нет workspace</option>}
+                        {workspaces.length === 0 && <option value="">{t('No workspace')}</option>}
                         {workspaces.map((item) => (
                             <option key={item.id} value={item.id}>
                                 {item.name}
@@ -75,7 +78,7 @@ export function TitleBar(): React.JSX.Element {
                         value={activeTab.endpointId ?? workspace.defaultEndpointId ?? ''}
                         onMouseDown={(event) => event.stopPropagation()}
                         onChange={(event) => setTabEndpoint(activeTab.id, event.target.value)}
-                        title="Эндпоинт"
+                        title={t('Endpoint')}
                     >
                         {workspace.endpoints.map((endpoint) => (
                             <option key={endpoint.id} value={endpoint.id}>
@@ -97,8 +100,8 @@ export function TitleBar(): React.JSX.Element {
                             onChange={(event) => setTabEnvironment(activeTab.id, event.target.value)}
                             title={
                                 activeEnvironment?.production
-                                    ? 'Боевое окружение: мутации и цепочки требуют подтверждения'
-                                    : 'Окружение'
+                                    ? t('Production environment: mutations and flows ask for confirmation')
+                                    : t('Environment')
                             }
                         >
                             {workspace.environments.map((environment) => (
@@ -113,7 +116,7 @@ export function TitleBar(): React.JSX.Element {
                 )}
 
                 {activeEnvironment?.production && (
-                    <span className="badge badge--prod" title="Боевое окружение">
+                    <span className="badge badge--prod" title={t('Production environment')}>
                         PROD
                     </span>
                 )}
@@ -135,17 +138,17 @@ export function TitleBar(): React.JSX.Element {
                 type="button"
                 className="btn btn--quiet"
                 onClick={() => setPaletteOpen(true)}
-                title="Палитра команд (⌘K)"
+                title={t('Command palette ({keys})', { keys: kbd('K') })}
             >
-                ⌘K
+                {kbd('K')}
             </button>
 
             <button
                 type="button"
                 className="btn btn--quiet btn--icon"
                 onClick={() => setDialog('activity')}
-                title="Действия агента (⌘⇧A)"
-                aria-label="Действия агента"
+                title={t('Agent activity ({keys})', { keys: kbd('Shift+A') })}
+                aria-label={t('Agent activity')}
             >
                 <AgentIcon />
             </button>
@@ -154,8 +157,8 @@ export function TitleBar(): React.JSX.Element {
                 type="button"
                 className="btn btn--quiet btn--icon"
                 onClick={() => setDialog('settings')}
-                title="Настройки (⌘,)"
-                aria-label="Настройки"
+                title={t('Settings ({keys})', { keys: kbd(',') })}
+                aria-label={t('Settings')}
             >
                 <GearIcon />
             </button>
@@ -167,12 +170,13 @@ export function TitleBar(): React.JSX.Element {
 function LastRunStatus(): React.JSX.Element | null {
     const run = useAppStore((state) => (state.activeTabId ? state.runs[state.activeTabId] : undefined))
     const result = run?.status === 'done' ? run.result : undefined
+    const t = useT()
     if (!result) return null
 
     return (
         <span className="row" style={{ gap: 5 }}>
             <span className={`statusbar__dot ${result.ok ? 'statusbar__dot--ok' : 'statusbar__dot--fail'}`} />
-            <span>{Math.round(result.durationMs)} мс</span>
+            <span>{t('{n} ms', { n: Math.round(result.durationMs) })}</span>
         </span>
     )
 }
@@ -206,6 +210,7 @@ function TokenStatus(): React.JSX.Element | null {
     const setSidebarTab = useAppStore((state) => state.setSidebarTab)
     const [now, setNow] = useState(() => Date.now())
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
+    const t = useT()
 
     // Обратный отсчёт обновляется раз в полминуты: чаще незачем, а без этого
     // подпись «истекает через 3 мин» застывала бы до следующего запроса.
@@ -241,14 +246,14 @@ function TokenStatus(): React.JSX.Element | null {
               : 'fresh'
 
     const label = refreshing
-        ? 'обновляю токен…'
+        ? t('refreshing token…')
         : !canRefresh
-          ? 'авторизация не настроена'
+          ? t('auth not configured')
           : state === 'unknown'
-            ? 'токен не получен'
+            ? t('token not obtained')
             : state === 'expired'
-              ? 'токен истёк'
-              : `токен ${formatLeft(left ?? 0)}`
+              ? t('token expired')
+              : t('token {left}', { left: formatLeft(left ?? 0, t) })
 
     const flowId = environment.recovery?.flowId
 
@@ -265,16 +270,18 @@ function TokenStatus(): React.JSX.Element | null {
                     y: event.clientY,
                     items: [
                         {
-                            label: canRefresh ? `Получить токен: ${flowId}` : 'Цепочка не выбрана',
+                            label: canRefresh
+                                ? t('Get token: {flow}', { flow: flowId ?? '' })
+                                : t('No flow selected'),
                             run: () => (canRefresh ? refreshToken() : setDialog('workspaceSettings')),
                         },
                         {
-                            label: 'Настроить авторизацию…',
-                            hint: 'окружение',
+                            label: t('Configure authorization…'),
+                            hint: t('environment'),
                             run: () => setDialog('workspaceSettings'),
                         },
                         {
-                            label: 'Показать цепочку',
+                            label: t('Show flow'),
                             separated: true,
                             run: () => setSidebarTab('flows'),
                         },
@@ -284,11 +291,13 @@ function TokenStatus(): React.JSX.Element | null {
             disabled={refreshing}
             title={
                 canRefresh
-                    ? `Клик — выполнить цепочку «${flowId ?? ''}» и сохранить токен.` +
-                      ` Правая кнопка — настроить.${
-                          environment.tokenSubject ? ` Сейчас: ${environment.tokenSubject}` : ''
-                      }`
-                    : 'Цепочка не выбрана. Правая кнопка → «Настроить авторизацию…»'
+                    ? t('Click — run flow “{flow}” and save the token. Right-click — configure.', {
+                          flow: flowId ?? '',
+                      }) +
+                      (environment.tokenSubject
+                          ? ` ${t('Now: {subject}', { subject: environment.tokenSubject })}`
+                          : '')
+                    : t('No flow selected. Right-click → “Configure authorization…”')
             }
         >
             <span className="token-status__dot" />
@@ -301,11 +310,11 @@ function TokenStatus(): React.JSX.Element | null {
 }
 
 /** Остаток времени в человекочитаемом виде. */
-function formatLeft(milliseconds: number): string {
+function formatLeft(milliseconds: number, t: ReturnType<typeof useT>): string {
     const minutes = Math.round(milliseconds / 60_000)
-    if (minutes < 60) return `${minutes} мин`
+    if (minutes < 60) return t('{n} min', { n: minutes })
 
-    return `${Math.round(minutes / 60)} ч`
+    return t('{n} h', { n: Math.round(minutes / 60) })
 }
 
 /** Значок журнала действий агента: список строк с отметками выполнения. */
@@ -367,6 +376,7 @@ export function TabStrip(): React.JSX.Element {
     const closeAllTabs = useAppStore((state) => state.closeAllTabs)
     const openTab = useAppStore((state) => state.openTab)
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
+    const t = useT()
 
     function openMenu(event: React.MouseEvent, tabId: string): void {
         event.preventDefault()
@@ -376,23 +386,23 @@ export function TabStrip(): React.JSX.Element {
             x: event.clientX,
             y: event.clientY,
             items: [
-                { label: 'Закрыть', hint: '⌘W', run: () => closeTab(tabId) },
+                { label: t('Close'), hint: kbd('W'), run: () => closeTab(tabId) },
                 {
-                    label: 'Закрыть остальные',
+                    label: t('Close others'),
                     disabled: tabs.length < 2,
                     run: () => closeOtherTabs(tabId),
                 },
                 {
-                    label: 'Закрыть слева',
+                    label: t('Close to the left'),
                     disabled: index < 1,
                     run: () => closeTabsToLeft(tabId),
                 },
                 {
-                    label: 'Закрыть справа',
+                    label: t('Close to the right'),
                     disabled: index >= tabs.length - 1,
                     run: () => closeTabsToRight(tabId),
                 },
-                { label: 'Закрыть все', separated: true, run: () => closeAllTabs() },
+                { label: t('Close all'), separated: true, run: () => closeAllTabs() },
             ],
         })
     }
@@ -422,7 +432,7 @@ export function TabStrip(): React.JSX.Element {
                             if (event.button === 0) activateTab(tab.id)
                         }}
                         onContextMenu={(event) => openMenu(event, tab.id)}
-                        title={tab.operationRef ?? (tab.kind === 'flow' ? 'Цепочка' : 'Черновик')}
+                        title={tab.operationRef ?? (tab.kind === 'flow' ? t('Flow') : t('Draft'))}
                     >
                         <span className={`tab__kind tab__kind--${kind}`}>
                             {kind === 'query'
@@ -437,7 +447,7 @@ export function TabStrip(): React.JSX.Element {
                         </span>
                         <span className="tab__label">{tab.title}</span>
                         {tab.dirty ? (
-                            <span className="tab__dot" title="Есть несохранённые изменения" />
+                            <span className="tab__dot" title={t('Unsaved changes')} />
                         ) : null}
                         <button
                             type="button"
@@ -446,8 +456,8 @@ export function TabStrip(): React.JSX.Element {
                                 event.stopPropagation()
                                 if (event.button === 0) void closeTab(tab.id)
                             }}
-                            title="Закрыть вкладку (⌘W)"
-                            aria-label="Закрыть вкладку"
+                            title={t('Close tab ({keys})', { keys: kbd('W') })}
+                            aria-label={t('Close')}
                         >
                             <CloseIcon />
                         </button>
@@ -460,7 +470,7 @@ export function TabStrip(): React.JSX.Element {
                 className="btn btn--quiet btn--icon"
                 style={{ alignSelf: 'center', marginLeft: 4 }}
                 onClick={() => void openTab()}
-                title="Новая вкладка (⌘T)"
+                title={t('New tab ({keys})', { keys: kbd('T') })}
             >
                 +
             </button>
@@ -483,27 +493,30 @@ export function UpdateBanner(): React.JSX.Element | null {
     const error = useAppStore((state) => state.updateError)
     const installUpdate = useAppStore((state) => state.installUpdate)
     const dismissUpdate = useAppStore((state) => state.dismissUpdate)
+    const t = useT()
 
     if (!update) return null
 
     return (
         <div className="update-banner">
             <span>
-                Доступна версия <b>{update.version}</b>
-                {error ? ` — не удалось установить: ${error}` : ''}
+                {t('Version {version} is available', { version: update.version })}
+                {error ? t(' — failed to install: {error}', { error }) : ''}
             </span>
             <span className="panel__spacer" />
             {progress !== undefined && !error ? (
                 <span className="inspector__hint">
-                    {progress < 1 ? `скачивание ${Math.round(progress * 100)}%` : 'установка…'}
+                    {progress < 1
+                        ? t('downloading {percent}%', { percent: Math.round(progress * 100) })
+                        : t('installing…')}
                 </span>
             ) : (
                 <>
                     <button type="button" className="btn btn--quiet" onClick={dismissUpdate}>
-                        Позже
+                        {t('Later')}
                     </button>
                     <button type="button" className="btn btn--primary" onClick={() => void installUpdate()}>
-                        Обновить и перезапустить
+                        {t('Update and restart')}
                     </button>
                 </>
             )}

@@ -6,7 +6,7 @@ import {
 } from '@resolvr/core'
 import { useState } from 'react'
 
-import { CHAINS, plural, pluralize, STEPS } from '../lib/plural.js'
+import { plural, tn, useT } from '../i18n/index.js'
 import { useAppStore } from '../state/store.js'
 import { JsonViewer } from './JsonViewer.js'
 
@@ -22,8 +22,9 @@ export function ReportPage(props: { tabId: string }): React.JSX.Element {
     const runAllFlows = useAppStore((state) => state.runAllFlows)
     const openFlowTab = useAppStore((state) => state.openFlowTab)
     const [copied, setCopied] = useState(false)
+    const t = useT()
 
-    if (!report) return <div className="empty">Отчёт не найден</div>
+    if (!report) return <div className="empty">{t('Report not found')}</div>
 
     const summary = summarizeReport(report)
     const state = running ? 'running' : summary.failed > 0 ? 'fail' : 'ok'
@@ -31,17 +32,20 @@ export function ReportPage(props: { tabId: string }): React.JSX.Element {
     return (
         <div className="panel">
             <div className="panel__header">
-                <span className="panel__title">Прогон цепочек</span>
+                <span className="panel__title">{t('Flows run')}</span>
                 <span
                     className={`badge ${
                         state === 'running' ? '' : state === 'ok' ? 'badge--ok' : 'badge--fail'
                     }`}
                 >
                     {state === 'running'
-                        ? `выполняется · ${summary.total - summary.pending} из ${summary.total}`
+                        ? t('running · {done} of {total}', {
+                              done: summary.total - summary.pending,
+                              total: summary.total,
+                          })
                         : state === 'ok'
-                          ? 'все пройдены'
-                          : `упало: ${summary.failed}`}
+                          ? t('all passed')
+                          : t('failed: {n}', { n: summary.failed })}
                 </span>
 
                 <span className="panel__spacer" />
@@ -54,9 +58,9 @@ export function ReportPage(props: { tabId: string }): React.JSX.Element {
                         setCopied(true)
                         window.setTimeout(() => setCopied(false), 1500)
                     }}
-                    title="Отчёт в Markdown — для задачи или чата"
+                    title={t('Report in Markdown — for a ticket or chat')}
                 >
-                    {copied ? 'Скопировано' : 'Скопировать отчёт'}
+                    {copied ? t('Copied') : t('Copy report')}
                 </button>
                 <button
                     type="button"
@@ -64,16 +68,16 @@ export function ReportPage(props: { tabId: string }): React.JSX.Element {
                     disabled={running}
                     onClick={() => void runAllFlows()}
                 >
-                    {running ? 'Выполняется…' : 'Запустить снова'}
+                    {running ? t('Running…') : t('Run again')}
                 </button>
             </div>
 
             <div className="panel__content report">
                 <div className="report__summary">
-                    <Stat label={plural(summary.total, CHAINS)} value={summary.total} />
-                    <Stat label="пройдено" value={summary.passed} tone="ok" />
-                    <Stat label="упало" value={summary.failed} tone={summary.failed > 0 ? 'fail' : undefined} />
-                    <Stat label="мс" value={Math.round(summary.durationMs)} />
+                    <Stat label={plural(summary.total, 'flow|flows')} value={summary.total} />
+                    <Stat label={t('passed')} value={summary.passed} tone="ok" />
+                    <Stat label={t('failed')} value={summary.failed} tone={summary.failed > 0 ? 'fail' : undefined} />
+                    <Stat label={t('ms')} value={Math.round(summary.durationMs)} />
                     <span className="inspector__hint">
                         {new Date(report.startedAt).toLocaleString()}
                         {report.environmentName ? ` · ${report.environmentName}` : ''}
@@ -103,6 +107,7 @@ function Stat(props: { label: string; value: number; tone?: 'ok' | 'fail' }): Re
 function ReportEntry(props: { entry: IFlowReportEntry; onOpen: () => void }): React.JSX.Element {
     const { entry } = props
     const [open, setOpen] = useState<boolean | undefined>()
+    const t = useT()
     const expanded = open ?? (entry.run ? !entry.run.ok : false)
 
     return (
@@ -119,7 +124,7 @@ function ReportEntry(props: { entry: IFlowReportEntry; onOpen: () => void }): Re
                 <span className="report__name">{entry.flowName}</span>
                 {entry.run && (
                     <span className="inspector__hint">
-                        {pluralize(entry.run.steps.length, STEPS)} · {Math.round(entry.run.durationMs)} мс
+                        {tn(entry.run.steps.length, 'step|steps')} · {t('{n} ms', { n: Math.round(entry.run.durationMs) })}
                     </span>
                 )}
                 <span className="panel__spacer" />
@@ -131,7 +136,7 @@ function ReportEntry(props: { entry: IFlowReportEntry; onOpen: () => void }): Re
                         props.onOpen()
                     }}
                 >
-                    Открыть
+                    {t('Open')}
                 </button>
             </div>
 
@@ -153,6 +158,7 @@ function ReportEntry(props: { entry: IFlowReportEntry; onOpen: () => void }): Re
 
 function ReportStep({ step }: { step: IFlowStepResult }): React.JSX.Element {
     const [showResponse, setShowResponse] = useState(false)
+    const t = useT()
     const failedAsserts = step.asserts.filter((item) => !item.passed)
 
     return (
@@ -163,7 +169,7 @@ function ReportStep({ step }: { step: IFlowStepResult }): React.JSX.Element {
                 </span>
                 <span>{step.name}</span>
                 {step.status !== undefined && <span className="badge">HTTP {step.status}</span>}
-                <span className="inspector__hint">{Math.round(step.durationMs)} мс</span>
+                <span className="inspector__hint">{t('{n} ms', { n: Math.round(step.durationMs) })}</span>
                 <span className="panel__spacer" />
                 {step.result && (
                     <button
@@ -171,7 +177,7 @@ function ReportStep({ step }: { step: IFlowStepResult }): React.JSX.Element {
                         className="btn btn--quiet"
                         onClick={() => setShowResponse((current) => !current)}
                     >
-                        {showResponse ? 'Скрыть ответ' : 'Ответ'}
+                        {showResponse ? t('Hide response') : t('Response')}
                     </button>
                 )}
             </div>

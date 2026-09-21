@@ -78,7 +78,7 @@ function describeWsError(error: unknown): string {
     if (typeof error === 'object' && error !== null && 'reason' in error) {
         const closeEvent = error as { code?: number; reason?: string }
 
-        return `Соединение закрыто (${closeEvent.code ?? '—'}): ${closeEvent.reason || 'без причины'}`
+        return `Connection closed (${closeEvent.code ?? '—'}): ${closeEvent.reason || 'no reason'}`
     }
 
     return JSON.stringify(error)

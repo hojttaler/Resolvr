@@ -41,6 +41,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { parse, print, type GraphQLSchema } from 'graphql'
 import { create } from 'zustand'
 
+import { resolveLanguage, setLanguage, t } from '../i18n/index.js'
 import { getAppContext } from '../platform/context.js'
 import { checkForUpdate, type IAvailableUpdate } from '../platform/updates.js'
 
@@ -486,7 +487,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         let query = input.query ?? ''
         let variables = '{}'
         let headers: Record<string, string> = {}
-        let title = input.title ?? 'Новый запрос'
+        let title = input.title ?? t('New request')
 
         if (input.operationRef && workspace) {
             const operation = await context.workspaces.getOperation(
@@ -606,7 +607,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         const flow: IFlow = (flowId ? flows.find((item) => item.id === flowId) : undefined) ?? {
             id: '',
-            name: 'Новая цепочка',
+            name: t('New flow'),
             description: '',
             steps: [],
         }
@@ -668,17 +669,17 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
     async saveFlowTab(tabId) {
         const draft = get().flowDrafts[tabId]
-        if (!draft) return 'Черновик цепочки не найден'
-        if (draft.name.trim().length === 0) return 'Укажите название цепочки'
+        if (!draft) return t('Flow draft not found')
+        if (draft.name.trim().length === 0) return t('Enter a flow name')
 
         const invalid = draft.steps.find((step) => !step.operationRef && !step.query?.trim())
-        if (invalid) return `Шаг «${invalid.name}»: выберите операцию или впишите запрос`
+        if (invalid) return t('Step “{name}”: pick an operation or type a query', { name: invalid.name })
 
         const parsed = FlowSchema.safeParse({
             ...draft,
             id: draft.id.length > 0 ? draft.id : toSlug(draft.name),
         })
-        if (!parsed.success) return parsed.error.issues[0]?.message ?? 'Цепочка заполнена неверно'
+        if (!parsed.success) return parsed.error.issues[0]?.message ?? t('The flow is filled in incorrectly')
 
         await get().saveFlow(parsed.data)
 
@@ -810,7 +811,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             get().requestConfirm(
                 productionConfirm(
                     environment.name,
-                    `мутация ${extractOperationName(content.query) ?? 'без имени'}`,
+                    t('mutation {name}', { name: extractOperationName(content.query) ?? t('unnamed') }),
                     () => get().runActiveTab({ ...options, confirmed: true }),
                 ),
             )
@@ -919,7 +920,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             workspace.endpoints.find((item) => item.id === endpointId) ?? workspace.endpoints[0]
 
         if (!endpoint) {
-            set({ schemaError: 'В workspace не задан ни один эндпоинт' })
+            set({ schemaError: t('The workspace has no endpoints') })
 
             return
         }
@@ -958,7 +959,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             set({
                 schemaDiff: [],
                 schemaDiffNote:
-                    'Нет предыдущего снимка — обновите схему ещё раз после изменения на сервере',
+                    t('No previous snapshot — refresh the schema again after the server changes'),
             })
 
             return
@@ -1060,7 +1061,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         if (environment?.production && !options.confirmed) {
             const flow = get().flows.find((item) => item.id === flowId)
             get().requestConfirm(
-                productionConfirm(environment.name, `цепочка «${flow?.name ?? flowId}»`, () =>
+                productionConfirm(environment.name, t('flow “{name}”', { name: flow?.name ?? flowId }), () =>
                     get().runFlow(flowId, { confirmed: true }),
                 ),
             )
@@ -1113,7 +1114,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         if (environment?.production && !options.confirmed) {
             get().requestConfirm(
-                productionConfirm(environment.name, `прогон всех цепочек (${flows.length})`, () =>
+                productionConfirm(environment.name, t('run of all flows ({n})', { n: flows.length }), () =>
                     get().runAllFlows({ confirmed: true }),
                 ),
             )
@@ -1145,7 +1146,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                           id: tabId,
                           kind: 'report',
                           workspaceId: workspace.id,
-                          title: 'Прогон цепочек',
+                          title: t('Flows run'),
                       }),
                   ],
             activeTabId: tabId,
@@ -1646,6 +1647,11 @@ function applySettings(settings: ISettings): void {
     if (settings.theme === 'system') root.removeAttribute('data-theme')
     else root.setAttribute('data-theme', settings.theme)
 
+    // Язык интерфейса и нативного меню: меню пересобирается в Rust.
+    const language = resolveLanguage(settings.language)
+    setLanguage(language)
+    void invokeSafely('set_menu_language', { language }).catch(() => undefined)
+
     root.style.setProperty('--code-size', `${settings.editor.fontSize}px`)
     root.style.setProperty('--window-opacity', String(settings.appearance.opacity))
 
@@ -1749,9 +1755,12 @@ function productionConfirm(
     run: () => Promise<void>,
 ): IConfirmRequest {
     return {
-        title: 'Боевое окружение',
-        description: `Сейчас выполнится ${description} в окружении «${environmentName}». Это изменит боевые данные.`,
-        actionLabel: 'Выполнить на PROD',
+        title: t('Production'),
+        description: t('This will run {what} in environment “{env}”. It changes production data.', {
+            what: description,
+            env: environmentName,
+        }),
+        actionLabel: t('Run on PROD'),
         danger: true,
         production: true,
         run,
@@ -1904,12 +1913,12 @@ export function parseVariables(raw: string): Record<string, unknown> | Error {
     try {
         const parsed: unknown = JSON.parse(trimmed)
         if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            return new Error('Переменные должны быть JSON-объектом')
+            return new Error(t('Variables must be a JSON object'))
         }
 
         return parsed as Record<string, unknown>
     } catch (error) {
-        return new Error(`Переменные: некорректный JSON — ${toErrorMessage(error)}`)
+        return new Error(t('Variables: invalid JSON — {error}', { error: toErrorMessage(error) }))
     }
 }
 

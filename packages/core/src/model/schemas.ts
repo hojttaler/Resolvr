@@ -307,9 +307,14 @@ export const WindowMaterialSchema = z.enum([
 export const SecretStorageSchema = z.enum(['file', 'keychain'])
 export type ISecretStorage = z.infer<typeof SecretStorageSchema>
 
+export const LanguageSchema = z.enum(['system', 'en', 'ru'])
+export type ILanguage = z.infer<typeof LanguageSchema>
+
 export const SettingsSchema = z.object({
     version: z.literal(1).default(1),
     theme: z.enum(['system', 'light', 'dark']).default('system'),
+    /** Язык интерфейса; `system` — по языку системы, иначе английский. */
+    language: LanguageSchema.default('system'),
     lastWorkspaceId: z.string().optional(),
     appearance: z
         .object({

@@ -9,16 +9,18 @@ import {
 import { isObjectType, type GraphQLField, type GraphQLSchema } from 'graphql'
 import { useMemo, useState } from 'react'
 
+import { useT } from '../i18n/index.js'
+import { kbd } from '../lib/keys.js'
 import { useAppStore } from '../state/store.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 
 type ISidebarTab = 'collections' | 'schema' | 'history' | 'flows'
 
 const TABS: Array<{ id: ISidebarTab; label: string; hint: string }> = [
-    { id: 'collections', label: 'Коллекции', hint: 'Сохранённые запросы' },
-    { id: 'schema', label: 'Схема', hint: 'Типы и поля эндпоинта' },
-    { id: 'history', label: 'История', hint: 'Последние запуски' },
-    { id: 'flows', label: 'Цепочки', hint: 'Сценарии и smoke-тесты' },
+    { id: 'collections', label: 'Collections', hint: 'Saved requests' },
+    { id: 'schema', label: 'Schema', hint: 'Types and fields of the endpoint' },
+    { id: 'history', label: 'History', hint: 'Recent runs list' },
+    { id: 'flows', label: 'Flows', hint: 'Scenarios and smoke tests' },
 ]
 
 /**
@@ -34,9 +36,10 @@ export function ActivityRail(): React.JSX.Element {
     const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed)
     const setSidebarTab = useAppStore((state) => state.setSidebarTab)
     const toggleSidebar = useAppStore((state) => state.toggleSidebar)
+    const t = useT()
 
     return (
-        <nav className="rail" aria-label="Разделы">
+        <nav className="rail" aria-label={t('Sections')}>
             {TABS.map((tab) => {
                 const active = sidebarTab === tab.id && !sidebarCollapsed
 
@@ -45,8 +48,8 @@ export function ActivityRail(): React.JSX.Element {
                         key={tab.id}
                         type="button"
                         className={`rail__item${active ? ' rail__item--active' : ''}`}
-                        title={`${tab.label} — ${tab.hint}`}
-                        aria-label={tab.label}
+                        title={`${t(tab.label)} — ${t(tab.hint)}`}
+                        aria-label={t(tab.label)}
                         aria-pressed={active}
                         onClick={() => {
                             if (sidebarTab === tab.id) {
@@ -111,12 +114,14 @@ export function Sidebar(): React.JSX.Element {
     const createCollection = useAppStore((state) => state.createCollection)
     const tree = useAppStore((state) => state.tree)
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
+    const t = useT()
 
     /** Имя новой коллекции — первое свободное из «Новая коллекция», «… 2»… */
     function freshCollectionName(): string {
         const taken = new Set(tree.map((node) => node.collection.name))
-        let name = 'Новая коллекция'
-        for (let index = 2; taken.has(name); index += 1) name = `Новая коллекция ${index}`
+        const base = t('New collection')
+        let name = base
+        for (let index = 2; taken.has(name); index += 1) name = `${base} ${index}`
 
         return name
     }
@@ -126,7 +131,7 @@ export function Sidebar(): React.JSX.Element {
     return (
         <div className="panel sidebar">
             <div className="panel__header">
-                <span className="panel__title">{current?.label}</span>
+                <span className="panel__title">{t(current?.label ?? '')}</span>
 
                 <span className="panel__spacer" />
 
@@ -143,20 +148,20 @@ export function Sidebar(): React.JSX.Element {
                                 y: rect.bottom + 4,
                                 items: [
                                     {
-                                        label: 'Сохранить текущий запрос…',
-                                        hint: '⌘S',
+                                        label: t('Save current query…'),
+                                        hint: kbd('S'),
                                         run: () => setDialog('save'),
                                     },
                                     {
-                                        label: 'Новая коллекция',
-                                        hint: 'переименуйте правой кнопкой',
+                                        label: t('New collection'),
+                                        hint: t('rename with right-click'),
                                         run: () => createCollection(freshCollectionName()),
                                     },
                                 ],
                             })
                         }}
-                        title="Добавить операцию или коллекцию"
-                        aria-label="Добавить"
+                        title={t('Add an operation or a collection')}
+                        aria-label={t('Add')}
                     >
                         +
                     </button>
@@ -166,8 +171,8 @@ export function Sidebar(): React.JSX.Element {
                     type="button"
                     className="btn btn--quiet btn--icon"
                     onClick={toggleSidebar}
-                    title="Свернуть панель (⌘B)"
-                    aria-label="Свернуть панель"
+                    title={t('Collapse panel ({keys})', { keys: kbd('B') })}
+                    aria-label={t('Collapse panel')}
                 >
                     ‹
                 </button>
@@ -219,6 +224,7 @@ function CollectionsPanel(): React.JSX.Element {
     const [renaming, setRenaming] = useState<IRenaming | undefined>()
     const [dropTarget, setDropTarget] = useState<string | undefined>()
     const [error, setError] = useState<string | undefined>()
+    const t = useT()
 
     const activeRef = tabs.find((tab) => tab.id === activeTabId)?.operationRef
 
@@ -276,17 +282,20 @@ function CollectionsPanel(): React.JSX.Element {
             y: event.clientY,
             items: [
                 {
-                    label: 'Переименовать',
+                    label: t('Rename'),
                     run: () => setRenaming({ kind: 'collection', id: collection.id, value: collection.name }),
                 },
                 {
-                    label: 'Удалить коллекцию…',
+                    label: t('Delete collection…'),
                     separated: true,
                     run: () =>
                         requestConfirm({
-                            title: 'Удалить коллекцию',
-                            description: `Коллекция «${collection.name}» и все её операции будут удалены с диска. Открытые вкладки останутся черновиками.`,
-                            actionLabel: 'Удалить',
+                            title: t('Delete collection'),
+                            description: t(
+                                'Collection “{name}” and all its operations will be deleted from disk. Open tabs stay as drafts.',
+                                { name: collection.name },
+                            ),
+                            actionLabel: t('Delete'),
                             danger: true,
                             run: () => guarded(() => deleteCollection(collection.id)),
                         }),
@@ -304,31 +313,34 @@ function CollectionsPanel(): React.JSX.Element {
             x: event.clientX,
             y: event.clientY,
             items: [
-                { label: 'Открыть', run: () => openTab({ operationRef: ref }) },
+                { label: t('Open'), run: () => openTab({ operationRef: ref }) },
                 {
-                    label: 'Переименовать',
+                    label: t('Rename'),
                     run: () => setRenaming({ kind: 'operation', id: ref, value: name }),
                 },
-                { label: 'Дублировать', run: () => guarded(() => duplicateOperation(ref)) },
+                { label: t('Duplicate'), run: () => guarded(() => duplicateOperation(ref)) },
                 {
-                    label: 'Копировать ссылку',
+                    label: t('Copy link'),
                     hint: 'resolvr://',
                     run: () => navigator.clipboard.writeText(linkTo({ operationRef: ref }) ?? ''),
                 },
                 ...others.map((node, index) => ({
-                    label: `Переместить в «${node.collection.name}»`,
+                    label: t('Move to “{name}”', { name: node.collection.name }),
                     separated: index === 0,
                     run: () =>
                         guarded(() => moveOperation(ref, { collectionId: node.collection.id, name })),
                 })),
                 {
-                    label: 'Удалить…',
+                    label: t('Delete…'),
                     separated: true,
                     run: () =>
                         requestConfirm({
-                            title: 'Удалить операцию',
-                            description: `Операция «${name}» будет удалена с диска. Открытая вкладка останется черновиком.`,
-                            actionLabel: 'Удалить',
+                            title: t('Delete operation'),
+                            description: t(
+                                'Operation “{name}” will be deleted from disk. The open tab stays as a draft.',
+                                { name },
+                            ),
+                            actionLabel: t('Delete'),
                             danger: true,
                             run: () => guarded(() => deleteOperation(ref)),
                         }),
@@ -340,9 +352,12 @@ function CollectionsPanel(): React.JSX.Element {
     if (tree.length === 0) {
         return (
             <div className="empty">
-                Коллекций пока нет.
+                {t('No collections yet.')}
                 <br />
-                Наберите запрос и нажмите ⌘S — коллекция создастся вместе с первой операцией.
+                {t(
+                    'Type a query and press {keys} — the collection is created with the first operation.',
+                    { keys: kbd('S') },
+                )}
             </div>
         )
     }
@@ -352,7 +367,7 @@ function CollectionsPanel(): React.JSX.Element {
             <div style={{ padding: '8px 12px 4px' }}>
                 <input
                     className="input"
-                    placeholder="Поиск операции…"
+                    placeholder={t('Search operation…')}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                 />
@@ -365,7 +380,7 @@ function CollectionsPanel(): React.JSX.Element {
             )}
 
             <div className="tree">
-                {filtered.length === 0 && <div className="empty">Ничего не найдено</div>}
+                {filtered.length === 0 && <div className="empty">{t('Nothing found')}</div>}
                 {filtered.map((node) => {
                     // При поиске коллекции раскрыты: иначе результат прячется внутри.
                     const isCollapsed =
@@ -525,13 +540,14 @@ function SchemaPanel(): React.JSX.Element {
     const activeTabId = useAppStore((state) => state.activeTabId)
     const autofillDepth = useAppStore((state) => state.settings.editor.autofillDepth)
     const [search, setSearch] = useState('')
+    const t = useT()
 
     const rootFields = useMemo(() => collectRootFields(schema, search), [schema, search])
 
     if (!schema) {
         return (
             <div className="empty">
-                {schemaError ?? 'Схема не загружена.'}
+                {schemaError ?? t('Schema not loaded')}
                 <br />
                 <button
                     type="button"
@@ -539,7 +555,7 @@ function SchemaPanel(): React.JSX.Element {
                     style={{ marginTop: 12 }}
                     onClick={() => void refreshSchema()}
                 >
-                    Выполнить интроспекцию
+                    {t('Load schema')}
                 </button>
             </div>
         )
@@ -558,7 +574,7 @@ function SchemaPanel(): React.JSX.Element {
             <div style={{ padding: '8px 12px' }}>
                 <input
                     className="input"
-                    placeholder="Поиск по полям…"
+                    placeholder={t('Search type or field…')}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                 />
@@ -597,9 +613,10 @@ function SchemaPanel(): React.JSX.Element {
 function HistoryPanel(): React.JSX.Element {
     const history = useAppStore((state) => state.history)
     const openTab = useAppStore((state) => state.openTab)
+    const t = useT()
 
     if (history.length === 0) {
-        return <div className="empty">История пуста — выполните первый запрос.</div>
+        return <div className="empty">{t('No history yet')}</div>
     }
 
     return (
@@ -611,7 +628,7 @@ function HistoryPanel(): React.JSX.Element {
                     onClick={() =>
                         void openTab({
                             query: entry.query,
-                            title: entry.operationName ?? 'Из истории',
+                            title: entry.operationName ?? t('From history'),
                         })
                     }
                     title={entry.responsePreview}
@@ -619,8 +636,8 @@ function HistoryPanel(): React.JSX.Element {
                     <span className={`badge ${entry.ok ? 'badge--ok' : 'badge--fail'}`}>
                         {entry.status}
                     </span>
-                    <span className="tree__label">{entry.operationName ?? 'без имени'}</span>
-                    <span className="badge">{Math.round(entry.durationMs)} мс</span>
+                    <span className="tree__label">{entry.operationName ?? t('unnamed')}</span>
+                    <span className="badge">{t('{n} ms', { n: Math.round(entry.durationMs) })}</span>
                 </div>
             ))}
         </div>
@@ -643,6 +660,7 @@ function FlowsPanel(): React.JSX.Element {
     const reportRunning = useAppStore((state) => state.reportRunning)
     const tabs = useAppStore((state) => state.tabs)
     const activeTabId = useAppStore((state) => state.activeTabId)
+    const t = useT()
 
     const activeFlowId = tabs.find((tab) => tab.id === activeTabId && tab.kind === 'flow')?.flowId
 
@@ -651,10 +669,11 @@ function FlowsPanel(): React.JSX.Element {
             <div className="tree">
                 {flows.length === 0 && (
                     <div className="empty">
-                        Цепочек пока нет.
+                        {t('No flows yet.')}
                         <br />
-                        Цепочка выполняет несколько операций подряд и передаёт значения из ответа в
-                        следующий шаг — например, логин, а затем мутацию с полученным токеном.
+                        {t(
+                            'A flow runs several operations in sequence and passes values from a response to the next step — for example, login, then a mutation with the obtained token.',
+                        )}
                     </div>
                 )}
 
@@ -671,7 +690,7 @@ function FlowsPanel(): React.JSX.Element {
                                     event.stopPropagation()
                                     void runFlow(flow.id)
                                 }}
-                                title="Запустить"
+                                title={t('Run')}
                             >
                                 ▶
                             </button>
@@ -684,7 +703,7 @@ function FlowsPanel(): React.JSX.Element {
                                 <div
                                     key={step.stepId}
                                     className="tree__row tree__row--nested"
-                                    title={step.error ?? 'Шаг выполнен'}
+                                    title={step.error ?? t('Step done')}
                                     onClick={() => void openFlowTab(flow.id)}
                                 >
                                     <span
@@ -707,7 +726,7 @@ function FlowsPanel(): React.JSX.Element {
 
             <div className="row" style={{ padding: '0 12px 12px' }}>
                 <button type="button" className="btn" onClick={() => void openFlowTab()}>
-                    + Создать цепочку
+                    {t('+ Create flow')}
                 </button>
                 {flows.length > 0 && (
                     <button
@@ -715,9 +734,9 @@ function FlowsPanel(): React.JSX.Element {
                         className="btn btn--primary"
                         disabled={reportRunning}
                         onClick={() => void runAllFlows()}
-                        title="Smoke-тест: прогнать все цепочки по очереди и показать отчёт"
+                        title={t('Smoke test: run all flows in sequence and show a report')}
                     >
-                        {reportRunning ? 'Выполняется…' : 'Запустить все'}
+                        {reportRunning ? t('Running…') : t('Run all')}
                     </button>
                 )}
             </div>

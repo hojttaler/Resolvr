@@ -8,6 +8,8 @@ import {
 } from '@resolvr/core'
 import { useEffect, useState } from 'react'
 
+import { useT } from '../i18n/index.js'
+import { isModKey, kbd } from '../lib/keys.js'
 import { useAppStore } from '../state/store.js'
 import { CodeEditor } from './editor/CodeEditor.js'
 import { JsonViewer } from './JsonViewer.js'
@@ -19,13 +21,13 @@ export interface IFlowPageProps {
 }
 
 const ASSERT_OPS: Array<{ value: IFlowAssert['op']; label: string; needsValue: boolean }> = [
-    { value: 'exists', label: 'существует', needsValue: false },
-    { value: 'notExists', label: 'отсутствует', needsValue: false },
-    { value: 'eq', label: 'равно', needsValue: true },
-    { value: 'ne', label: 'не равно', needsValue: true },
-    { value: 'contains', label: 'содержит', needsValue: true },
-    { value: 'gt', label: 'больше', needsValue: true },
-    { value: 'lt', label: 'меньше', needsValue: true },
+    { value: 'exists', label: 'exists', needsValue: false },
+    { value: 'notExists', label: 'does not exist', needsValue: false },
+    { value: 'eq', label: 'equals', needsValue: true },
+    { value: 'ne', label: 'not equals', needsValue: true },
+    { value: 'contains', label: 'contains', needsValue: true },
+    { value: 'gt', label: 'greater than', needsValue: true },
+    { value: 'lt', label: 'less than', needsValue: true },
 ]
 
 /**
@@ -55,11 +57,12 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
 
     const [error, setError] = useState<string | undefined>()
     const [busy, setBusy] = useState(false)
+    const t = useT()
 
     // ⌘↩ запускает цепочку так же, как запрос в обычной вкладке.
     useEffect(() => {
         function onKeyDown(event: KeyboardEvent): void {
-            if (event.key === 'Enter' && event.metaKey) {
+            if (event.key === 'Enter' && isModKey(event)) {
                 event.preventDefault()
                 void saveAndRun()
             }
@@ -70,7 +73,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
         return () => window.removeEventListener('keydown', onKeyDown)
     })
 
-    if (!draft) return <div className="empty">Черновик цепочки не найден</div>
+    if (!draft) return <div className="empty">{t('Flow draft not found')}</div>
 
     function setDraft(updater: (current: IFlow) => IFlow): void {
         const current = useAppStore.getState().flowDrafts[props.tabId]
@@ -93,7 +96,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                 ...current.steps,
                 {
                     id: `step-${current.steps.length + 1}-${Math.random().toString(36).slice(2, 6)}`,
-                    name: `Шаг ${current.steps.length + 1}`,
+                    name: t('Step {n}', { n: current.steps.length + 1 }),
                     variables: {},
                     extract: {},
                     assert: [],
@@ -118,7 +121,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
 
     async function persist(): Promise<boolean> {
         if (draft && draft.steps.length === 0) {
-            setError('Добавьте хотя бы один шаг')
+            setError(t('Add at least one step'))
 
             return false
         }
@@ -149,13 +152,13 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
     return (
         <div className="panel flow-page">
             <div className="panel__header">
-                <span className="panel__title">Цепочка</span>
+                <span className="panel__title">{t('Flow')}</span>
                 {run && (
                     <span className={`badge ${run.ok ? 'badge--ok' : 'badge--fail'}`}>
-                        {run.ok ? 'пройдена' : 'упала'} · {run.durationMs} мс
+                        {run.ok ? t('passed') : t('failed')} · {t('{n} ms', { n: run.durationMs })}
                     </span>
                 )}
-                {tab?.dirty && <span className="badge">не сохранено</span>}
+                {tab?.dirty && <span className="badge">{t('not saved')}</span>}
 
                 <span className="panel__spacer" />
 
@@ -166,9 +169,9 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                         onClick={() =>
                             void navigator.clipboard.writeText(linkTo({ flowId: draft.id }) ?? '')
                         }
-                        title="Скопировать ссылку resolvr:// на эту цепочку"
+                        title={t('Copy resolvr:// link to this flow')}
                     >
-                        Ссылка
+                        {t('Link')}
                     </button>
                 )}
 
@@ -178,24 +181,24 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                         className="btn btn--quiet"
                         style={{ color: 'var(--danger)' }}
                         onClick={() => void deleteFlow(draft.id)}
-                        title="Удалить цепочку и закрыть вкладку"
+                        title={t('Delete flow and close the tab')}
                     >
-                        Удалить
+                        {t('Delete')}
                     </button>
                 )}
 
                 <button type="button" className="btn" onClick={() => void persist()}>
-                    Сохранить
+                    {t('Save')}
                 </button>
                 <button
                     type="button"
                     className="btn btn--primary"
                     disabled={busy}
                     onClick={() => void saveAndRun()}
-                    title="Сохранить и запустить (⌘↩)"
+                    title={t('Save and run ({keys})', { keys: kbd('Enter') })}
                 >
-                    {busy ? 'Выполняется…' : 'Запустить'}
-                    {!busy && <kbd className="btn__key">⌘↩</kbd>}
+                    {busy ? t('Running…') : t('Run')}
+                    {!busy && <kbd className="btn__key">{kbd('Enter')}</kbd>}
                 </button>
             </div>
 
@@ -204,7 +207,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                     <input
                         className="input flow-page__title"
                         value={draft.name}
-                        placeholder="Название цепочки"
+                        placeholder={t('Flow name')}
                         onChange={(event) =>
                             setDraft((current) => ({ ...current, name: event.target.value }))
                         }
@@ -221,11 +224,9 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                         не говорит, зачем цепочке шаги и что они дают. */}
                     {draft.steps.length === 0 && (
                         <div className="inspector__hint">
-                            Шаги выполняются по порядку. Значение из ответа шага — например,
-                            токен из логина — извлекается по пути и подставляется в следующие
-                            шаги как <span className="mono">{'{{имя}}'}</span>. Такую цепочку
-                            можно назначить в «Авторизации» окружения: тогда токен будет
-                            обновляться сам.
+                            {t(
+                                'Steps run in order. A value from a step response — for example, a token from login — is extracted by path and substituted into the next steps as {{name}}. Such a flow can be assigned in the environment “Authorization”: the token will then refresh itself.',
+                            )}
                         </div>
                     )}
 
@@ -253,15 +254,14 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                 </div>
 
                 <button type="button" className="btn" onClick={addStep}>
-                    + Шаг
+                    {t('+ Step')}
                 </button>
 
                 {run && Object.keys(run.context).length > 0 && (
                     <div className="flow__summary">
-                        <div className="settings__caption">Итог цепочки</div>
+                        <div className="settings__caption">{t('Flow result')}</div>
                         <div className="inspector__hint">
-                            Значения, извлечённые шагами — они же подставлялись дальше как{' '}
-                            {'{{имя}}'}
+                            {t('Values extracted by steps — they were substituted further as {{name}}')}
                         </div>
                         <JsonViewer value={run.context} defaultExpandDepth={3} />
                         <button
@@ -273,7 +273,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                                 )
                             }
                         >
-                            Скопировать итог
+                            {t('Copy result')}
                         </button>
                     </div>
                 )}
@@ -300,6 +300,7 @@ interface IStepEditorProps {
 }
 
 function StepEditor(props: IStepEditorProps): React.JSX.Element {
+    const t = useT()
     const { step, result } = props
     const schema = useAppStore((state) => state.schema)
     const [showResponse, setShowResponse] = useState(true)
@@ -361,9 +362,9 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                         className={`badge ${
                             result.skipped ? '' : result.ok ? 'badge--ok' : 'badge--fail'
                         }`}
-                        title={result.error ?? 'Шаг выполнен'}
+                        title={result.error ?? t('Step done')}
                     >
-                        {result.skipped ? 'пропущен' : result.ok ? '✓' : '✕'}
+                        {result.skipped ? '—' : result.ok ? '✓' : '✕'}
                         {result.status ? ` ${result.status}` : ''}
                     </span>
                 )}
@@ -373,7 +374,7 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     className="btn btn--quiet btn--icon"
                     onClick={() => props.onMove(-1)}
                     disabled={props.index === 0}
-                    title="Выше"
+                    title={t('Up')}
                 >
                     ↑
                 </button>
@@ -382,7 +383,7 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     className="btn btn--quiet btn--icon"
                     onClick={() => props.onMove(1)}
                     disabled={props.index === props.total - 1}
-                    title="Ниже"
+                    title={t('Down')}
                 >
                     ↓
                 </button>
@@ -390,14 +391,14 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     type="button"
                     className="btn btn--quiet btn--icon"
                     onClick={props.onRemove}
-                    title="Удалить шаг"
+                    title={t('Remove step')}
                 >
                     ×
                 </button>
             </div>
 
             <div className="flow__grid">
-                <label className="field__label">Операция</label>
+                <label className="field__label">{t('Operation')}</label>
                 <select
                     className="select"
                     style={{ maxWidth: 'none' }}
@@ -406,7 +407,7 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                         props.onPatch({ operationRef: event.target.value || undefined })
                     }
                 >
-                    <option value="">— свой запрос ниже —</option>
+                    <option value="">— {t('Custom query')} —</option>
                     {props.collections.map((node) =>
                         node.operations.map((operation) => {
                             const ref = formatOperationRef({
@@ -425,7 +426,7 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
 
                 {!step.operationRef && (
                     <>
-                        <label className="field__label">Запрос</label>
+                        <label className="field__label">{t('Query')}</label>
                         <div className="flow__editor flow__editor--query">
                             <CodeEditor
                                 value={step.query ?? ''}
@@ -437,7 +438,7 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     </>
                 )}
 
-                <label className="field__label">Переменные</label>
+                <label className="field__label">{t('Variables')}</label>
                 <div className="flow__editor">
                     <CodeEditor
                         value={variablesText}
@@ -455,15 +456,15 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                             } catch {
                                 // Незавершённый JSON — обычное состояние во время
                                 // набора: текст сохраняем, ошибку показываем мягко.
-                                props.onError(`Шаг «${step.name}»: переменные — некорректный JSON`)
+                                props.onError(t('Step “{name}”: variables are not valid JSON', { name: step.name }))
                             }
                         }}
                     />
                 </div>
 
                 <label className="field__label">
-                    Извлечь
-                    <div className="inspector__hint">доступно дальше как {'{{имя}}'}</div>
+                    {t('Extract')}
+                    <div className="inspector__hint">{t('available further as {{name}}')}</div>
                 </label>
                 <KeyValueEditor
                     value={step.extract}
@@ -471,11 +472,11 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     keyPlaceholder="token"
                     valuePlaceholder="data.login.accessToken"
                     separator="←"
-                    addLabel="+ Извлечение"
+                    addLabel={t('+ Extraction')}
                     valueSuggestions={payload ? collectPaths(payload) : undefined}
                 />
 
-                <label className="field__label">Проверки</label>
+                <label className="field__label">{t('Checks')}</label>
                 <AssertEditor
                     asserts={step.assert}
                     results={result?.asserts}
@@ -493,14 +494,13 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                         className="btn btn--quiet"
                         onClick={() => setShowResponse((current) => !current)}
                     >
-                        {showResponse ? '▾' : '▸'} Ответ шага
+                        {showResponse ? '▾' : '▸'} {t('Step response')}
                     </button>
 
                     {showResponse && (
                         <>
                             <div className="inspector__hint">
-                                Кнопка ↧ у поля добавляет его путь в «Извлечь», ⌥-клик — в
-                                «Проверки»
+                                {t('The ↧ button next to a field adds its path to “Extract”, Alt-click — to “Checks”')}
                             </div>
                             <div className="flow__response-body">
                                 <JsonViewer
@@ -528,6 +528,7 @@ interface IAssertEditorProps {
 }
 
 function AssertEditor(props: IAssertEditorProps): React.JSX.Element {
+    const t = useT()
     function patch(index: number, patchValue: Partial<IFlowAssert>): void {
         props.onChange(
             props.asserts.map((item, position) =>
@@ -574,7 +575,7 @@ function AssertEditor(props: IAssertEditorProps): React.JSX.Element {
                             >
                                 {ASSERT_OPS.map((item) => (
                                     <option key={item.value} value={item.value}>
-                                        {item.label}
+                                        {t(item.label)}
                                     </option>
                                 ))}
                             </select>
@@ -585,7 +586,7 @@ function AssertEditor(props: IAssertEditorProps): React.JSX.Element {
                         autoCorrect="off"
                         autoCapitalize="off"
                         spellCheck={false}
-                                    placeholder='"u1" или 200'
+                                    placeholder={t('"u1" or 200')}
                                     defaultValue={
                                         assertion.value === undefined
                                             ? ''
@@ -637,7 +638,7 @@ function AssertEditor(props: IAssertEditorProps): React.JSX.Element {
                 className="btn btn--quiet"
                 onClick={() => props.onChange([...props.asserts, { path: 'data.', op: 'exists' }])}
             >
-                + Проверка
+                {t('+ Check')}
             </button>
         </div>
     )
