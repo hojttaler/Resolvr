@@ -10,6 +10,10 @@ on:
     push:
         tags: ['v*']
 
+# Создание релиза и загрузка артефактов требуют права на запись в contents.
+permissions:
+    contents: write
+
 jobs:
     build:
         strategy:
@@ -62,6 +66,7 @@ jobs:
 
             - uses: tauri-apps/tauri-action@v0
               env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   # Ключ подписи обновлений (minisign): `tauri signer generate`.
                   # Секреты репозитория: Settings → Secrets and variables → Actions.
                   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
