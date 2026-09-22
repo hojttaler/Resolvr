@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 — 2026-09-22
+
+- Schema browser: a tab per type with fields, arguments, defaults, deprecations, enum
+  values, implementations and "used in"; type names are links with back/forward history;
+  root fields insert a ready query. The sidebar searches fields across all types and
+  groups the rest by kind.
+- Virtualized response tree: only the visible rows are rendered, so responses with tens of
+  thousands of nodes stay responsive.
+- Import from Postman (Collection v2.1, Environment) and Insomnia (export v4).
+- First launch: "Open the example" creates a workspace on a public countries API with
+  queries, an environment variable and a smoke flow.
+- Environments and endpoints can be added, removed and set as default in workspace
+  settings.
+- README with screenshots and an animated tour.
+
 ## 0.1.1 — 2026-09-21
 
 - Interface language: System / English / Russian (Settings → Appearance). The native
