@@ -12,10 +12,9 @@ import { useAppStore } from '../state/store.js'
  * проверять вёрстку, не поднимая окно и не выполняя реальные запросы.
  */
 const JWT =
-    'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.' +
-    'eyJzdWIiOiAiZGVtb0BleGFtcGxlLmNvbSIsICJyb2xlIjogIkFETUlOIiwgImV4cCI6IDQxMDI0NDQ4MDB9' +
-    'iLCJpYXQiOjE3NTUwMDAwMDAsImV4cCI6MTc1NTAwMzYwMH0.' +
-    'kZ4nQ0mS8pVYb3H2rT9wLxJvA6cEdF1gKmNpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYz'
+    'eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.' +
+    'eyJzdWIiOiAiZGVtb0BleGFtcGxlLmNvbSIsICJyb2xlIjogIkFETUlOIiwgImV4cCI6IDQxMDI0NDQ4MDB9.' +
+    'demo-signature-not-a-real-token'
 
 export const showcaseWorkspace: IWorkspace = {
     id: 'development',
@@ -25,7 +24,7 @@ export const showcaseWorkspace: IWorkspace = {
         {
             id: 'default',
             name: 'Default',
-            url: 'https://api.shop.example/graphql',
+            url: 'https://api.example.dev/graphql',
             headers: {},
             acceptInvalidCerts: false,
         },

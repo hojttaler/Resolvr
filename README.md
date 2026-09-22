@@ -8,8 +8,21 @@ collections live in plain files you can keep in git, environments obtain and ref
 tokens by themselves, and flows turn your requests into smoke tests. A bundled MCP server
 lets Claude Code build collections and run tests with every step narrated in the app.
 
-Русская документация: [docs/README.ru.md](docs/README.ru.md) · installation guide for
-teammates: [docs/INSTALL.md](docs/INSTALL.md).
+Русская документация: [docs/README.ru.md](docs/README.ru.md) · installation guide:
+[docs/INSTALL.md](docs/INSTALL.md).
+
+![Resolvr — query, variables and response](docs/screenshots/hero-dark.png)
+
+<details>
+<summary>More screens: response search, schema browser, flows report, command palette</summary>
+
+![Tour](docs/screenshots/tour.gif)
+
+| Schema browser | Flows report |
+|---|---|
+| ![Schema browser](docs/screenshots/schema-browser.png) | ![Flows report](docs/screenshots/flows-report.png) |
+
+</details>
 
 ## Highlights
 
@@ -23,13 +36,22 @@ teammates: [docs/INSTALL.md](docs/INSTALL.md).
   marked `PROD` and ask before mutations.
 - **Flows as smoke tests** — chain operations, extract values by path, assert on
   responses, run all of them with one click and copy a Markdown report.
-- **Schema tools** — introspection, autocomplete with argument scaffolding, click-to-build
-  operations, schema diff after deploys, freshness indicator.
+- **Schema browser** — every type as a documentation page: fields with arguments and
+  defaults, deprecations, enum values, implementations and "used in"; type names are links
+  with back/forward history. Plus introspection with a freshness indicator, autocomplete
+  that scaffolds arguments, click-to-build operations and schema diff after deploys.
+- **Import** from Postman (collections and environments) and Insomnia exports.
 - **Subscriptions** over `graphql-ws`, response search (⌘F), copy as curl, `resolvr://`
   links to share an exact request with a colleague.
 - **Agent access** — an MCP server on the same core: workspaces, operations, runs, flows,
   schema search. Every call must state its intent; the app shows the full activity log.
 - **macOS-native** — vibrancy, system accent, both themes, overlay title bar.
+
+## Try it in a minute
+
+Open Resolvr and press **Open the example** on the welcome screen: a workspace on a public
+countries API appears with three queries, an environment variable and a smoke flow. Press
+⌘↩ (Ctrl+Enter) to run the first one.
 
 ## Install
 
@@ -52,6 +74,10 @@ pnpm typecheck && pnpm lint && pnpm test   # before pushing
 pnpm install:app                           # build and install into /Applications
 pnpm release                               # universal DMG into dist/
 ```
+
+Screenshots in this README come from the showcase page (`showcase.html`, fixtures only):
+`pnpm --filter @resolvr/desktop shots` renders every screen with Playwright, then
+`python3 scripts/readme-media.py <shots dir>` resizes them and assembles the GIF.
 
 Requirements: Node.js 20+, pnpm 10, Rust stable, Xcode Command Line Tools.
 
