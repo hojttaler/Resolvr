@@ -197,6 +197,11 @@ function useCommands(): ICommand[] {
                         }),
             },
             {
+                id: 'action:import',
+                label: translate('Import from Postman or Insomnia…'),
+                run: () => store.getState().setDialog('import'),
+            },
+            {
                 id: 'action:run-all-flows',
                 label: translate('Run all flows (smoke test)'),
                 hint: translate('the report opens as a tab'),

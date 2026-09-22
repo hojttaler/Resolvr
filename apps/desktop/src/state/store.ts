@@ -19,8 +19,11 @@ import {
     type ICollection,
     FlowSchema,
     toSlug,
+    importBundle,
     type IAppLink,
     type IFlow,
+    type IImportBundle,
+    type IImportResult,
     type IFlowReport,
     type IFlowRunResult,
     type IHistoryEntry,
@@ -89,6 +92,7 @@ export type IDialogKind =
     | 'settings'
     | 'activity'
     | 'workspaceSettings'
+    | 'import'
 
 /** Действие, ожидающее подтверждения: prod-guard, удаление коллекции и т. п. */
 export interface IConfirmRequest {
@@ -233,6 +237,8 @@ export interface IAppActions {
     dismissConfirm(): void
 
     createCollection(name: string): Promise<void>
+    /** Записывает распознанный экспорт Postman/Insomnia в текущий workspace. */
+    importFromBundle(bundle: IImportBundle): Promise<IImportResult>
     renameCollection(collectionId: string, name: string): Promise<void>
     deleteCollection(collectionId: string): Promise<void>
     /** Перенос или переименование операции; открытые вкладки следуют за ней. */
@@ -1349,6 +1355,19 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const context = await getAppContext()
         await context.workspaces.createCollection(workspace.id, name)
         await get().reloadTree()
+    },
+
+    async importFromBundle(bundle) {
+        const { workspace } = get()
+        if (!workspace) throw new Error(t('Create a workspace first'))
+
+        const context = await getAppContext()
+        const result = await importBundle(context.workspaces, workspace.id, bundle)
+
+        set({ workspace: await context.tokens.attach(await context.workspaces.getWorkspace(workspace.id)) })
+        await get().reloadTree()
+
+        return result
     },
 
     async renameCollection(collectionId, name) {

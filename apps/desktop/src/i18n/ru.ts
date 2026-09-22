@@ -489,6 +489,25 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
         'Клик — вставить запрос; правая кнопка — открыть в браузере схемы',
     '+{n} more — open the type': 'ещё {n} — открыть тип',
 
+    // --- импорт ---
+    'Import from Postman or Insomnia…': 'Импорт из Postman или Insomnia…',
+    'Import from Postman or Insomnia': 'Импорт из Postman или Insomnia',
+    'Postman Collection v2.1, Postman Environment or Insomnia export v4. Only GraphQL requests are imported; folders become collections.':
+        'Postman Collection v2.1, Postman Environment или экспорт Insomnia v4. Импортируются только GraphQL-запросы; папки становятся коллекциями.',
+    'Choose file…': 'Выбрать файл…',
+    'This file is not a Postman collection, a Postman environment or an Insomnia export':
+        'Это не коллекция Postman, не окружение Postman и не экспорт Insomnia',
+    '{n} non-GraphQL requests skipped': 'пропущено не-GraphQL запросов: {n}',
+    'Environment values are imported as plain variables. Move tokens to secrets afterwards: right-click a value in a response → “Save to environment variable…”.':
+        'Значения окружений импортируются обычными переменными. Токены потом перенесите в секреты: правая кнопка по значению в ответе → «Сохранить в переменную окружения…».',
+    'Imported': 'Импортировано',
+    'Importing…': 'Импортирую…',
+    'Import': 'Импортировать',
+    'collection|collections': ['коллекция', 'коллекции', 'коллекций'],
+    'operation|operations': ['операция', 'операции', 'операций'],
+    'environment|environments': ['окружение', 'окружения', 'окружений'],
+    'variable|variables': ['переменная', 'переменные', 'переменных'],
+
     // --- подтверждения ---
     'Production': 'Боевое окружение',
     'This will run {what} in environment “{env}”. It changes production data.':

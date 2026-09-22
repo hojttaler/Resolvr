@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { AgentActivity } from './components/AgentActivity.js'
+import { ImportDialog } from './components/ImportDialog.js'
 import { CommandPalette } from './components/CommandPalette.js'
 import {
     CreateWorkspaceDialog,
@@ -185,6 +186,7 @@ export function App(): React.JSX.Element {
             {dialog === 'workspace' && <CreateWorkspaceDialog onClose={() => setDialog('none')} />}
             {dialog === 'settings' && <SettingsDialog onClose={() => setDialog('none')} />}
             {dialog === 'activity' && <AgentActivity onClose={() => setDialog('none')} />}
+            {dialog === 'import' && <ImportDialog onClose={() => setDialog('none')} />}
             {dialog === 'workspaceSettings' && (
                 <WorkspaceSettings onClose={() => setDialog('none')} />
             )}

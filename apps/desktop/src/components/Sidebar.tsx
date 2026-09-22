@@ -161,6 +161,11 @@ export function Sidebar(): React.JSX.Element {
                                         hint: t('rename with right-click'),
                                         run: () => createCollection(freshCollectionName()),
                                     },
+                                    {
+                                        label: t('Import from Postman or Insomnia…'),
+                                        separated: true,
+                                        run: () => setDialog('import'),
+                                    },
                                 ],
                             })
                         }}
@@ -222,6 +227,7 @@ function CollectionsPanel(): React.JSX.Element {
     const deleteOperation = useAppStore((state) => state.deleteOperation)
     const duplicateOperation = useAppStore((state) => state.duplicateOperation)
     const linkTo = useAppStore((state) => state.linkTo)
+    const setDialog = useAppStore((state) => state.setDialog)
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
     const [search, setSearch] = useState('')
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
@@ -362,6 +368,11 @@ function CollectionsPanel(): React.JSX.Element {
                     'Type a query and press {keys} — the collection is created with the first operation.',
                     { keys: kbd('S') },
                 )}
+                <div style={{ marginTop: 12 }}>
+                    <button type="button" className="btn" onClick={() => setDialog('import')}>
+                        {t('Import from Postman or Insomnia…')}
+                    </button>
+                </div>
             </div>
         )
     }

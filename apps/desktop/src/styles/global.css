@@ -2169,3 +2169,19 @@ input[type='checkbox'] {
     background: color-mix(in srgb, var(--syntax-variable) 22%, transparent);
     color: var(--syntax-variable);
 }
+
+/* Предпросмотр импорта. */
+.import-preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+    padding: var(--pad-sm) var(--pad-md);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+}
+
+.import-preview__list {
+    margin: 0;
+    padding-left: 18px;
+    line-height: 1.6;
+}
