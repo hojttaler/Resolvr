@@ -46,7 +46,14 @@ const api = async (path, init = {}) => {
     return response.status === 204 ? undefined : response.json()
 }
 
-const release = await api(`/repos/${repo}/releases/tags/${tag}`)
+// Релиз ищется в списке, а не через `/releases/tags/`: черновик этим
+// маршрутом не находится, а tauri-action создаёт именно черновик.
+const releases = await api(`/repos/${repo}/releases?per_page=100`)
+const release = releases.find((item) => item.tag_name === tag)
+if (!release) {
+    console.error(`✗ релиз с тегом ${tag} не найден`)
+    process.exit(1)
+}
 const assets = release.assets
 
 const platforms = {}
@@ -62,7 +69,14 @@ for (const asset of assets) {
         process.exit(1)
     }
 
-    const signature = await fetch(signatureAsset.browser_download_url).then((response) => response.text())
+    // Ассет скачивается через API: у черновика публичной ссылки ещё нет.
+    const signature = await fetch(signatureAsset.url, {
+        headers: { authorization: `Bearer ${token}`, accept: 'application/octet-stream' },
+    }).then((response) => {
+        if (!response.ok) throw new Error(`${signatureAsset.name} → ${response.status}`)
+
+        return response.text()
+    })
     for (const key of rule.keys) {
         platforms[key] = { signature: signature.trim(), url: asset.browser_download_url }
     }
