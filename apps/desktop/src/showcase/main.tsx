@@ -17,7 +17,7 @@ document.documentElement.setAttribute('data-platform', 'macos')
 
 // Язык и платформа витрины — из адреса: `?lang=en&platform=windows`.
 const showcaseParams = new URLSearchParams(location.search)
-setLanguage(showcaseParams.get('lang') === 'en' ? 'en' : 'ru')
+setLanguage(showcaseParams.get('lang') === 'ru' ? 'ru' : 'en')
 if (showcaseParams.get('platform')) {
     document.documentElement.setAttribute('data-platform', showcaseParams.get('platform') ?? 'macos')
 }
@@ -128,7 +128,7 @@ function StatusBar(): React.JSX.Element {
             <span className="statusbar__dot statusbar__dot--ok" />
             <span>{workspace?.name}</span>
             <span>{t('schema loaded')}</span>
-            <span className="mono">authorization/Products</span>
+            <span className="mono">catalog/Products</span>
             <span className="panel__spacer" style={{ flex: 1 }} />
             <span>{tn(1, 'draft|drafts')}</span>
             <span>{t('layout: {preset}', { preset })}</span>

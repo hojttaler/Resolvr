@@ -17,30 +17,30 @@ const JWT =
     'demo-signature-not-a-real-token'
 
 export const showcaseWorkspace: IWorkspace = {
-    id: 'development',
-    name: 'Development',
+    id: 'shop',
+    name: 'Shop',
     description: '',
     endpoints: [
         {
             id: 'default',
             name: 'Default',
-            url: 'https://api.example.dev/graphql',
+            url: 'https://api.shop.example/graphql',
             headers: {},
             acceptInvalidCerts: false,
         },
     ],
     environments: [
         {
-            id: 'default',
-            name: 'Default',
+            id: 'staging',
+            name: 'Staging',
             production: false,
-            variables: { accessToken: 'keychain://development/default/accessToken' },
+            variables: { accessToken: 'keychain://shop/staging/accessToken' },
             headers: { authorization: 'Bearer {{accessToken}}' },
             auth: { type: 'none' },
             recovery: {
                 flowId: 'sign-in',
                 statuses: [401, 403],
-                messagePatterns: ['authorization', 'access denied'],
+                messagePatterns: ['unauthorized', 'token expired'],
                 maxAttempts: 1,
                 enabled: true,
                 onExpiry: true,
@@ -52,43 +52,48 @@ export const showcaseWorkspace: IWorkspace = {
             tokenSubject: 'demo@example.com',
         },
         {
-            id: 'staging',
-            name: 'Staging',
-            production: false,
+            id: 'production',
+            name: 'Production',
+            production: true,
             variables: {},
             headers: {},
             auth: { type: 'none' },
         },
     ],
     defaultEndpointId: 'default',
-    defaultEnvironmentId: 'default',
+    defaultEnvironmentId: 'staging',
     layout: { preset: 'classic', sizes: {}, sidebarCollapsed: false, sidebarTab: 'collections' },
     createdAt: '2026-08-12T16:32:17.151Z',
     updatedAt: '2026-09-08T10:00:00.000Z',
 }
 
-const QUERY = `query Products($input: ProductFilter!) {
-  products(input: $input) {
-    sessionId
-    device
-    retryAfter
-    timeout
-    cooldown
-    emailCooldown
+const QUERY = `query Products($filter: ProductFilter!, $first: Int = 20) {
+  products(filter: $filter, first: $first) {
+    totalCount
+    edges {
+      node {
+        id
+        name
+        price {
+          amount
+          currency
+        }
+        inStock
+      }
+    }
   }
 }
 `
 
 const VARIABLES = `{
-  "input": {
-    "service": "EXAMPLE",
-    "identity": "demo@example.com",
-    "device": "EMAIL",
-    "type": "REGISTRATION",
-    "captcha": {
-      "clientToken": ""
+  "filter": {
+    "category": "AUDIO",
+    "inStock": true,
+    "priceRange": {
+      "max": 50000
     }
-  }
+  },
+  "first": 20
 }
 `
 
@@ -105,21 +110,24 @@ export function seedShowcase(): void {
         workspaces: [showcaseWorkspace],
         tree: [
             {
-                collection: { id: 'authorization', name: 'Authorization', description: '', order: [], headers: {} },
+                collection: { id: 'catalog', name: 'Catalog', description: '', order: [], headers: {} },
                 operations: [
-                    makeOperation('authorization', 'Products', 'query'),
-                    makeOperation('authorization', 'SignIn', 'query'),
-                    makeOperation('authorization', 'SignIn', 'mutation'),
-                    makeOperation('authorization', 'Me', 'query'),
+                    makeOperation('catalog', 'Products', 'query'),
+                    makeOperation('catalog', 'Product', 'query'),
+                    makeOperation('catalog', 'Categories', 'query'),
+                    makeOperation('catalog', 'UpdatePrice', 'mutation'),
                 ],
             },
             {
-                collection: { id: 'users', name: 'Users', description: '', order: [], headers: {} },
-                operations: [makeOperation('users', 'Me', 'query')],
+                collection: { id: 'orders', name: 'Orders', description: '', order: [], headers: {} },
+                operations: [
+                    makeOperation('orders', 'Orders', 'query'),
+                    makeOperation('orders', 'CreateOrder', 'mutation'),
+                ],
             },
             {
-                collection: { id: 'catalog', name: 'Catalog', description: '', order: [], headers: {} },
-                operations: [makeOperation('catalog', 'Categories', 'query')],
+                collection: { id: 'account', name: 'Account', description: '', order: [], headers: {} },
+                operations: [makeOperation('account', 'Me', 'query'), makeOperation('account', 'SignIn', 'mutation')],
             },
         ],
         flows: [
@@ -128,8 +136,8 @@ export function seedShowcase(): void {
                 name: 'Sign in',
                 description: '',
                 steps: [
-                    { id: 's1', name: 'Шаг 1', operationRef: 'authorization/SignIn', variables: {}, extract: { operationId: 'data.signIn.operationId' }, assert: [], continueOnFailure: false },
-                    { id: 's2', name: 'Шаг 2', operationRef: 'authorization/SignIn', variables: {}, extract: { accessToken: 'data.signIn.accessToken' }, assert: [], continueOnFailure: false },
+                    { id: 's1', name: 'Request code', operationRef: 'account/SignIn', variables: {}, extract: { challengeId: 'data.signIn.challengeId' }, assert: [], continueOnFailure: false },
+                    { id: 's2', name: 'Confirm code', operationRef: 'account/SignIn', variables: {}, extract: { accessToken: 'data.signIn.accessToken' }, assert: [], continueOnFailure: false },
                 ],
             },
         ],
@@ -139,8 +147,8 @@ export function seedShowcase(): void {
             makeHistory('CreateOrder', 200, false, 96, now - 240_000),
         ],
         tabs: [
-            { ...makeTab('tab-1', 'Новый запрос'), dirty: true },
-            { ...makeTab('tab-2', 'Products'), operationRef: 'authorization/Products' },
+            { ...makeTab('tab-1', 'New request'), dirty: true },
+            { ...makeTab('tab-2', 'Products'), operationRef: 'catalog/Products' },
         ],
         activeTabId: 'tab-2',
         contents: {
@@ -158,28 +166,47 @@ export function seedShowcase(): void {
                     headers: { 'content-type': 'application/json' },
                     body: '{}',
                     data: {
-                        signIn: {
-                            accessToken: JWT,
-                            refreshToken: 'rt-9f2b41ca',
-                            expiresIn: 3600,
-                            params: {},
-                            profile: {
-                                id: 'u-1',
-                                email: 'demo@example.com',
-                                disabledUntil: null,
-                                enabled: true,
-                                reason: null,
-                            },
+                        products: {
+                            totalCount: 128,
+                            edges: [
+                                {
+                                    node: {
+                                        id: 'prod_01HZ',
+                                        name: 'Studio Headphones',
+                                        price: { amount: 24900, currency: 'USD' },
+                                        inStock: true,
+                                        tags: ['audio', 'wired', 'over-ear'],
+                                    },
+                                },
+                                {
+                                    node: {
+                                        id: 'prod_01J2',
+                                        name: 'Desk Speaker Pair',
+                                        price: { amount: 18900, currency: 'USD' },
+                                        inStock: true,
+                                        tags: [],
+                                    },
+                                },
+                                {
+                                    node: {
+                                        id: 'prod_01K7',
+                                        name: 'USB Microphone',
+                                        price: { amount: 9900, currency: 'USD' },
+                                        inStock: false,
+                                        signature: JWT,
+                                    },
+                                },
+                            ],
                         },
                     },
-                    errors: [{ message: 'Authorization token is not valid', status: 500 }],
+                    errors: [{ message: 'Unauthorized: token expired', path: ['products'], extensions: { code: 'UNAUTHENTICATED' } }],
                     kind: 'query',
                     durationMs: 188,
-                    responseBytes: 85,
+                    responseBytes: 1_412,
                     requestHeaders: { 'content-type': 'application/json' },
                     unresolvedHeaders: ['authorization'],
                     endpointId: 'default',
-                    environmentId: 'default',
+                    environmentId: 'staging',
                 },
             },
         },
@@ -193,8 +220,8 @@ export function seedShowcase(): void {
                     sessionId: 's-showcase',
                     seq: 1,
                     ts: new Date(now - 300_000).toISOString(),
-                    goal: 'Проверить, что логин выдаёт токен и профиль читается по нему',
-                    steps: ['Загрузить схему', 'Выполнить логин', 'Прочитать профиль'],
+                    goal: 'Verify that sign-in returns a token and the catalog is readable with it',
+                    steps: ['Load the schema', 'Sign in', 'Read the catalog'],
                 },
                 entries: [
                     {
@@ -203,13 +230,13 @@ export function seedShowcase(): void {
                         seq: 2,
                         ts: new Date(now - 280_000).toISOString(),
                         tool: 'introspect',
-                        intent: 'Загружаю схему гейтвея, чтобы знать доступные операции',
-                        expectation: 'В схеме есть signIn и signIn',
+                        intent: 'Loading the schema to learn the available operations',
+                        expectation: 'The schema has signIn and products',
                         step: 0,
-                        args: { workspaceId: 'development' },
+                        args: { workspaceId: 'shop' },
                         ok: true,
                         durationMs: 412,
-                        summary: 'схема default, 184 320 символов SDL',
+                        summary: 'schema default, 184,320 characters of SDL',
                         result: { endpointId: 'default', sdlLength: 184_320 },
                         truncated: false,
                     },
@@ -219,12 +246,12 @@ export function seedShowcase(): void {
                         seq: 3,
                         ts: new Date(now - 240_000).toISOString(),
                         tool: 'run',
-                        intent: 'Выполняю логин и забираю accessToken',
+                        intent: 'Signing in and taking the accessToken',
                         step: 1,
-                        args: { workspaceId: 'development', ref: 'authorization/SignIn' },
+                        args: { workspaceId: 'shop', ref: 'account/SignIn' },
                         ok: true,
                         durationMs: 188,
-                        summary: 'HTTP 200, успех, 188 мс',
+                        summary: 'HTTP 200, ok, 188 ms',
                         result: { ok: true, status: 200, data: { signIn: { accessToken: JWT } } },
                         truncated: false,
                     },
@@ -233,7 +260,7 @@ export function seedShowcase(): void {
                         sessionId: 's-showcase',
                         seq: 4,
                         ts: new Date(now - 230_000).toISOString(),
-                        text: 'Токен получен и подставляется в заголовок; перехожу к чтению профиля',
+                        text: 'Token obtained and substituted into the header; moving on to the catalog',
                         step: 1,
                     },
                     {
@@ -242,13 +269,13 @@ export function seedShowcase(): void {
                         seq: 5,
                         ts: new Date(now - 200_000).toISOString(),
                         tool: 'operation_get',
-                        intent: 'Читаю операцию, которой нет — проверяю поведение на ошибке',
+                        intent: 'Reading an operation that does not exist — checking the error path',
                         step: 2,
-                        args: { workspaceId: 'development', ref: 'users/missing' },
+                        args: { workspaceId: 'shop', ref: 'catalog/missing' },
                         ok: false,
                         durationMs: 4,
-                        summary: 'ошибка: OPERATION_NOT_FOUND',
-                        error: 'Операция "users/missing" не найдена',
+                        summary: 'error: OPERATION_NOT_FOUND',
+                        error: 'Operation "catalog/missing" not found',
                         truncated: false,
                     },
                 ],
@@ -284,11 +311,11 @@ function makeTab(id: string, title: string): ITabState {
     return {
         id,
         kind: 'operation',
-        workspaceId: 'development',
+        workspaceId: 'shop',
         title,
         dirty: false,
         pinned: false,
-        environmentId: 'default',
+        environmentId: 'staging',
         endpointId: 'default',
         queryCursor: { anchor: 0, head: 0, scrollTop: 0 },
         variablesCursor: { anchor: 0, head: 0, scrollTop: 0 },
@@ -307,9 +334,9 @@ function makeHistory(
     return {
         id: `${name}-${at}`,
         ts: new Date(at).toISOString(),
-        workspaceId: 'development',
+        workspaceId: 'shop',
         endpointId: 'default',
-        environmentId: 'default',
+        environmentId: 'staging',
         operationName: name,
         kind: 'query' as const,
         query: QUERY,
@@ -334,8 +361,8 @@ export function seedReport(): void {
             {
                 id: tabId,
                 kind: 'report',
-                workspaceId: 'development',
-                title: 'Прогон цепочек',
+                workspaceId: 'shop',
+                title: 'Flows run',
                 dirty: false,
                 pinned: false,
                 queryCursor: { anchor: 0, head: 0, scrollTop: 0 },
@@ -349,8 +376,8 @@ export function seedReport(): void {
             [tabId]: {
                 startedAt: new Date(Date.now() - 90_000).toISOString(),
                 finishedAt: new Date().toISOString(),
-                environmentId: 'default',
-                environmentName: 'Default',
+                environmentId: 'staging',
+                environmentName: 'Staging',
                 entries: [
                     {
                         flowId: 'sign-in',
@@ -361,23 +388,23 @@ export function seedReport(): void {
                             durationMs: 412,
                             context: { accessToken: 'eyJ…' },
                             steps: [
-                                { stepId: 's1', name: 'SignIn', ok: true, skipped: false, status: 200, durationMs: 210, asserts: [], extracted: {} },
-                                { stepId: 's2', name: 'SignIn', ok: true, skipped: false, status: 200, durationMs: 202, asserts: [], extracted: { accessToken: 'eyJ…' } },
+                                { stepId: 's1', name: 'Request code', ok: true, skipped: false, status: 200, durationMs: 210, asserts: [], extracted: {} },
+                                { stepId: 's2', name: 'Confirm code', ok: true, skipped: false, status: 200, durationMs: 202, asserts: [], extracted: { accessToken: 'eyJ…' } },
                             ],
                         },
                     },
                     {
-                        flowId: 'profile-smoke',
-                        flowName: 'Profile smoke',
+                        flowId: 'catalog-smoke',
+                        flowName: 'Catalog smoke',
                         run: {
-                            flowId: 'profile-smoke',
+                            flowId: 'catalog-smoke',
                             ok: false,
                             durationMs: 188,
                             context: {},
                             steps: [
                                 {
                                     stepId: 's1',
-                                    name: 'Me',
+                                    name: 'Products',
                                     ok: false,
                                     skipped: false,
                                     status: 200,
@@ -392,7 +419,7 @@ export function seedReport(): void {
                                         },
                                     ],
                                 },
-                                { stepId: 's2', name: 'Categories', ok: false, skipped: true, durationMs: 0, asserts: [], extracted: {} },
+                                { stepId: 's2', name: 'Orders', ok: false, skipped: true, durationMs: 0, asserts: [], extracted: {} },
                             ],
                         },
                     },
@@ -404,14 +431,14 @@ export function seedReport(): void {
 
 /** Схема витрины — небольшая, но со всеми родами типов для браузера схемы. */
 export const SHOWCASE_SCHEMA = buildSchema(`
-    "Пользователь платформы."
+    "A registered customer."
     type User implements Node {
         id: ID!
-        "Адрес электронной почты; уникален в пределах сервиса."
+        "Email address; unique within the shop."
         email: String!
         role: Role!
         profile: Profile
-        "Заказы пользователя, новые первыми."
+        "Orders of the user, newest first."
         orders(first: Int = 20, after: String, status: OrderStatus): OrderConnection!
         legacyName: String @deprecated(reason: "Используйте profile.displayName")
     }
@@ -420,26 +447,31 @@ export const SHOWCASE_SCHEMA = buildSchema(`
     type Order implements Node { id: ID!, status: OrderStatus!, total: Money!, user: User! }
     type OrderConnection { edges: [OrderEdge!]!, totalCount: Int! }
     type OrderEdge { node: Order!, cursor: String! }
-    "Денежная сумма в минимальных единицах валюты."
+    "Amount in the smallest currency unit."
     type Money { amount: Int!, currency: Currency! }
     enum Role { ADMIN, MANAGER, USER }
     enum OrderStatus { NEW, PAID, SHIPPED, CANCELLED }
     enum Currency { USD, EUR, RUB }
-    input ProductFilter { service: String!, identity: String!, device: DeviceKind!, type: String! }
-    enum DeviceKind { EMAIL, SMS }
-    type ProductsResult { sessionId: ID!, retryAfter: Int, cooldown: Int }
+    input ProductFilter { category: String, inStock: Boolean, priceRange: PriceRange }
+    input PriceRange { min: Int, max: Int }
+    type Product { id: ID!, name: String!, price: Money!, inStock: Boolean!, tags: [String!]! }
+    type ProductConnection { edges: [ProductEdge!]!, totalCount: Int! }
+    type ProductEdge { node: Product!, cursor: String! }
+    type SignInResult { accessToken: String!, expiresIn: Int! }
     union SearchResult = User | Order
     type Query {
-        "Текущий пользователь по токену."
+        "The current user for the token."
         me: User
         user(id: ID!): User
         users(role: Role, first: Int = 50): [User!]!
         search(query: String!, limit: Int = 10): [SearchResult!]!
         order(id: ID!): Order
+        "Catalog with filters and cursor pagination."
+        products(filter: ProductFilter!, first: Int = 20, after: String): ProductConnection!
     }
     type Mutation {
-        products(input: ProductFilter!): ProductsResult!
-        signIn(sessionId: ID!, code: String!): User!
+        signIn(email: String!, password: String!): SignInResult!
+        createOrder(productIds: [ID!]!): Order!
         cancelOrder(id: ID!, reason: String): Order!
     }
     type Subscription { orderUpdated(userId: ID!): Order! }
@@ -476,6 +508,10 @@ export function seedBigResponse(): void {
                     headers: { 'content-type': 'application/json' },
                     body: '',
                     data: { users: items },
+                    // Плашки над деревом — проверка, что смещение виртуального
+                    // списка учитывает их высоту.
+                    errors: [{ message: 'Partial data: 3 users could not be loaded' }],
+                    unresolvedHeaders: ['x-trace'],
                     kind: 'query',
                     durationMs: 812,
                     responseBytes: 1_400_000,

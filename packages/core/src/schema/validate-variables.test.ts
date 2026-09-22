@@ -8,7 +8,7 @@ const schema = buildSchema(`
 
     input Captcha { clientToken: String! }
 
-    input ProductFilter {
+    input SignInInput {
         service: String!
         identity: String!
         device: Device!
@@ -19,11 +19,11 @@ const schema = buildSchema(`
     type Result { sessionId: ID! }
 
     type Query {
-        signIn(input: ProductFilter!, tags: [String!]): Result!
+        signIn(input: SignInInput!, tags: [String!]): Result!
     }
 `)
 
-const QUERY = 'query Send($input: ProductFilter!, $tags: [String!]) { signIn(input: $input, tags: $tags) { sessionId } }'
+const QUERY = 'query Send($input: SignInInput!, $tags: [String!]) { signIn(input: $input, tags: $tags) { sessionId } }'
 
 describe('validateVariables', () => {
     it('не находит проблем в корректных переменных', () => {
@@ -42,7 +42,7 @@ describe('validateVariables', () => {
         expect(problems).toEqual([
             {
                 path: 'input',
-                message: 'обязательная переменная не заполнена (ProductFilter!)',
+                message: 'обязательная переменная не заполнена (SignInInput!)',
                 severity: 'error',
             },
         ])

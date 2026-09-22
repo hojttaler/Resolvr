@@ -13,13 +13,13 @@ const schema = buildSchema(`
         SMS
     }
 
-    input ProductFilter {
+    input SignInInput {
         service: String!
         identity: String!
         device: Device!
     }
 
-    type ProductsResult {
+    type SignInResult {
         sessionId: ID!
         timeout: Int!
     }
@@ -30,7 +30,7 @@ const schema = buildSchema(`
     }
 
     type Query {
-        products(input: ProductFilter!): ProductsResult!
+        signIn(input: SignInInput!): SignInResult!
         user(id: ID!): User
         me: User
         search(term: String, limit: Int = 10): [User!]!
@@ -80,23 +80,23 @@ async function completeField(harness: IHarness, at: number, field: string): Prom
 
 describe('autoArguments', () => {
     it('подставляет обязательный аргумент и объявляет переменную', async () => {
-        const doc = 'query Products {\n  \n}\n'
+        const doc = 'query SignIn {\n  \n}\n'
         const harness = createHarness(doc)
 
-        await completeField(harness, doc.indexOf('\n  \n') + 3, 'products')
+        await completeField(harness, doc.indexOf('\n  \n') + 3, 'signIn')
 
         expect(harness.view.state.doc.toString()).toContain(
-            'query Products($input: ProductFilter!)',
+            'query SignIn($input: SignInInput!)',
         )
-        expect(harness.view.state.doc.toString()).toContain('products(input: $input)')
+        expect(harness.view.state.doc.toString()).toContain('signIn(input: $input)')
         harness.view.destroy()
     })
 
     it('отдаёт скелет значений для новых переменных', async () => {
-        const doc = 'query Products {\n  \n}\n'
+        const doc = 'query SignIn {\n  \n}\n'
         const harness = createHarness(doc)
 
-        await completeField(harness, doc.indexOf('\n  \n') + 3, 'products')
+        await completeField(harness, doc.indexOf('\n  \n') + 3, 'signIn')
 
         expect(harness.onVariablesAdded).toHaveBeenCalledWith({
             input: { service: '', identity: '', device: 'EMAIL' },
@@ -108,10 +108,10 @@ describe('autoArguments', () => {
         const doc = 'query Mixed($id: ID!) {\n  user(id: $id) {\n    id\n  }\n  \n}\n'
         const harness = createHarness(doc)
 
-        await completeField(harness, doc.lastIndexOf('\n  \n') + 3, 'products')
+        await completeField(harness, doc.lastIndexOf('\n  \n') + 3, 'signIn')
 
         expect(harness.view.state.doc.toString()).toContain(
-            'query Mixed($id: ID!, $input: ProductFilter!)',
+            'query Mixed($id: ID!, $input: SignInInput!)',
         )
         harness.view.destroy()
     })
@@ -120,9 +120,9 @@ describe('autoArguments', () => {
         const doc = '{\n  \n}\n'
         const harness = createHarness(doc)
 
-        await completeField(harness, doc.indexOf('\n  \n') + 3, 'products')
+        await completeField(harness, doc.indexOf('\n  \n') + 3, 'signIn')
 
-        expect(harness.view.state.doc.toString()).toContain('query ($input: ProductFilter!) {')
+        expect(harness.view.state.doc.toString()).toContain('query ($input: SignInInput!) {')
         harness.view.destroy()
     })
 
@@ -149,15 +149,15 @@ describe('autoArguments', () => {
     })
 
     it('переиспользует уже объявленную переменную с тем же именем', async () => {
-        const doc = 'query Reuse($input: ProductFilter!) {\n  \n}\n'
+        const doc = 'query Reuse($input: SignInInput!) {\n  \n}\n'
         const harness = createHarness(doc)
 
-        await completeField(harness, doc.indexOf('\n  \n') + 3, 'products')
+        await completeField(harness, doc.indexOf('\n  \n') + 3, 'signIn')
 
         const text = harness.view.state.doc.toString()
-        expect(text).toContain('products(input: $input)')
+        expect(text).toContain('signIn(input: $input)')
         // Повторного объявления быть не должно — документ остался бы невалидным.
-        expect(text.match(/\$input: ProductFilter!/g)).toHaveLength(1)
+        expect(text.match(/\$input: SignInInput!/g)).toHaveLength(1)
         expect(harness.onVariablesAdded).not.toHaveBeenCalled()
         harness.view.destroy()
     })

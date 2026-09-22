@@ -197,9 +197,32 @@ interface IRowProps {
 function VirtualRows({ rows, rowProps }: { rows: IJsonRow[]; rowProps: IRowProps }): React.JSX.Element {
     const containerRef = useRef<HTMLDivElement>(null)
     const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
+    const [scrollMargin, setScrollMargin] = useState(0)
 
+    // Смещение дерева внутри прокручиваемой панели: над ним лежат плашки и
+    // блок ошибок переменной высоты. `offsetTop` считал бы от positioned-предка,
+    // а не от панели, и окно строк уезжало бы на высоту плашек.
     useLayoutEffect(() => {
-        setScrollElement(findScrollParent(containerRef.current))
+        const container = containerRef.current
+        const parent = findScrollParent(container)
+        setScrollElement(parent)
+        if (!container || !parent) return
+
+        function measure(): void {
+            if (!container || !parent) return
+            const offset =
+                container.getBoundingClientRect().top - parent.getBoundingClientRect().top + parent.scrollTop
+            setScrollMargin(Math.max(0, Math.round(offset)))
+        }
+
+        measure()
+        const observer = new ResizeObserver(measure)
+        observer.observe(parent)
+        for (const sibling of Array.from(parent.querySelectorAll(':scope > * > *'))) {
+            if (sibling !== container && sibling instanceof HTMLElement) observer.observe(sibling)
+        }
+
+        return () => observer.disconnect()
     }, [])
 
     const virtualizer = useVirtualizer({
@@ -207,7 +230,7 @@ function VirtualRows({ rows, rowProps }: { rows: IJsonRow[]; rowProps: IRowProps
         getScrollElement: () => scrollElement,
         estimateSize: () => ESTIMATED_ROW_HEIGHT,
         overscan: 20,
-        scrollMargin: containerRef.current?.offsetTop ?? 0,
+        scrollMargin,
         getItemKey: (index) => rows[index]?.key ?? index,
     })
 

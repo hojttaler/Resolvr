@@ -13,8 +13,8 @@ const OUT = process.env.SHOTS_DIR ?? '/tmp/gqlai-shots'
 const SCREENS = [
     { name: 'main-dark', query: '?theme=dark' },
     { name: 'main-light', query: '?theme=light' },
-    { name: 'main-en-windows', query: '?theme=dark&lang=en&platform=windows' },
-    { name: 'settings-en', query: '?screen=settings&theme=dark&lang=en' },
+    { name: 'main-ru', query: '?theme=dark&lang=ru' },
+    { name: 'main-windows', query: '?theme=dark&platform=windows' },
     { name: 'search', query: '?screen=search&theme=dark' },
     { name: 'search-light', query: '?screen=search&theme=light' },
     { name: 'palette', query: '?screen=palette&theme=dark' },
@@ -50,11 +50,28 @@ for (const screen of SCREENS) {
     if (screen.name === 'big-response') {
         // Массив свёрнут автоматически (больше 100 элементов): раскрываем и
         // проверяем, что в DOM попало лишь окно, а не все 20 000 объектов.
-        await page.locator('.json-row--clickable').nth(1).click()
+        await page.locator('.json-row--clickable', { hasText: 'users' }).first().click()
         await page.waitForTimeout(200)
         const rows = await page.locator('.json-row').count()
         console.log(`виртуализация: ${rows} строк в DOM после раскрытия 20 000 элементов`)
         if (rows > 1000) console.error('ВИРТУАЛИЗАЦИЯ НЕ РАБОТАЕТ: слишком много строк в DOM')
+        if (rows < 30) console.error('ВИРТУАЛИЗАЦИЯ: массив не раскрылся — проверка не состоялась')
+
+        // Прокрутка в конец: последняя строка дерева должна оказаться на экране
+        // внутри панели — иначе смещение списка посчитано неверно.
+        const panel = page.locator('.panel__content').last()
+        await panel.evaluate((element) => {
+            element.scrollTop = element.scrollHeight
+        })
+        await page.waitForTimeout(300)
+        const closing = page.locator('.json-viewer .json-row').last()
+        const box = await closing.boundingBox()
+        const panelBox = await panel.boundingBox()
+        const text = (await closing.textContent())?.trim()
+        const inside = box && panelBox && box.y >= panelBox.y - 1 && box.y + box.height <= panelBox.y + panelBox.height + 1
+        console.log(`конец дерева: «${text}» ${inside ? 'виден в панели' : 'ВНЕ ПАНЕЛИ'} (y=${Math.round(box?.y ?? -1)})`)
+        if (!inside || text !== '}') console.error('ВИРТУАЛИЗАЦИЯ: конец дерева не на месте')
+        await page.screenshot({ path: `${OUT}/big-response-end.png` })
     }
     // Редакторы и панели доводят раскладку после первого кадра.
     await page.waitForTimeout(700)
