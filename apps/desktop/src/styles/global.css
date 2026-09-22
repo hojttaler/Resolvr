@@ -2185,3 +2185,19 @@ input[type='checkbox'] {
     padding-left: 18px;
     line-height: 1.6;
 }
+
+.onboarding {
+    max-width: 460px;
+}
+
+.onboarding__title {
+    font-size: 15px;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.onboarding__actions {
+    margin-top: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+}

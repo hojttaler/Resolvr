@@ -19,6 +19,8 @@ import {
     type ICollection,
     FlowSchema,
     toSlug,
+    createDemoWorkspace,
+    DEMO_WORKSPACE_ID,
     importBundle,
     type IAppLink,
     type IFlow,
@@ -192,6 +194,8 @@ export interface IAppActions {
     reloadTree(): Promise<void>
     selectWorkspace(workspaceId: string): Promise<void>
     createWorkspace(name: string, endpointUrl: string): Promise<void>
+    /** Создаёт демо-workspace на публичном API и открывает первую операцию. */
+    openDemoWorkspace(): Promise<void>
 
     openTab(input?: { operationRef?: string; title?: string; query?: string }): Promise<void>
     /** Открывает редактор цепочки вкладкой; без `flowId` — новую цепочку. */
@@ -494,6 +498,19 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         set({ workspaces: await context.workspaces.listWorkspaces() })
         await get().selectWorkspace(workspace.id)
         await get().refreshSchema()
+    },
+
+    async openDemoWorkspace() {
+        const context = await getAppContext()
+        const exists = get().workspaces.some((item) => item.id === DEMO_WORKSPACE_ID)
+        if (!exists) {
+            await createDemoWorkspace(context.workspaces)
+            set({ workspaces: await context.workspaces.listWorkspaces() })
+        }
+
+        await get().selectWorkspace(DEMO_WORKSPACE_ID)
+        await get().refreshSchema()
+        await get().openTab({ operationRef: 'countries/Continents' })
     },
 
     async openTab(input = {}) {
@@ -1358,10 +1375,17 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     },
 
     async importFromBundle(bundle) {
-        const { workspace } = get()
-        if (!workspace) throw new Error(t('Create a workspace first'))
-
         const context = await getAppContext()
+        let workspace = get().workspace
+
+        // Импорт до первого workspace: создаём его сразу, эндпоинт человек
+        // впишет в настройках — форма с URL здесь только мешала бы.
+        if (!workspace) {
+            workspace = await context.workspaces.createWorkspace({ name: 'Imported' })
+            set({ workspaces: await context.workspaces.listWorkspaces() })
+            await get().selectWorkspace(workspace.id)
+        }
+
         const result = await importBundle(context.workspaces, workspace.id, bundle)
 
         set({ workspace: await context.tokens.attach(await context.workspaces.getWorkspace(workspace.id)) })

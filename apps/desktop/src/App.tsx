@@ -195,20 +195,36 @@ export function App(): React.JSX.Element {
 }
 
 function Onboarding({ onCreate }: { onCreate: () => void }): React.JSX.Element {
+    const openDemoWorkspace = useAppStore((state) => state.openDemoWorkspace)
+    const setDialog = useAppStore((state) => state.setDialog)
+    const [busy, setBusy] = useState(false)
     const t = useT()
 
     return (
         <div className="app__body" style={{ alignItems: 'center', justifyContent: 'center' }}>
-            <div className="empty" style={{ maxWidth: 420 }}>
-                <div style={{ fontSize: 15, color: 'var(--text-primary)', marginBottom: 8 }}>
-                    {t('Welcome to Resolvr')}
-                </div>
+            <div className="empty onboarding">
+                <div className="onboarding__title">{t('Welcome to Resolvr')}</div>
                 {t(
                     'Create a workspace: a name and the GraphQL endpoint URL. The schema is fetched by introspection.',
                 )}
-                <div style={{ marginTop: 16 }}>
+                <div className="row onboarding__actions">
                     <button type="button" className="btn btn--primary" onClick={onCreate}>
                         {t('Create workspace')}
+                    </button>
+                    <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => {
+                            setBusy(true)
+                            void openDemoWorkspace().finally(() => setBusy(false))
+                        }}
+                        title={t('A public countries API: a collection, an environment variable and a smoke flow')}
+                    >
+                        {busy ? t('Opening…') : t('Open the example')}
+                    </button>
+                    <button type="button" className="btn btn--quiet" onClick={() => setDialog('import')}>
+                        {t('Import from Postman or Insomnia…')}
                     </button>
                 </div>
             </div>

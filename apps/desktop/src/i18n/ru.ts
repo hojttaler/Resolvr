@@ -538,6 +538,10 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
     'Create a workspace: a name and the GraphQL endpoint URL. The schema is fetched by introspection.':
         'Создайте workspace: название и URL GraphQL-эндпоинта. Схема подтянется интроспекцией.',
     'Create workspace': 'Создать workspace',
+    'Open the example': 'Открыть пример',
+    'Opening…': 'Открываю…',
+    'A public countries API: a collection, an environment variable and a smoke flow':
+        'Публичный API стран: коллекция, переменная окружения и smoke-цепочка',
 
     // --- множественное число: формы 1 / 2 / 5 ---
     'error|errors': ['ошибка', 'ошибки', 'ошибок'],
