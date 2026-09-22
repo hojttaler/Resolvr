@@ -13,6 +13,10 @@
   queries, an environment variable and a smoke flow.
 - Environments and endpoints can be added, removed and set as default in workspace
   settings.
+- History entries open with their response (body stored up to 512 KB) and are labelled by
+  the saved operation name; clicking a saved operation focuses its existing tab.
+- Performance: pooled HTTP connections (no TLS handshake per request), parallel reads of
+  collections and drafts, fewer re-renders while typing, appended history writes.
 - README with screenshots and an animated tour.
 
 ## 0.1.1 — 2026-09-21
