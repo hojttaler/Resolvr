@@ -450,6 +450,14 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
     'Variables must be a JSON object': 'Переменные должны быть JSON-объектом',
     'Variables: invalid JSON — {error}': 'Переменные: некорректный JSON — {error}',
 
+    'New environment': 'Новое окружение',
+    'New endpoint': 'Новый эндпоинт',
+    'Make default': 'Сделать основным',
+    'Delete environment': 'Удалить окружение',
+    'Delete endpoint': 'Удалить эндпоинт',
+    '+ Environment': '+ Окружение',
+    '+ Endpoint': '+ Эндпоинт',
+
     // --- подтверждения ---
     'Production': 'Боевое окружение',
     'This will run {what} in environment “{env}”. It changes production data.':

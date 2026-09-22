@@ -1,4 +1,4 @@
-import type { IEndpoint, IEnvironment, IWorkspace } from '@resolvr/core'
+import { toSlug, type IEndpoint, type IEnvironment, type IWorkspace } from '@resolvr/core'
 import { useEffect, useState } from 'react'
 
 import { useT } from '../i18n/index.js'
@@ -64,6 +64,92 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
         )
     }
 
+    /** Свободный идентификатор из названия: «Staging» → `staging`, повтор — `staging-2`. */
+    function freshId(name: string, taken: string[]): string {
+        const base = toSlug(name) || 'item'
+        let id = base
+        for (let index = 2; taken.includes(id); index += 1) id = `${base}-${index}`
+
+        return id
+    }
+
+    function addEnvironment(): void {
+        setDraft((current) => {
+            if (!current) return current
+
+            const name = t('New environment')
+            const id = freshId(name, current.environments.map((item) => item.id))
+            const environment: IEnvironment = {
+                id,
+                name,
+                production: false,
+                variables: {},
+                headers: {},
+                auth: { type: 'none' },
+            }
+
+            return {
+                ...current,
+                environments: [...current.environments, environment],
+                defaultEnvironmentId: current.defaultEnvironmentId ?? id,
+            }
+        })
+    }
+
+    function removeEnvironment(id: string): void {
+        setDraft((current) => {
+            if (!current) return current
+
+            const environments = current.environments.filter((item) => item.id !== id)
+
+            return {
+                ...current,
+                environments,
+                defaultEnvironmentId:
+                    current.defaultEnvironmentId === id
+                        ? environments[0]?.id
+                        : current.defaultEnvironmentId,
+            }
+        })
+    }
+
+    function addEndpoint(): void {
+        setDraft((current) => {
+            if (!current) return current
+
+            const name = t('New endpoint')
+            const id = freshId(name, current.endpoints.map((item) => item.id))
+            const endpoint: IEndpoint = {
+                id,
+                name,
+                url: 'https://',
+                headers: {},
+                acceptInvalidCerts: false,
+            }
+
+            return {
+                ...current,
+                endpoints: [...current.endpoints, endpoint],
+                defaultEndpointId: current.defaultEndpointId ?? id,
+            }
+        })
+    }
+
+    function removeEndpoint(id: string): void {
+        setDraft((current) => {
+            if (!current) return current
+
+            const endpoints = current.endpoints.filter((item) => item.id !== id)
+
+            return {
+                ...current,
+                endpoints,
+                defaultEndpointId:
+                    current.defaultEndpointId === id ? endpoints[0]?.id : current.defaultEndpointId,
+            }
+        })
+    }
+
     function patchEndpoint(id: string, patch: Partial<IEndpoint>): void {
         setDraft((current) =>
             current
@@ -118,9 +204,33 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                             })
                                         }
                                     />
-                                    {draft.defaultEnvironmentId === environment.id && (
+                                    {draft.defaultEnvironmentId === environment.id ? (
                                         <span className="badge badge--ok">{t('default')}</span>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="btn btn--quiet"
+                                            onClick={() =>
+                                                setDraft((current) =>
+                                                    current
+                                                        ? { ...current, defaultEnvironmentId: environment.id }
+                                                        : current,
+                                                )
+                                            }
+                                        >
+                                            {t('Make default')}
+                                        </button>
                                     )}
+                                    <button
+                                        type="button"
+                                        className="btn btn--quiet btn--icon"
+                                        disabled={draft.environments.length <= 1}
+                                        onClick={() => removeEnvironment(environment.id)}
+                                        title={t('Delete environment')}
+                                        aria-label={t('Delete environment')}
+                                    >
+                                        ×
+                                    </button>
                                 </div>
 
                                 <div className="flow__grid">
@@ -201,6 +311,12 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                             </section>
                         ))}
 
+                    {tab === 'environments' && (
+                        <button type="button" className="btn" onClick={addEnvironment}>
+                            {t('+ Environment')}
+                        </button>
+                    )}
+
                     {tab === 'endpoints' &&
                         draft.endpoints.map((endpoint) => (
                             <section key={endpoint.id} className="flow__step">
@@ -213,6 +329,33 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                             patchEndpoint(endpoint.id, { name: event.target.value })
                                         }
                                     />
+                                    {draft.defaultEndpointId === endpoint.id ? (
+                                        <span className="badge badge--ok">{t('default')}</span>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="btn btn--quiet"
+                                            onClick={() =>
+                                                setDraft((current) =>
+                                                    current
+                                                        ? { ...current, defaultEndpointId: endpoint.id }
+                                                        : current,
+                                                )
+                                            }
+                                        >
+                                            {t('Make default')}
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        className="btn btn--quiet btn--icon"
+                                        disabled={draft.endpoints.length <= 1}
+                                        onClick={() => removeEndpoint(endpoint.id)}
+                                        title={t('Delete endpoint')}
+                                        aria-label={t('Delete endpoint')}
+                                    >
+                                        ×
+                                    </button>
                                 </div>
 
                                 <div className="flow__grid">
@@ -241,6 +384,12 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                                 </div>
                             </section>
                         ))}
+
+                    {tab === 'endpoints' && (
+                        <button type="button" className="btn" onClick={addEndpoint}>
+                            {t('+ Endpoint')}
+                        </button>
+                    )}
 
                     <div className="inspector__hint">
                         {t(
