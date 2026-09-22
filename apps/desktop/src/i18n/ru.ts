@@ -141,6 +141,7 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
     'Recent runs of {name}': 'Последние запуски {name}',
     'Recent runs': 'Последние запуски',
     'From history': 'Из истории',
+    'Response not stored (too large)': 'Ответ не сохранён (слишком большой)',
     '{n} B': '{n} Б',
     '{n} KB': '{n} КБ',
     '{n} MB': '{n} МБ',

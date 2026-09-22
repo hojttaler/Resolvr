@@ -117,3 +117,32 @@ export function buildResponsePreview(body: string): string {
 
     return collapsed.length > PREVIEW_LIMIT ? `${collapsed.slice(0, PREVIEW_LIMIT)}…` : collapsed
 }
+
+/**
+ * Подпись записи для списков.
+ *
+ * Имя сохранённой операции важнее имени из документа: коллекция называет
+ * запрос так, как его знает команда. У анонимного `{ me { … } }` берётся
+ * первое корневое поле — оно почти всегда и есть смысл запроса.
+ */
+export function historyTitle(entry: Pick<IHistoryEntry, 'operationRef' | 'operationName' | 'query'>): string | undefined {
+    if (entry.operationRef) {
+        const slash = entry.operationRef.indexOf('/')
+
+        return slash >= 0 ? entry.operationRef.slice(slash + 1) : entry.operationRef
+    }
+    if (entry.operationName) return entry.operationName
+
+    return firstRootField(entry.query)
+}
+
+/** Первое поле верхнего уровня: `query { me { id } }` → `me`. */
+export function firstRootField(query: string): string | undefined {
+    const body = query.replace(/#[^\n]*/g, '')
+    const open = body.indexOf('{')
+    if (open < 0) return undefined
+
+    const match = /^\s*(?:\.\.\.\s*)?([A-Za-z_][A-Za-z0-9_]*)/.exec(body.slice(open + 1))
+
+    return match?.[1]
+}

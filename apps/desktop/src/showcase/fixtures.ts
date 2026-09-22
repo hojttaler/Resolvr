@@ -347,6 +347,9 @@ function makeHistory(
         errorCount: ok ? 0 : 1,
         responseBytes: 512,
         responsePreview: ok ? '{"data":{…}}' : '{"errors":[{"message":"Access denied"}]}',
+        responseTruncated: false,
+        responseHeaders: {},
+        requestHeaders: {},
     }
 }
 

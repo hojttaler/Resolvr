@@ -1,10 +1,11 @@
 import { ErrorCodeEnum, ResolvrError } from '../model/errors.js'
-import type {
-    IEndpoint,
-    IEnvironment,
-    IHistoryEntry,
-    IOperationKind,
-    IWorkspace,
+import {
+    HISTORY_BODY_LIMIT,
+    type IEndpoint,
+    type IEnvironment,
+    type IHistoryEntry,
+    type IOperationKind,
+    type IWorkspace,
 } from '../model/schemas.js'
 import type { ISecretStore } from '../ports/secret-store.js'
 import { TokenKeeper } from '../secrets/token-keeper.js'
@@ -293,7 +294,7 @@ export class RunEngine {
         })
 
         const result = this._buildResult(prepared, response)
-        if (!input.skipHistory) await this._writeHistory(input.workspaceId, prepared, result)
+        if (!input.skipHistory) await this._writeHistory(input.workspaceId, prepared, result, input)
 
         return result
     }
@@ -722,6 +723,7 @@ export class RunEngine {
         workspaceId: string,
         prepared: IPreparedRequest,
         result: IRunResult,
+        input: { operationRef?: string },
     ): Promise<void> {
         const entry: IHistoryEntry = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -739,6 +741,13 @@ export class RunEngine {
             errorCount: result.errors?.length ?? 0,
             responseBytes: result.responseBytes,
             responsePreview: buildResponsePreview(result.body),
+            operationRef: input.operationRef,
+            statusText: result.statusText,
+            responseBody:
+                result.body.length <= HISTORY_BODY_LIMIT ? result.body : undefined,
+            responseTruncated: result.body.length > HISTORY_BODY_LIMIT,
+            responseHeaders: result.headers,
+            requestHeaders: result.requestHeaders,
         }
 
         await this._history.append(workspaceId, entry)

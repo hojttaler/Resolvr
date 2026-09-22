@@ -3,6 +3,7 @@ import {
     detectOperationKind,
     formatAppLink,
     formatCurl,
+    historyTitle,
     formatOperationRef,
     maskCurlSecrets,
     parseOperationRef,
@@ -198,6 +199,11 @@ export interface IAppActions {
     openDemoWorkspace(): Promise<void>
 
     openTab(input?: { operationRef?: string; title?: string; query?: string }): Promise<void>
+    /**
+     * Открывает запуск из истории: запрос, переменные и — если тело
+     * сохранилось — сам ответ, как будто запрос только что выполнен.
+     */
+    openHistoryEntry(entry: IHistoryEntry): Promise<void>
     /** Открывает редактор цепочки вкладкой; без `flowId` — новую цепочку. */
     openFlowTab(flowId?: string): Promise<void>
     /**
@@ -527,6 +533,17 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const context = await getAppContext()
         const { workspace } = get()
 
+        // Сохранённая операция открыта не больше одного раза: повторный клик
+        // в коллекции возвращает к её вкладке, а не плодит копии.
+        if (input.operationRef) {
+            const existing = get().tabs.find((tab) => tab.operationRef === input.operationRef)
+            if (existing) {
+                get().activateTab(existing.id)
+
+                return
+            }
+        }
+
         const tabId = `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
         let query = input.query ?? ''
         let variables = '{}'
@@ -640,6 +657,56 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         await get().closeTabs(get().tabs.map((tab) => tab.id))
     },
 
+    async openHistoryEntry(entry) {
+        const title = historyTitle(entry) ?? t('From history')
+        await get().openTab({ query: entry.query, title })
+
+        const tabId = get().activeTabId
+        if (!tabId) return
+
+        get().updateVariables(tabId, `${JSON.stringify(entry.variables, null, 2)}\n`)
+        // Вкладка из истории — не черновик: текст и переменные взяты как есть.
+        set((state) => ({
+            tabs: state.tabs.map((tab) =>
+                tab.id === tabId
+                    ? { ...tab, dirty: false, environmentId: entry.environmentId ?? tab.environmentId, endpointId: entry.endpointId }
+                    : tab,
+            ),
+        }))
+
+        if (entry.responseBody === undefined) return
+
+        let data: unknown
+        let errors: unknown[] | undefined
+        try {
+            const parsed = JSON.parse(entry.responseBody) as { data?: unknown; errors?: unknown[] }
+            data = parsed.data
+            errors = parsed.errors
+        } catch {
+            // Не JSON — покажется как сырое тело.
+        }
+
+        setRun(set, tabId, {
+            status: 'done',
+            events: [],
+            result: {
+                ok: entry.ok,
+                status: entry.status,
+                statusText: entry.statusText ?? '',
+                headers: entry.responseHeaders,
+                body: entry.responseBody,
+                data,
+                errors,
+                kind: entry.kind,
+                durationMs: entry.durationMs,
+                responseBytes: entry.responseBytes,
+                requestHeaders: entry.requestHeaders,
+                endpointId: entry.endpointId,
+                environmentId: entry.environmentId,
+            },
+        })
+    },
+
     async openFlowTab(flowId) {
         const { workspace, tabs, flows } = get()
         if (!workspace) return
@@ -745,10 +812,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         if (workspace?.id !== link.workspaceId) await get().selectWorkspace(link.workspaceId)
 
         if (link.operationRef) {
-            // Уже открытая операция активируется, а не дублируется.
-            const existing = get().tabs.find((tab) => tab.operationRef === link.operationRef)
-            if (existing) get().activateTab(existing.id)
-            else await get().openTab({ operationRef: link.operationRef })
+            await get().openTab({ operationRef: link.operationRef })
         } else if (link.flowId) {
             await get().openFlowTab(link.flowId)
         }

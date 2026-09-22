@@ -460,7 +460,7 @@ function IdleResponse(): React.JSX.Element {
     const tabs = useAppStore((state) => state.tabs)
     const activeTabId = useAppStore((state) => state.activeTabId)
     const contents = useAppStore((state) => state.contents)
-    const openTab = useAppStore((state) => state.openTab)
+    const openHistoryEntry = useAppStore((state) => state.openHistoryEntry)
     const t = useT()
 
     const activeTab = tabs.find((item) => item.id === activeTabId)
@@ -490,12 +490,7 @@ function IdleResponse(): React.JSX.Element {
                                 key={entry.id}
                                 className="idle__row"
                                 title={entry.responsePreview}
-                                onClick={() =>
-                                    void openTab({
-                                        query: entry.query,
-                                        title: entry.operationName ?? t('From history'),
-                                    })
-                                }
+                                onClick={() => void openHistoryEntry(entry)}
                             >
                                 <span className={`badge ${entry.ok ? 'badge--ok' : 'badge--fail'}`}>
                                     {entry.status}

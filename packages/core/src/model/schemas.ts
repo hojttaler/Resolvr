@@ -241,7 +241,21 @@ export const HistoryEntrySchema = z.object({
     responseBytes: z.number().int().default(0),
     /** Начало тела ответа для превью в списке истории. */
     responsePreview: z.string().default(''),
+    /** Сохранённая операция, если запуск был из коллекции. */
+    operationRef: z.string().optional(),
+    statusText: z.string().optional(),
+    /**
+     * Тело ответа с замаскированными секретами — чтобы открыть запуск из
+     * истории вместе с ответом. Хранится до лимита; больше — только превью.
+     */
+    responseBody: z.string().optional(),
+    responseTruncated: z.boolean().default(false),
+    responseHeaders: z.record(z.string(), z.string()).default({}),
+    requestHeaders: z.record(z.string(), z.string()).default({}),
 })
+
+/** Больше этого тело ответа в историю не пишется целиком. */
+export const HISTORY_BODY_LIMIT = 512 * 1024
 
 export const TabCursorSchema = z.object({
     anchor: z.number().int().nonnegative().default(0),

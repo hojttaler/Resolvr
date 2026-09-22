@@ -1,6 +1,7 @@
 import {
     buildOperation,
     formatOperationRef,
+    historyTitle,
     listTypes,
     parseOperationRef,
     searchFields,
@@ -736,7 +737,7 @@ function SchemaPanel(): React.JSX.Element {
 
 function HistoryPanel(): React.JSX.Element {
     const history = useAppStore((state) => state.history)
-    const openTab = useAppStore((state) => state.openTab)
+    const openHistoryEntry = useAppStore((state) => state.openHistoryEntry)
     const t = useT()
 
     if (history.length === 0) {
@@ -749,18 +750,15 @@ function HistoryPanel(): React.JSX.Element {
                 <div
                     key={entry.id}
                     className="tree__row"
-                    onClick={() =>
-                        void openTab({
-                            query: entry.query,
-                            title: entry.operationName ?? t('From history'),
-                        })
-                    }
-                    title={entry.responsePreview}
+                    onClick={() => void openHistoryEntry(entry)}
+                    title={`${new Date(entry.ts).toLocaleString()}\n${entry.responsePreview}${
+                        entry.responseBody === undefined ? `\n${t('Response not stored (too large)')}` : ''
+                    }`}
                 >
                     <span className={`badge ${entry.ok ? 'badge--ok' : 'badge--fail'}`}>
                         {entry.status}
                     </span>
-                    <span className="tree__label">{entry.operationName ?? t('unnamed')}</span>
+                    <span className="tree__label">{historyTitle(entry) ?? t('unnamed')}</span>
                     <span className="badge">{t('{n} ms', { n: Math.round(entry.durationMs) })}</span>
                 </div>
             ))}
