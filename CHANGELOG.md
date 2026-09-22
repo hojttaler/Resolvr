@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 — 2026-09-22
+
+- Fixed "Signature Verification Failed" on update: the release manifest could mix
+  signatures from different CI runs of the same tag. It is now built once, after all
+  builds, from the signatures next to the uploaded files.
+
 ## 0.2.0 — 2026-09-22
 
 - Schema browser: a tab per type with fields, arguments, defaults, deprecations, enum

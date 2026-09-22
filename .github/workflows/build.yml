@@ -80,9 +80,10 @@ jobs:
                   tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
                   releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Resolvr {0}', github.ref_name) || '' }}
                   releaseDraft: true
-                  # latest.json нужен встроенному updater; без него приложение не
-                  # узнает о новой версии.
-                  includeUpdaterJson: true
+                  # Манифест собирает отдельная задача после всех сборок:
+                  # параллельная дозапись одного файла тремя платформами давала
+                  # смесь подписей разных прогонов.
+                  includeUpdaterJson: false
 
             - uses: actions/upload-artifact@v4
               with:
@@ -96,3 +97,20 @@ jobs:
                       apps/desktop/src-tauri/target/**/release/bundle/**/*.sig
                       apps/desktop/src-tauri/target/**/release/bundle/**/*.tar.gz
                   if-no-files-found: ignore
+
+    # Манифест обновления — один раз, из подписей рядом с загруженными файлами.
+    updater-manifest:
+        needs: build
+        if: startsWith(github.ref, 'refs/tags/')
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+
+            - run: node scripts/build-updater-manifest.mjs ${{ github.ref_name }}
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GITHUB_REPOSITORY: ${{ github.repository }}
