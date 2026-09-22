@@ -2013,3 +2013,159 @@ input[type='checkbox'] {
     background: var(--surface-active);
     color: var(--text-primary);
 }
+
+/* ── Браузер схемы ───────────────────────────────────────────────────────── */
+
+.schema-page__body {
+    padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-md);
+    max-width: 960px;
+}
+
+.schema-page__description {
+    margin: 0;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.schema-page__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-xs);
+    flex-wrap: wrap;
+    color: var(--text-secondary);
+}
+
+.schema-page__sdl {
+    max-height: 320px;
+    overflow: auto;
+    padding: var(--pad-sm) var(--pad-md);
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+}
+
+.schema-page__section {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.schema-page__section-head {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-md);
+    margin-bottom: var(--pad-xs);
+}
+
+.schema-page__filter {
+    max-width: 240px;
+    height: 22px;
+}
+
+.schema-page__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pad-xs) var(--pad-sm);
+}
+
+.schema-field {
+    padding: 4px 0;
+    border-bottom: 1px solid var(--separator);
+}
+
+.schema-field--deprecated .schema-field__name {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+}
+
+.schema-field__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    flex-wrap: wrap;
+}
+
+.schema-field__chevron {
+    border: none;
+    background: transparent;
+    padding: 0;
+    width: 14px;
+    color: var(--text-tertiary);
+}
+
+.schema-field__chevron--hidden {
+    visibility: hidden;
+}
+
+.schema-field__name {
+    color: var(--syntax-field);
+}
+
+.schema-field__args {
+    color: var(--text-tertiary);
+    cursor: default;
+}
+
+.schema-field__colon {
+    color: var(--text-tertiary);
+}
+
+.schema-field__type {
+    color: var(--syntax-variable);
+}
+
+.schema-field__doc {
+    padding-left: 20px;
+    font-size: var(--text-size-small);
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+.schema-field__arglist {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--pad-xs) 0 var(--pad-xs) 20px;
+}
+
+.schema-field__arg {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+/* Имя типа как ссылка: выглядит кодом, ведёт себя как переход. */
+.schema-link {
+    border: none;
+    background: transparent;
+    padding: 0 2px;
+    border-radius: 3px;
+    color: var(--syntax-variable);
+    font: inherit;
+    font-family: var(--font-mono);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--syntax-variable) 40%, transparent);
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.schema-link:hover {
+    background: var(--surface-hover);
+    text-decoration-color: var(--syntax-variable);
+}
+
+.badge--kind-object { color: var(--syntax-field); }
+.badge--kind-input { color: var(--warning); }
+.badge--kind-enum { color: var(--syntax-keyword); }
+.badge--kind-interface,
+.badge--kind-union { color: var(--syntax-variable); }
+
+.tab__kind--schema {
+    background: color-mix(in srgb, var(--syntax-variable) 22%, transparent);
+    color: var(--syntax-variable);
+}

@@ -458,6 +458,37 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
     '+ Environment': '+ Окружение',
     '+ Endpoint': '+ Эндпоинт',
 
+    // --- браузер схемы ---
+    'Type “{name}” is not in the schema': 'Типа «{name}» нет в схеме',
+    'Back': 'Назад',
+    'Forward': 'Вперёд',
+    'Copy SDL': 'Скопировать SDL',
+    'Implements': 'Реализует',
+    'Input fields': 'Поля ввода',
+    'Fields': 'Поля',
+    'Filter fields…': 'Фильтр полей…',
+    'Values': 'Значения',
+    'Possible types': 'Возможные типы',
+    'Implemented by': 'Реализуют',
+    'Used in': 'Используется в',
+    'type': 'type',
+    'deprecated': 'устарело',
+    'Insert query': 'Вставить запрос',
+    'required': 'обязательный',
+    'field': 'поле',
+    'argument': 'аргумент',
+    'input field': 'поле ввода',
+    'Objects': 'Объекты',
+    'Inputs': 'Входные типы',
+    'Enums': 'Перечисления',
+    'Interfaces': 'Интерфейсы',
+    'Unions': 'Объединения',
+    'Scalars': 'Скаляры',
+    'Open in schema browser': 'Открыть в браузере схемы',
+    'Click — insert query; right-click — open in schema browser':
+        'Клик — вставить запрос; правая кнопка — открыть в браузере схемы',
+    '+{n} more — open the type': 'ещё {n} — открыть тип',
+
     // --- подтверждения ---
     'Production': 'Боевое окружение',
     'This will run {what} in environment “{env}”. It changes production data.':

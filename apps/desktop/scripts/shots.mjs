@@ -23,6 +23,9 @@ const SCREENS = [
     { name: 'activity', query: '?screen=activity&theme=dark' },
     { name: 'flow', query: '?screen=flow&theme=dark' },
     { name: 'report', query: '?screen=report&theme=dark' },
+    { name: 'schema-user', query: '?screen=schema&type=User&theme=dark' },
+    { name: 'schema-query', query: '?screen=schema&type=Query&theme=light' },
+    { name: 'schema-sidebar', query: '?screen=schema-sidebar&theme=dark' },
     { name: 'save', query: '?screen=save&theme=dark' },
 ]
 

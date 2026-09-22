@@ -249,7 +249,7 @@ export const TabCursorSchema = z.object({
     scrollTop: z.number().nonnegative().default(0),
 })
 
-export const TabKindSchema = z.enum(['operation', 'flow', 'report'])
+export const TabKindSchema = z.enum(['operation', 'flow', 'report', 'schema'])
 
 export const TabStateSchema = z.object({
     id: z.string().min(1),
@@ -265,6 +265,8 @@ export const TabStateSchema = z.object({
     operationRef: z.string().optional(),
     /** Идентификатор цепочки для вкладки-редактора; отсутствует у новой. */
     flowId: z.string().optional(),
+    /** Открытый тип для вкладки-браузера схемы. */
+    schemaType: z.string().optional(),
     endpointId: z.string().optional(),
     environmentId: z.string().optional(),
     /** Черновик отличается от сохранённой операции — показывается точкой на вкладке. */

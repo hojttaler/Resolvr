@@ -415,7 +415,9 @@ export function TabStrip(): React.JSX.Element {
                         ? 'flow'
                         : tab.kind === 'report'
                           ? 'report'
-                          : detectOperationKind(contents[tab.id]?.query ?? '')
+                          : tab.kind === 'schema'
+                            ? 'schema'
+                            : detectOperationKind(contents[tab.id]?.query ?? '')
 
                 return (
                     <div
@@ -432,7 +434,10 @@ export function TabStrip(): React.JSX.Element {
                             if (event.button === 0) activateTab(tab.id)
                         }}
                         onContextMenu={(event) => openMenu(event, tab.id)}
-                        title={tab.operationRef ?? (tab.kind === 'flow' ? t('Flow') : t('Draft'))}
+                        title={
+                            tab.operationRef ??
+                            (tab.kind === 'flow' ? t('Flow') : tab.kind === 'schema' ? t('Schema') : t('Draft'))
+                        }
                     >
                         <span className={`tab__kind tab__kind--${kind}`}>
                             {kind === 'query'
@@ -443,7 +448,9 @@ export function TabStrip(): React.JSX.Element {
                                     ? 'S'
                                     : kind === 'flow'
                                       ? 'F'
-                                      : 'R'}
+                                      : kind === 'schema'
+                                        ? 'T'
+                                        : 'R'}
                         </span>
                         <span className="tab__label">{tab.title}</span>
                         {tab.dirty ? (

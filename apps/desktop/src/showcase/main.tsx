@@ -11,7 +11,7 @@ import { WorkspaceSettings } from '../components/WorkspaceSettings.js'
 import { useAppStore } from '../state/store.js'
 import '../styles/global.css'
 import { setLanguage, tn, useT } from '../i18n/index.js'
-import { seedReport, seedShowcase } from './fixtures.js'
+import { seedReport, seedSchemaBrowser, seedShowcase, SHOWCASE_SCHEMA } from './fixtures.js'
 
 document.documentElement.setAttribute('data-platform', 'macos')
 
@@ -42,6 +42,12 @@ function Showcase(): React.JSX.Element {
         }
         if (screenParam === 'report') {
             seedReport()
+        }
+        if (screenParam === 'schema') {
+            seedSchemaBrowser(showcaseParams.get('type') ?? 'User')
+        }
+        if (screenParam === 'schema-sidebar') {
+            useAppStore.setState({ schema: SHOWCASE_SCHEMA, sidebarTab: 'schema' })
         }
     }, [])
 

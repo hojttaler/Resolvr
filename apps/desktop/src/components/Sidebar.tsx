@@ -1,10 +1,14 @@
 import {
     buildOperation,
     formatOperationRef,
+    listTypes,
     parseOperationRef,
+    searchFields,
     toErrorMessage,
     type ICollection,
     type IOperationKind,
+    type ITypeKind,
+    type ITypeListEntry,
 } from '@resolvr/core'
 import { isObjectType, type GraphQLField, type GraphQLSchema } from 'graphql'
 import { useMemo, useState } from 'react'
@@ -537,12 +541,22 @@ function SchemaPanel(): React.JSX.Element {
     const refreshSchema = useAppStore((state) => state.refreshSchema)
     const replaceActiveQuery = useAppStore((state) => state.replaceActiveQuery)
     const openTab = useAppStore((state) => state.openTab)
+    const openSchemaTab = useAppStore((state) => state.openSchemaTab)
+    const tabs = useAppStore((state) => state.tabs)
     const activeTabId = useAppStore((state) => state.activeTabId)
     const autofillDepth = useAppStore((state) => state.settings.editor.autofillDepth)
     const [search, setSearch] = useState('')
+    const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
     const t = useT()
 
+    const needle = search.trim().toLowerCase()
     const rootFields = useMemo(() => collectRootFields(schema, search), [schema, search])
+    const types = useMemo(() => (schema ? listTypes(schema, search) : []), [schema, search])
+    const fieldHits = useMemo(
+        () => (schema && needle.length > 1 ? searchFields(schema, needle, 30) : []),
+        [schema, needle],
+    )
+    const currentType = tabs.find((tab) => tab.id === activeTabId && tab.kind === 'schema')?.schemaType
 
     if (!schema) {
         return (
@@ -569,6 +583,22 @@ function SchemaPanel(): React.JSX.Element {
         replaceActiveQuery(built.query, built.variables)
     }
 
+    // Типы сгруппированы по роду: объектов больше всего, и без групп список
+    // из тысячи имён не читается.
+    const groups: Array<{ kind: ITypeKind; label: string; entries: ITypeListEntry[] }> = [
+        { kind: 'object', label: t('Objects'), entries: [] },
+        { kind: 'input', label: t('Inputs'), entries: [] },
+        { kind: 'enum', label: t('Enums'), entries: [] },
+        { kind: 'interface', label: t('Interfaces'), entries: [] },
+        { kind: 'union', label: t('Unions'), entries: [] },
+        { kind: 'scalar', label: t('Scalars'), entries: [] },
+    ]
+    const rootNames = new Set(rootFields.map((group) => group.typeName))
+    for (const entry of types) {
+        if (rootNames.has(entry.name)) continue
+        groups.find((group) => group.kind === entry.kind)?.entries.push(entry)
+    }
+
     return (
         <div>
             <div style={{ padding: '8px 12px' }}>
@@ -583,28 +613,111 @@ function SchemaPanel(): React.JSX.Element {
             <div className="tree">
                 {rootFields.map((group) => (
                     <div key={group.kind}>
-                        <div className="tree__row">
+                        <div
+                            className={`tree__row${currentType === group.typeName ? ' tree__row--active' : ''}`}
+                            onClick={() => openSchemaTab(group.typeName)}
+                            title={t('Open in schema browser')}
+                        >
                             <span className={`badge badge--${group.kind}`}>
                                 {group.kind.toUpperCase()}
                             </span>
                             <span className="tree__label">{group.typeName}</span>
+                            <span className="badge">{group.fields.length}</span>
                         </div>
 
-                        {group.fields.map((field) => (
+                        {(needle.length > 0 || openGroups[group.kind] !== false) &&
+                            group.fields.slice(0, needle.length > 0 ? 100 : 40).map((field) => (
+                                <div
+                                    key={`${group.kind}.${field.name}`}
+                                    className="tree__row tree__row--nested"
+                                    onClick={() => void insertOperation(group.kind, field.name)}
+                                    title={`${field.name}: ${field.type.toString()}${
+                                        field.description ? `\n\n${field.description}` : ''
+                                    }\n${t('Click — insert query; right-click — open in schema browser')}`}
+                                    onContextMenu={(event) => {
+                                        event.preventDefault()
+                                        openSchemaTab(group.typeName)
+                                    }}
+                                >
+                                    <span className="tree__label mono">{field.name}</span>
+                                    <span className="badge">{field.type.toString()}</span>
+                                </div>
+                            ))}
+                        {needle.length === 0 && group.fields.length > 40 && (
                             <div
-                                key={`${group.kind}.${field.name}`}
-                                className="tree__row tree__row--nested"
-                                onClick={() => void insertOperation(group.kind, field.name)}
-                                title={`${field.name}: ${field.type.toString()}${
-                                    field.description ? `\n\n${field.description}` : ''
-                                }`}
+                                className="tree__row tree__row--nested inspector__hint"
+                                onClick={() => openSchemaTab(group.typeName)}
                             >
-                                <span className="tree__label mono">{field.name}</span>
-                                <span className="badge">{field.type.toString()}</span>
+                                {t('+{n} more — open the type', { n: group.fields.length - 40 })}
+                            </div>
+                        )}
+                    </div>
+                ))}
+
+                {fieldHits.length > 0 && (
+                    <div>
+                        <div className="tree__row">
+                            <span className="tree__label">{t('Fields')}</span>
+                            <span className="badge">{fieldHits.length}</span>
+                        </div>
+                        {fieldHits.map((hit) => (
+                            <div
+                                key={`${hit.typeName}.${hit.fieldName}`}
+                                className="tree__row tree__row--nested"
+                                onClick={() => openSchemaTab(hit.typeName)}
+                                title={hit.description}
+                            >
+                                <span className="tree__label mono">
+                                    <span className="inspector__hint">{hit.typeName}.</span>
+                                    {hit.fieldName}
+                                </span>
+                                <span className="badge">{hit.type}</span>
                             </div>
                         ))}
                     </div>
-                ))}
+                )}
+
+                {groups
+                    .filter((group) => group.entries.length > 0)
+                    .map((group) => {
+                        const expanded = needle.length > 0 || openGroups[group.kind] === true
+
+                        return (
+                            <div key={group.kind}>
+                                <div
+                                    className="tree__row"
+                                    onClick={() =>
+                                        setOpenGroups((current) => ({
+                                            ...current,
+                                            [group.kind]: !expanded,
+                                        }))
+                                    }
+                                >
+                                    <span className={`tree__chevron${expanded ? ' tree__chevron--open' : ''}`}>
+                                        ▶
+                                    </span>
+                                    <span className="tree__label">{group.label}</span>
+                                    <span className="badge">{group.entries.length}</span>
+                                </div>
+                                {expanded &&
+                                    group.entries.slice(0, 300).map((entry) => (
+                                        <div
+                                            key={entry.name}
+                                            className={`tree__row tree__row--nested${
+                                                currentType === entry.name ? ' tree__row--active' : ''
+                                            }`}
+                                            onClick={() => openSchemaTab(entry.name)}
+                                            title={entry.description}
+                                        >
+                                            <span className="tree__label mono">{entry.name}</span>
+                                            {entry.fieldCount > 0 && (
+                                                <span className="badge">{entry.fieldCount}</span>
+                                            )}
+                                        </div>
+                                    ))}
+                            </div>
+                        )
+                    })}
             </div>
         </div>
     )

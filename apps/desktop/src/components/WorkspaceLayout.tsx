@@ -3,6 +3,7 @@ import { Group, Panel, Separator } from 'react-resizable-panels'
 import { useAppStore } from '../state/store.js'
 import { FlowPage } from './FlowEditor.js'
 import { ReportPage } from './ReportPage.js'
+import { SchemaPage } from './SchemaPage.js'
 import { Inspector } from './Inspector.js'
 import { RequestPane } from './RequestPane.js'
 import { ResponsePane } from './ResponsePane.js'
@@ -43,12 +44,14 @@ function WorkspacePanels(): React.JSX.Element {
 
     // Вкладка-цепочка и вкладка-отчёт занимают всё место запроса и ответа:
     // у них свои шаги со своими ответами, отдельная панель ответа была бы пустой.
-    if (activeTab?.kind === 'flow' || activeTab?.kind === 'report') {
+    if (activeTab?.kind === 'flow' || activeTab?.kind === 'report' || activeTab?.kind === 'schema') {
         const page =
             activeTab.kind === 'flow' ? (
                 <FlowPage tabId={activeTab.id} />
-            ) : (
+            ) : activeTab.kind === 'report' ? (
                 <ReportPage tabId={activeTab.id} />
+            ) : (
+                <SchemaPage tabId={activeTab.id} />
             )
         if (preset === 'focus' || sidebarCollapsed) return page
 

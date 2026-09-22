@@ -1,5 +1,7 @@
 import type { IHistoryEntry, IOperation, ITabState, IWorkspace } from '@resolvr/core'
 
+import { buildSchema } from 'graphql'
+
 import { useAppStore } from '../state/store.js'
 
 /**
@@ -399,4 +401,53 @@ export function seedReport(): void {
             },
         },
     })
+}
+
+/** Схема витрины — небольшая, но со всеми родами типов для браузера схемы. */
+export const SHOWCASE_SCHEMA = buildSchema(`
+    "Пользователь платформы."
+    type User implements Node {
+        id: ID!
+        "Адрес электронной почты; уникален в пределах сервиса."
+        email: String!
+        role: Role!
+        profile: Profile
+        "Заказы пользователя, новые первыми."
+        orders(first: Int = 20, after: String, status: OrderStatus): OrderConnection!
+        legacyName: String @deprecated(reason: "Используйте profile.displayName")
+    }
+    interface Node { id: ID! }
+    type Profile { displayName: String!, avatarUrl: String, locale: String }
+    type Order implements Node { id: ID!, status: OrderStatus!, total: Money!, user: User! }
+    type OrderConnection { edges: [OrderEdge!]!, totalCount: Int! }
+    type OrderEdge { node: Order!, cursor: String! }
+    "Денежная сумма в минимальных единицах валюты."
+    type Money { amount: Int!, currency: Currency! }
+    enum Role { ADMIN, MANAGER, USER }
+    enum OrderStatus { NEW, PAID, SHIPPED, CANCELLED }
+    enum Currency { USD, EUR, RUB }
+    input ProductFilter { service: String!, identity: String!, device: DeviceKind!, type: String! }
+    enum DeviceKind { EMAIL, SMS }
+    type ProductsResult { sessionId: ID!, retryAfter: Int, cooldown: Int }
+    union SearchResult = User | Order
+    type Query {
+        "Текущий пользователь по токену."
+        me: User
+        user(id: ID!): User
+        users(role: Role, first: Int = 50): [User!]!
+        search(query: String!, limit: Int = 10): [SearchResult!]!
+        order(id: ID!): Order
+    }
+    type Mutation {
+        products(input: ProductFilter!): ProductsResult!
+        signIn(sessionId: ID!, code: String!): User!
+        cancelOrder(id: ID!, reason: String): Order!
+    }
+    type Subscription { orderUpdated(userId: ID!): Order! }
+`)
+
+/** Открывает тип в браузере схемы. */
+export function seedSchemaBrowser(typeName: string): void {
+    useAppStore.setState({ schema: SHOWCASE_SCHEMA, schemaFetchedAt: new Date().toISOString() })
+    useAppStore.getState().openSchemaTab(typeName)
 }

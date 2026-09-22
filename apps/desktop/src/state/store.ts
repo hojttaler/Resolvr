@@ -135,6 +135,8 @@ export interface IAppState {
     flowDrafts: Record<string, IFlow>
     /** Отчёты о прогоне всех цепочек по вкладкам-отчётам. */
     reports: Record<string, IFlowReport>
+    /** История переходов браузера схемы по вкладкам. */
+    schemaNav: Record<string, { history: string[]; index: number }>
     /** Идёт прогон всех цепочек; повторный запуск заблокирован. */
     reportRunning: boolean
 
@@ -190,6 +192,14 @@ export interface IAppActions {
     openTab(input?: { operationRef?: string; title?: string; query?: string }): Promise<void>
     /** Открывает редактор цепочки вкладкой; без `flowId` — новую цепочку. */
     openFlowTab(flowId?: string): Promise<void>
+    /**
+     * Открывает тип в браузере схемы. Вкладка одна и переиспользуется:
+     * переходы между типами ведут историю назад/вперёд внутри неё.
+     */
+    openSchemaTab(typeName?: string): void
+    navigateSchema(tabId: string, typeName: string): void
+    schemaGoBack(tabId: string): void
+    schemaGoForward(tabId: string): void
     /** Открывает то, на что указывает ссылка `resolvr://`, переключая workspace. */
     openLink(link: IAppLink): Promise<void>
     /** Ссылка на операцию или цепочку текущего workspace для отправки коллеге. */
@@ -300,6 +310,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     flowDrafts: {},
     reports: {},
     reportRunning: false,
+    schemaNav: {},
     layoutPreset: 'classic',
     layoutSizes: {},
     layouts: {},
@@ -538,12 +549,14 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             const subscriptions = { ...state.subscriptions }
             const flowDrafts = { ...state.flowDrafts }
             const reports = { ...state.reports }
+            const schemaNav = { ...state.schemaNav }
             for (const tabId of closing) {
                 delete contents[tabId]
                 delete runs[tabId]
                 delete subscriptions[tabId]
                 delete flowDrafts[tabId]
                 delete reports[tabId]
+                delete schemaNav[tabId]
             }
 
             // Активной становится ближайшая справа от закрытой, как в браузере:
@@ -561,6 +574,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 subscriptions,
                 flowDrafts,
                 reports,
+                schemaNav,
                 activeTabId: activeClosed ? next?.id : state.activeTabId,
             }
         })
@@ -629,6 +643,65 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         }))
 
         scheduleFlowDraftSave(tabId, get)
+        scheduleSessionSave(get)
+    },
+
+    openSchemaTab(typeName) {
+        const { workspace, tabs, schema } = get()
+        if (!workspace) return
+
+        const target = typeName ?? schema?.getQueryType()?.name ?? 'Query'
+        const existing = tabs.find((tab) => tab.kind === 'schema')
+        if (existing) {
+            get().activateTab(existing.id)
+            if (existing.schemaType !== target) get().navigateSchema(existing.id, target)
+
+            return
+        }
+
+        const tabId = `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+        const tab = TabStateSchema.parse({
+            id: tabId,
+            kind: 'schema',
+            workspaceId: workspace.id,
+            schemaType: target,
+            title: target,
+        })
+
+        set((state) => ({
+            tabs: [...state.tabs, tab],
+            activeTabId: tabId,
+            schemaNav: { ...state.schemaNav, [tabId]: { history: [target], index: 0 } },
+        }))
+        scheduleSessionSave(get)
+    },
+
+    navigateSchema(tabId, typeName) {
+        set((state) => {
+            const current = state.schemaNav[tabId] ?? {
+                history: [state.tabs.find((tab) => tab.id === tabId)?.schemaType ?? typeName],
+                index: 0,
+            }
+            // Переход обрезает «вперёд», как в браузере.
+            const history = [...current.history.slice(0, current.index + 1), typeName]
+
+            return {
+                schemaNav: { ...state.schemaNav, [tabId]: { history, index: history.length - 1 } },
+                tabs: state.tabs.map((tab) =>
+                    tab.id === tabId ? { ...tab, schemaType: typeName, title: typeName } : tab,
+                ),
+            }
+        })
+        scheduleSessionSave(get)
+    },
+
+    schemaGoBack(tabId) {
+        moveSchemaHistory(set, tabId, -1)
+        scheduleSessionSave(get)
+    },
+
+    schemaGoForward(tabId) {
+        moveSchemaHistory(set, tabId, 1)
         scheduleSessionSave(get)
     },
 
@@ -1765,6 +1838,29 @@ function productionConfirm(
         production: true,
         run,
     }
+}
+
+/** Сдвиг по истории браузера схемы; за границы не выходит. */
+function moveSchemaHistory(
+    set: (updater: (state: IAppState) => Partial<IAppState>) => void,
+    tabId: string,
+    delta: -1 | 1,
+): void {
+    set((state) => {
+        const nav = state.schemaNav[tabId]
+        if (!nav) return {}
+
+        const index = nav.index + delta
+        const typeName = nav.history[index]
+        if (typeName === undefined) return {}
+
+        return {
+            schemaNav: { ...state.schemaNav, [tabId]: { ...nav, index } },
+            tabs: state.tabs.map((tab) =>
+                tab.id === tabId ? { ...tab, schemaType: typeName, title: typeName } : tab,
+            ),
+        }
+    })
 }
 
 /** Раскладка активного workspace в форме, пригодной для сессии. */
