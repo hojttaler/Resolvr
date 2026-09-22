@@ -6,7 +6,7 @@ import {
     type ITypeInfo,
     type ITypeUsage,
 } from '@resolvr/core'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { useT } from '../i18n/index.js'
 import { useAppStore } from '../state/store.js'
@@ -37,6 +37,13 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
     const t = useT()
 
     const typeName = tab?.schemaType ?? ''
+
+    // Фильтр полей относится к конкретному типу: при переходе он сбрасывается,
+    // иначе невидимое условие с прошлой страницы прятало бы поля следующей.
+    useEffect(() => {
+        setFilter('')
+    }, [typeName])
+
     const info = useMemo(
         () => (schema ? describeType(schema, typeName) : undefined),
         [schema, typeName],
@@ -77,7 +84,9 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
     const canBack = (nav?.index ?? 0) > 0
     const canForward = nav !== undefined && nav.index < nav.history.length - 1
 
-    const needle = filter.trim().toLowerCase()
+    // Поле фильтра есть только у длинных списков; без поля фильтр не действует.
+    const filterable = info.fields.length > 8
+    const needle = filterable ? filter.trim().toLowerCase() : ''
     const fields = info.fields.filter(
         (field) =>
             needle.length === 0 ||
@@ -166,7 +175,7 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
                             <span className="settings__caption">
                                 {info.kind === 'input' ? t('Input fields') : t('Fields')} · {info.fields.length}
                             </span>
-                            {info.fields.length > 8 && (
+                            {filterable && (
                                 <input
                                     className="input schema-page__filter"
                                     placeholder={t('Filter fields…')}
