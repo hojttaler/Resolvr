@@ -417,7 +417,7 @@ export function TabStrip(): React.JSX.Element {
                           ? 'report'
                           : tab.kind === 'schema'
                             ? 'schema'
-                            : detectOperationKind(contents[tab.id]?.query ?? '')
+                            : cachedOperationKind(contents[tab.id]?.query ?? '')
 
                 return (
                     <div
@@ -529,6 +529,30 @@ export function UpdateBanner(): React.JSX.Element | null {
             )}
         </div>
     )
+}
+
+/**
+ * Род операции по тексту с кэшем.
+ *
+ * Полоса вкладок перерисовывается на каждое нажатие клавиши, и разбирать
+ * GraphQL всех открытых вкладок заново каждый раз незачем: текст меняется
+ * только у одной.
+ */
+const kindCache = new Map<string, ReturnType<typeof detectOperationKind>>()
+const KIND_CACHE_LIMIT = 300
+
+function cachedOperationKind(query: string): ReturnType<typeof detectOperationKind> {
+    const cached = kindCache.get(query)
+    if (cached) return cached
+
+    const kind = detectOperationKind(query)
+    if (kindCache.size >= KIND_CACHE_LIMIT) {
+        const oldest = kindCache.keys().next().value
+        if (oldest !== undefined) kindCache.delete(oldest)
+    }
+    kindCache.set(query, kind)
+
+    return kind
 }
 
 /** Крестик закрытия: SVG вместо символа «×», который в системном шрифте сидит ниже центра. */

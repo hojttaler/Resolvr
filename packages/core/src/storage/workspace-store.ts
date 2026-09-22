@@ -211,20 +211,19 @@ export class WorkspaceStore {
 
     public async listCollections(workspaceId: string): Promise<ICollection[]> {
         const entries = await this._fs.listDir(this._paths.collectionsDir(workspaceId))
-        const collections: ICollection[] = []
+        const collections = await Promise.all(
+            entries
+                .filter((entry) => entry.isDirectory)
+                .map(async (entry) => {
+                    const collection = await readJsonFile(
+                        this._fs,
+                        this._paths.collectionFile(workspaceId, entry.name),
+                        CollectionSchema,
+                    )
 
-        for (const entry of entries) {
-            if (!entry.isDirectory) continue
-
-            const collection = await readJsonFile(
-                this._fs,
-                this._paths.collectionFile(workspaceId, entry.name),
-                CollectionSchema,
-            )
-            collections.push(
-                collection ?? CollectionSchema.parse({ id: entry.name, name: entry.name }),
-            )
-        }
+                    return collection ?? CollectionSchema.parse({ id: entry.name, name: entry.name })
+                }),
+        )
 
         return collections.sort((left, right) => left.name.localeCompare(right.name))
     }
@@ -282,11 +281,13 @@ export class WorkspaceStore {
             .filter((entry) => !entry.isDirectory && entry.name.endsWith(OPERATION_QUERY_SUFFIX))
             .map((entry) => entry.name.slice(0, -OPERATION_QUERY_SUFFIX.length))
 
-        const operations: IOperation[] = []
-        for (const name of names) {
-            const operation = await this._readOperation(workspaceId, collectionId, name)
-            if (operation) operations.push(operation)
-        }
+        // Файлы читаются параллельно: каждое чтение — отдельный вызов в
+        // Tauri, и последовательный обход коллекции на сто операций занимал
+        // заметную долю секунды при каждом обновлении дерева.
+        const read = await Promise.all(
+            names.map((name) => this._readOperation(workspaceId, collectionId, name)),
+        )
+        const operations = read.filter((operation): operation is IOperation => operation !== undefined)
 
         return this._applyCollectionOrder(workspaceId, collectionId, operations)
     }
@@ -419,18 +420,14 @@ export class WorkspaceStore {
 
     public async listFlows(workspaceId: string): Promise<IFlow[]> {
         const entries = await this._fs.listDir(this._paths.flowsDir(workspaceId))
-        const flows: IFlow[] = []
-
-        for (const entry of entries) {
-            if (entry.isDirectory || !entry.name.endsWith(FLOW_SUFFIX)) continue
-
-            const flow = await readJsonFile(
-                this._fs,
-                `${this._paths.flowsDir(workspaceId)}/${entry.name}`,
-                FlowSchema,
-            )
-            if (flow) flows.push(flow)
-        }
+        const read = await Promise.all(
+            entries
+                .filter((entry) => !entry.isDirectory && entry.name.endsWith(FLOW_SUFFIX))
+                .map((entry) =>
+                    readJsonFile(this._fs, `${this._paths.flowsDir(workspaceId)}/${entry.name}`, FlowSchema),
+                ),
+        )
+        const flows = read.filter((flow): flow is IFlow => flow !== undefined)
 
         return flows.sort((left, right) => left.name.localeCompare(right.name))
     }

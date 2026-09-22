@@ -18,6 +18,13 @@ import {
  * убит во время записи» — покрыт: `rename` не оставляет обрезанного файла.
  */
 export class TauriFileSystem implements IFileSystem {
+    /**
+     * Директории, которые уже создавались в этой сессии: черновики и сессия
+     * пишутся каждые триста миллисекунд во время набора, и повторный
+     * `mkdir` перед каждой записью — лишний вызов в Rust.
+     */
+    private readonly _knownDirs = new Set<string>()
+
     public async readText(path: string): Promise<string | undefined> {
         try {
             return await readTextFile(path)
@@ -43,9 +50,10 @@ export class TauriFileSystem implements IFileSystem {
 
     public async appendText(path: string, content: string): Promise<void> {
         await this.ensureDir(parentDir(path))
-        const existing = (await this.readText(path)) ?? ''
 
-        await writeTextFile(path, existing + content)
+        // Дозапись средствами плагина: чтение и полная перезапись файла
+        // истории делали каждый запуск дороже с ростом самого файла.
+        await writeTextFile(path, content, { append: true })
     }
 
     public async exists(path: string): Promise<boolean> {
@@ -57,15 +65,17 @@ export class TauriFileSystem implements IFileSystem {
     }
 
     public async ensureDir(path: string, options?: IWriteOptions): Promise<void> {
-        if (path.length === 0) return
+        if (path.length === 0 || this._knownDirs.has(path)) return
 
         try {
             await mkdir(path, {
                 recursive: true,
                 mode: options?.privateAccess ? 0o700 : undefined,
             })
+            this._knownDirs.add(path)
         } catch {
             // Существующая директория не является ошибкой.
+            this._knownDirs.add(path)
         }
     }
 
@@ -91,6 +101,10 @@ export class TauriFileSystem implements IFileSystem {
     }
 
     public async removeDir(path: string): Promise<void> {
+        for (const known of [...this._knownDirs]) {
+            if (known === path || known.startsWith(`${path}/`)) this._knownDirs.delete(known)
+        }
+
         try {
             await remove(path, { recursive: true })
         } catch {

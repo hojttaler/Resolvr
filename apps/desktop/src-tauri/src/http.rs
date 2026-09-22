@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -38,23 +39,44 @@ pub struct HttpResponseOutput {
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
+/// Клиенты живут всё время работы приложения: у `reqwest::Client` внутри пул
+/// соединений, и новый клиент на каждый запрос означал новый TCP- и
+/// TLS-handshake каждый раз — сотни миллисекунд сверху на любом вызове.
+/// Два экземпляра, потому что приём самоподписанных сертификатов — свойство
+/// клиента, а не запроса; таймаут задаётся на запросе.
+static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static INSECURE_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn client(accept_invalid_certs: bool) -> Result<&'static reqwest::Client, String> {
+    let cell = if accept_invalid_certs { &INSECURE_CLIENT } else { &CLIENT };
+    if let Some(client) = cell.get() {
+        return Ok(client);
+    }
+
+    let built = reqwest::Client::builder()
+        .danger_accept_invalid_certs(accept_invalid_certs)
+        .user_agent(concat!("Resolvr/", env!("CARGO_PKG_VERSION")))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|error| format!("Не удалось создать HTTP-клиент: {error}"))?;
+
+    Ok(cell.get_or_init(|| built))
+}
+
 #[tauri::command]
 pub async fn http_request(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     let started = Instant::now();
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(
-            input.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
-        ))
-        .danger_accept_invalid_certs(input.accept_invalid_certs.unwrap_or(false))
-        .user_agent("Resolvr/0.1")
-        .build()
-        .map_err(|error| format!("Не удалось создать HTTP-клиент: {error}"))?;
+    let client = client(input.accept_invalid_certs.unwrap_or(false))?;
 
     let method = reqwest::Method::from_bytes(input.method.as_bytes())
         .map_err(|_| format!("Неизвестный HTTP-метод: {}", input.method))?;
 
-    let mut request = client.request(method, &input.url);
+    let mut request = client
+        .request(method, &input.url)
+        .timeout(Duration::from_millis(
+            input.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
+        ));
     for (name, value) in &input.headers {
         request = request.header(name, value);
     }

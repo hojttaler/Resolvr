@@ -359,26 +359,34 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             const contents: Record<string, ITabContent> = {}
             const flowDrafts: Record<string, IFlow> = {}
             const reports: Record<string, IFlowReport> = {}
-            for (const tab of allTabs) {
-                if (tab.kind === 'report') {
-                    const report = await context.sessions.readReport(tab.id)
-                    if (report) reports[tab.id] = report
-                    continue
-                }
-                if (tab.kind === 'flow') {
-                    const draft =
-                        (await context.sessions.readFlowDraft(tab.id)) ??
-                        (tab.flowId && tab.workspaceId
-                            ? await context.workspaces.getFlow(tab.workspaceId, tab.flowId).catch(() => undefined)
-                            : undefined)
-                    if (draft) flowDrafts[tab.id] = draft
-                    continue
-                }
+            await Promise.all(
+                allTabs.map(async (tab) => {
+                    if (tab.kind === 'report') {
+                        const report = await context.sessions.readReport(tab.id)
+                        if (report) reports[tab.id] = report
 
-                const query = await context.sessions.readDraftQuery(tab.id)
-                const data = await context.sessions.readDraftData(tab.id)
-                contents[tab.id] = { query, variables: data.variables, headers: data.headers }
-            }
+                        return
+                    }
+                    if (tab.kind === 'flow') {
+                        const draft =
+                            (await context.sessions.readFlowDraft(tab.id)) ??
+                            (tab.flowId && tab.workspaceId
+                                ? await context.workspaces
+                                      .getFlow(tab.workspaceId, tab.flowId)
+                                      .catch(() => undefined)
+                                : undefined)
+                        if (draft) flowDrafts[tab.id] = draft
+
+                        return
+                    }
+
+                    const [query, data] = await Promise.all([
+                        context.sessions.readDraftQuery(tab.id),
+                        context.sessions.readDraftData(tab.id),
+                    ])
+                    contents[tab.id] = { query, variables: data.variables, headers: data.headers }
+                }),
+            )
 
             await context.sessions.pruneOrphanDrafts(allTabs)
 
@@ -434,15 +442,17 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const context = await getAppContext()
         const collections = await context.workspaces.listCollections(workspace.id)
 
-        const tree: ICollectionNode[] = []
-        for (const collection of collections) {
-            tree.push({
-                collection,
-                operations: await context.workspaces.listOperations(workspace.id, collection.id),
-            })
-        }
+        const [tree, flows] = await Promise.all([
+            Promise.all(
+                collections.map(async (collection) => ({
+                    collection,
+                    operations: await context.workspaces.listOperations(workspace.id, collection.id),
+                })),
+            ),
+            context.workspaces.listFlows(workspace.id),
+        ])
 
-        set({ tree, flows: await context.workspaces.listFlows(workspace.id) })
+        set({ tree, flows })
     },
 
     async selectWorkspace(workspaceId) {
@@ -805,7 +815,10 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 ...state.contents,
                 [tabId]: { ...requireContent(state.contents, tabId), query },
             },
-            tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, dirty: true } : tab)),
+            // Новый массив вкладок — перерисовка всего, что на него подписано
+            // (шапка, сайдбар, полоса вкладок); на каждое нажатие он нужен
+            // только пока вкладка ещё не помечена изменённой.
+            tabs: markDirty(state.tabs, tabId),
         }))
 
         scheduleDraftSave(tabId, get)
@@ -818,7 +831,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 ...state.contents,
                 [tabId]: { ...requireContent(state.contents, tabId), variables },
             },
-            tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, dirty: true } : tab)),
+            tabs: markDirty(state.tabs, tabId),
         }))
 
         scheduleDraftSave(tabId, get)
@@ -830,7 +843,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 ...state.contents,
                 [tabId]: { ...requireContent(state.contents, tabId), headers },
             },
-            tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, dirty: true } : tab)),
+            tabs: markDirty(state.tabs, tabId),
         }))
 
         scheduleDraftSave(tabId, get)
@@ -1904,6 +1917,14 @@ function moveSchemaHistory(
             ),
         }
     })
+}
+
+/** Помечает вкладку изменённой; возвращает тот же массив, если она уже помечена. */
+function markDirty(tabs: ITabState[], tabId: string): ITabState[] {
+    const tab = tabs.find((item) => item.id === tabId)
+    if (!tab || tab.dirty) return tabs
+
+    return tabs.map((item) => (item.id === tabId ? { ...item, dirty: true } : item))
 }
 
 /** Раскладка активного workspace в форме, пригодной для сессии. */
