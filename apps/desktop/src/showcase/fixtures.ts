@@ -451,3 +451,40 @@ export function seedSchemaBrowser(typeName: string): void {
     useAppStore.setState({ schema: SHOWCASE_SCHEMA, schemaFetchedAt: new Date().toISOString() })
     useAppStore.getState().openSchemaTab(typeName)
 }
+
+/** Ответ на 20 000 объектов — проверка виртуализации дерева. */
+export function seedBigResponse(): void {
+    const state = useAppStore.getState()
+    const tabId = state.activeTabId
+    if (!tabId) return
+
+    const items = Array.from({ length: 20_000 }, (_, index) => ({
+        id: `u-${index}`,
+        email: `user${index}@example.com`,
+        enabled: index % 3 !== 0,
+    }))
+
+    useAppStore.setState({
+        runs: {
+            ...state.runs,
+            [tabId]: {
+                status: 'done',
+                events: [],
+                result: {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    headers: { 'content-type': 'application/json' },
+                    body: '',
+                    data: { users: items },
+                    kind: 'query',
+                    durationMs: 812,
+                    responseBytes: 1_400_000,
+                    requestHeaders: {},
+                    endpointId: 'default',
+                },
+            },
+        },
+        settings: { ...state.settings, response: { expandDepth: 4 } },
+    })
+}

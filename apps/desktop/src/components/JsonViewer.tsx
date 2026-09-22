@@ -1,8 +1,10 @@
-import { memo, useCallback, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { plural, t as translate, useT } from '../i18n/index.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
-import { highlightParts, subtreeMatches } from './json-search.js'
+import { flattenJson, type IJsonRow } from './json-rows.js'
+import { highlightParts } from './json-search.js'
 
 export interface IJsonViewerProps {
     value: unknown
@@ -48,17 +50,58 @@ const INDENT_PX = 14
 const STRING_CLAMP = 180
 
 /**
+ * С этого числа строк дерево рисуется через виртуализацию. Маленькие ответы
+ * (и дерево внутри диалогов) остаются обычным потоком: абсолютное
+ * позиционирование там ничего не даёт, а высоту контейнера усложняет.
+ */
+const VIRTUAL_THRESHOLD = 200
+const ESTIMATED_ROW_HEIGHT = 22
+
+/**
  * Просмотрщик JSON-ответа.
  *
- * Узлы разворачиваются лениво: свёрнутая ветка не создаёт DOM-элементов вовсе.
- * Благодаря этому ответ на десятки тысяч узлов открывается мгновенно — в
- * отличие от подсветки всего тела как одного текстового блока.
+ * Дерево сплющивается в список видимых строк, и при большом объёме
+ * отрисовываются только строки в окне прокрутки. Свёрнутые ветки в список
+ * не попадают вовсе, так что ответ на десятки тысяч узлов открывается
+ * мгновенно, а прокрутка не зависит от его размера.
  */
 export const JsonViewer = memo(function JsonViewer(props: IJsonViewerProps): React.JSX.Element {
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
+    const [expanded, setExpanded] = useState<Map<string, boolean>>(() => new Map())
+    const [openStrings, setOpenStrings] = useState<Set<string>>(() => new Set())
     const needle = (props.search ?? '').trim().toLowerCase()
     const onSaveValue = props.onSaveValue
     const t = useT()
+
+    const rows = useMemo(
+        () =>
+            flattenJson(props.value, expanded, {
+                expandDepth: props.defaultExpandDepth ?? 2,
+                autoCollapseSize: AUTO_COLLAPSE_SIZE,
+                needle,
+                rootPath: props.rootPath ?? '',
+            }),
+        [props.value, expanded, needle, props.defaultExpandDepth, props.rootPath],
+    )
+
+    const toggle = useCallback((row: IJsonRow) => {
+        setExpanded((current) => {
+            const next = new Map(current)
+            next.set(row.path || '$', !row.expanded)
+
+            return next
+        })
+    }, [])
+
+    const toggleString = useCallback((path: string) => {
+        setOpenStrings((current) => {
+            const next = new Set(current)
+            if (next.has(path)) next.delete(path)
+            else next.add(path)
+
+            return next
+        })
+    }, [])
 
     /**
      * Меню правой кнопки для узла.
@@ -113,177 +156,192 @@ export const JsonViewer = memo(function JsonViewer(props: IJsonViewerProps): Rea
         })
     }, [onSaveValue, t])
 
+    const rowProps = {
+        needle,
+        onPickPath: props.onPickPath,
+        onMenu: openMenu,
+        onToggle: toggle,
+        openStrings,
+        onToggleString: toggleString,
+    }
+
     return (
         <div className="json-viewer mono selectable">
-            <JsonNode
-                label={undefined}
-                value={props.value}
-                depth={0}
-                expandDepth={props.defaultExpandDepth ?? 2}
-                path={props.rootPath ?? ''}
-                onPickPath={props.onPickPath}
-                onMenu={openMenu}
-                needle={needle}
-                root
-            />
+            {rows.length > VIRTUAL_THRESHOLD ? (
+                <VirtualRows rows={rows} rowProps={rowProps} />
+            ) : (
+                rows.map((row) => <JsonRow key={row.key} row={row} {...rowProps} />)
+            )}
 
             <ContextMenu menu={menu} onClose={() => setMenu(undefined)} />
         </div>
     )
 })
 
-/**
- * Подпись узла.
- *
- * Элементы массива подписываются порядковым номером, а не ключом: индекс — это
- * позиция, а не имя поля, и рисовать его как `0:` значит выдавать массив за
- * объект. Номер показывается приглушённо и без двоеточия.
- */
-interface IJsonLabel {
-    text: string
-    kind: 'key' | 'index'
-}
-
-interface IJsonNodeProps {
-    label: IJsonLabel | undefined
-    value: unknown
-    depth: number
-    expandDepth: number
-    path: string
+interface IRowProps {
+    needle: string
     onPickPath?: (path: string, modifiers: { alt: boolean }) => void
     onMenu: (request: INodeMenuRequest) => void
-    needle: string
-    /** Корень рисуется всегда: пустой результат поиска показывает панель выше. */
-    root?: boolean
+    onToggle: (row: IJsonRow) => void
+    openStrings: ReadonlySet<string>
+    onToggleString: (path: string) => void
 }
 
-function JsonNode(props: IJsonNodeProps): React.JSX.Element | null {
-    const { label, value, depth, expandDepth, path, onPickPath, onMenu, needle } = props
+/**
+ * Виртуальный список строк.
+ *
+ * Прокручивает ближайший предок с `overflow: auto` — панель ответа, а не
+ * само дерево: так у дерева нет собственной высоты, и оно ведёт себя как
+ * обычный блок в потоке вместе с плашками выше.
+ */
+function VirtualRows({ rows, rowProps }: { rows: IJsonRow[]; rowProps: IRowProps }): React.JSX.Element {
+    const containerRef = useRef<HTMLDivElement>(null)
+    const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
 
-    function handleContextMenu(event: React.MouseEvent): void {
-        event.preventDefault()
-        event.stopPropagation()
-        onMenu({ x: event.clientX, y: event.clientY, path, value })
-    }
-    const isContainer = value !== null && typeof value === 'object'
-    const isArray = Array.isArray(value)
+    useLayoutEffect(() => {
+        setScrollElement(findScrollParent(containerRef.current))
+    }, [])
 
-    const entries: Array<readonly [IJsonLabel, unknown]> = isContainer
-        ? isArray
-            ? (value as unknown[]).map(
-                  (item, index) => [{ text: String(index), kind: 'index' }, item] as const,
-              )
-            : Object.entries(value as Record<string, unknown>).map(
-                  ([key, item]) => [{ text: key, kind: 'key' }, item] as const,
-              )
-        : []
+    const virtualizer = useVirtualizer({
+        count: rows.length,
+        getScrollElement: () => scrollElement,
+        estimateSize: () => ESTIMATED_ROW_HEIGHT,
+        overscan: 20,
+        scrollMargin: containerRef.current?.offsetTop ?? 0,
+        getItemKey: (index) => rows[index]?.key ?? index,
+    })
 
-    // Крупные узлы сворачиваются независимо от глубины: разворачивать список из
-    // тысячи элементов по умолчанию бессмысленно и дорого.
-    const [expanded, setExpanded] = useState(
-        depth < expandDepth && entries.length <= AUTO_COLLAPSE_SIZE,
-    )
+    const items = virtualizer.getVirtualItems()
 
-    const searching = needle.length > 0
-
-    if (searching && !props.root && !subtreeMatches(label?.text, value, needle)) return null
-
-    // При поиске ветки раскрыты принудительно: иначе совпадение остаётся
-    // спрятанным внутри свёрнутого узла и результат выглядит пустым.
-    const open = searching || expanded
-    const visible = searching
-        ? entries.filter(([itemLabel, item]) => subtreeMatches(itemLabel.text, item, needle))
-        : entries
-
-    if (!isContainer) {
+    // Без прокручиваемого предка (дерево в диалоге без overflow) виртуализация
+    // невозможна — рисуем обычным потоком, чтобы ничего не пропало.
+    if (!scrollElement) {
         return (
-            <div
-                className="json-row"
-                style={{ paddingLeft: depth * INDENT_PX }}
-                onContextMenu={handleContextMenu}
-            >
-                <span className="json-gutter" />
-                <JsonLabel label={label} needle={needle} />
-                <JsonScalar value={value} needle={needle} />
-                <PickPathButton path={path} onPick={onPickPath} />
-            </div>
-        )
-    }
-
-    const openBrace = isArray ? '[' : '{'
-    const closeBrace = isArray ? ']' : '}'
-
-    // Пустой контейнер печатается одной строкой: раскрывать в нём нечего, а
-    // отдельная строка под закрывающую скобку заметно растягивает ответ.
-    if (entries.length === 0) {
-        return (
-            <div
-                className="json-row"
-                style={{ paddingLeft: depth * INDENT_PX }}
-                onContextMenu={handleContextMenu}
-            >
-                <span className="json-gutter" />
-                <JsonLabel label={label} needle={needle} />
-                <span className="json-brace">
-                    {openBrace}
-                    {closeBrace}
-                </span>
-                <PickPathButton path={path} onPick={onPickPath} />
+            <div ref={containerRef}>
+                {rows.map((row) => (
+                    <JsonRow key={row.key} row={row} {...rowProps} />
+                ))}
             </div>
         )
     }
 
     return (
-        <div>
-            <div
-                className="json-row json-row--clickable"
-                style={{ paddingLeft: depth * INDENT_PX }}
-                onClick={() => setExpanded((current) => !current)}
-                onContextMenu={handleContextMenu}
-            >
-                <span className="json-gutter">
-                    <span className={`json-chevron${open ? ' json-chevron--open' : ''}`}>
-                        ▶
-                    </span>
-                </span>
-                <JsonLabel label={label} needle={needle} />
-                <span className="json-brace">{open ? openBrace : `${openBrace} … ${closeBrace}`}</span>
-                {!open && (
-                    <span className="json-hint">
-                        {entries.length} {plural(entries.length, isArray ? 'item|items' : 'field|fields')}
-                    </span>
-                )}
-                {searching && visible.length < entries.length && (
-                    <span className="json-hint">
-                        {translate('{shown} of {total}', { shown: visible.length, total: entries.length })}
-                    </span>
-                )}
-                <PickPathButton path={path} onPick={onPickPath} />
-            </div>
+        <div ref={containerRef} style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {items.map((item) => {
+                const row = rows[item.index]
+                if (!row) return null
 
-            {open && (
-                <>
-                    {visible.map(([itemLabel, item]) => (
-                        <JsonNode
-                            key={itemLabel.text}
-                            label={itemLabel}
-                            value={item}
-                            depth={depth + 1}
-                            expandDepth={expandDepth}
-                            path={path.length > 0 ? `${path}.${itemLabel.text}` : itemLabel.text}
-                            onPickPath={onPickPath}
-                            onMenu={onMenu}
-                            needle={needle}
-                        />
-                    ))}
-                    {/* Колонка под шеврон есть и здесь: без неё закрывающая
-                        скобка вставала не под открывающую, а левее. */}
-                    <div className="json-row" style={{ paddingLeft: depth * INDENT_PX }}>
-                        <span className="json-gutter" />
-                        <span className="json-brace">{closeBrace}</span>
+                return (
+                    <div
+                        key={item.key}
+                        data-index={item.index}
+                        ref={virtualizer.measureElement}
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            transform: `translateY(${item.start - virtualizer.options.scrollMargin}px)`,
+                        }}
+                    >
+                        <JsonRow row={row} {...rowProps} />
                     </div>
-                </>
+                )
+            })}
+        </div>
+    )
+}
+
+function findScrollParent(element: HTMLElement | null): HTMLElement | null {
+    let current = element?.parentElement ?? null
+    while (current) {
+        const overflow = getComputedStyle(current).overflowY
+        if (overflow === 'auto' || overflow === 'scroll') return current
+        current = current.parentElement
+    }
+
+    return null
+}
+
+/** Одна строка дерева: скаляр, открывающая или закрывающая скобка. */
+function JsonRow(props: { row: IJsonRow } & IRowProps): React.JSX.Element {
+    const { row, needle, onPickPath, onMenu, onToggle } = props
+    const indent = { paddingLeft: row.depth * INDENT_PX }
+
+    function handleContextMenu(event: React.MouseEvent): void {
+        event.preventDefault()
+        event.stopPropagation()
+        onMenu({ x: event.clientX, y: event.clientY, path: row.path, value: row.value })
+    }
+
+    const openBrace = row.isArray ? '[' : '{'
+    const closeBrace = row.isArray ? ']' : '}'
+
+    if (row.kind === 'close') {
+        // Колонка под шеврон есть и здесь: без неё закрывающая скобка вставала
+        // не под открывающую, а левее.
+        return (
+            <div className="json-row" style={indent}>
+                <span className="json-gutter" />
+                <span className="json-brace">{closeBrace}</span>
+            </div>
+        )
+    }
+
+    if (row.kind === 'scalar') {
+        return (
+            <div className="json-row" style={indent} onContextMenu={handleContextMenu}>
+                <span className="json-gutter" />
+                <JsonLabel label={row.label} needle={needle} />
+                <JsonScalar
+                    value={row.value}
+                    needle={needle}
+                    expanded={props.openStrings.has(row.path)}
+                    onToggle={() => props.onToggleString(row.path)}
+                />
+                <PickPathButton path={row.path} onPick={onPickPath} />
+            </div>
+        )
+    }
+
+    if (row.kind === 'empty') {
+        // Пустой контейнер печатается одной строкой: раскрывать в нём нечего.
+        return (
+            <div className="json-row" style={indent} onContextMenu={handleContextMenu}>
+                <span className="json-gutter" />
+                <JsonLabel label={row.label} needle={needle} />
+                <span className="json-brace">
+                    {openBrace}
+                    {closeBrace}
+                </span>
+                <PickPathButton path={row.path} onPick={onPickPath} />
+            </div>
+        )
+    }
+
+    return (
+        <div
+            className="json-row json-row--clickable"
+            style={indent}
+            onClick={() => onToggle(row)}
+            onContextMenu={handleContextMenu}
+        >
+            <span className="json-gutter">
+                <span className={`json-chevron${row.expanded ? ' json-chevron--open' : ''}`}>▶</span>
+            </span>
+            <JsonLabel label={row.label} needle={needle} />
+            <span className="json-brace">{row.expanded ? openBrace : `${openBrace} … ${closeBrace}`}</span>
+            {!row.expanded && (
+                <span className="json-hint">
+                    {row.childCount} {plural(row.childCount, row.isArray ? 'item|items' : 'field|fields')}
+                </span>
             )}
+            {needle.length > 0 && row.visibleCount < row.childCount && (
+                <span className="json-hint">
+                    {translate('{shown} of {total}', { shown: row.visibleCount, total: row.childCount })}
+                </span>
+            )}
+            <PickPathButton path={row.path} onPick={onPickPath} />
         </div>
     )
 }
@@ -310,11 +368,15 @@ function PickPathButton(props: {
     )
 }
 
+/**
+ * Подпись узла: элементы массива подписываются порядковым номером, а не
+ * ключом — индекс показывается приглушённо и без двоеточия.
+ */
 function JsonLabel({
     label,
     needle,
 }: {
-    label: IJsonLabel | undefined
+    label: IJsonRow['label']
     needle: string
 }): React.JSX.Element | null {
     if (!label) return null
@@ -347,9 +409,19 @@ function Highlighted({ text, needle }: { text: string; needle: string }): React.
     )
 }
 
-function JsonScalar({ value, needle }: { value: unknown; needle: string }): React.JSX.Element {
+function JsonScalar(props: {
+    value: unknown
+    needle: string
+    expanded: boolean
+    onToggle: () => void
+}): React.JSX.Element {
+    const { value, needle } = props
     if (value === null) return <span className="json-null">null</span>
-    if (typeof value === 'string') return <JsonString value={value} needle={needle} />
+    if (typeof value === 'string') {
+        return (
+            <JsonString value={value} needle={needle} expanded={props.expanded} onToggle={props.onToggle} />
+        )
+    }
     if (typeof value === 'number') {
         return (
             <span className="json-number">
@@ -368,10 +440,16 @@ function JsonScalar({ value, needle }: { value: unknown; needle: string }): Reac
  * Строковое значение.
  *
  * Длинные строки показываются началом и разворачиваются по клику: целиком они
- * занимают десятки строк и прячут остальной ответ.
+ * занимают десятки строк и прячут остальной ответ. Раскрытые строки помнит
+ * родитель — при виртуализации строка вне окна размонтируется.
  */
-function JsonString({ value, needle }: { value: string; needle: string }): React.JSX.Element {
-    const [expanded, setExpanded] = useState(false)
+function JsonString(props: {
+    value: string
+    needle: string
+    expanded: boolean
+    onToggle: () => void
+}): React.JSX.Element {
+    const { value, needle } = props
 
     // Совпадение может лежать за границей обрезки: показать начало строки и
     // сообщить «найдено» было бы враньём, поэтому такая строка разворачивается.
@@ -379,11 +457,11 @@ function JsonString({ value, needle }: { value: string; needle: string }): React
         needle.length > 0 && value.toLowerCase().indexOf(needle) >= STRING_CLAMP
     const long = value.length > STRING_CLAMP && !matchBeyondClamp
 
-    if (!long || expanded) {
+    if (!long || props.expanded) {
         return (
             <span
                 className="json-string json-value"
-                onClick={long ? () => setExpanded(false) : undefined}
+                onClick={long ? props.onToggle : undefined}
                 title={long ? translate('Collapse value') : undefined}
             >
                 &quot;
@@ -402,7 +480,7 @@ function JsonString({ value, needle }: { value: string; needle: string }): React
                 className="json-more"
                 onClick={(event) => {
                     event.stopPropagation()
-                    setExpanded(true)
+                    props.onToggle()
                 }}
                 title={translate('Show whole value')}
             >

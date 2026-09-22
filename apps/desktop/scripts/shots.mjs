@@ -26,6 +26,7 @@ const SCREENS = [
     { name: 'schema-user', query: '?screen=schema&type=User&theme=dark' },
     { name: 'schema-query', query: '?screen=schema&type=Query&theme=light' },
     { name: 'schema-sidebar', query: '?screen=schema-sidebar&theme=dark' },
+    { name: 'big-response', query: '?screen=big&theme=dark' },
     { name: 'save', query: '?screen=save&theme=dark' },
 ]
 
@@ -46,6 +47,15 @@ page.on('console', (message) => {
 
 for (const screen of SCREENS) {
     await page.goto(`${BASE}${screen.query}`, { waitUntil: 'networkidle' })
+    if (screen.name === 'big-response') {
+        // Массив свёрнут автоматически (больше 100 элементов): раскрываем и
+        // проверяем, что в DOM попало лишь окно, а не все 20 000 объектов.
+        await page.locator('.json-row--clickable').nth(1).click()
+        await page.waitForTimeout(200)
+        const rows = await page.locator('.json-row').count()
+        console.log(`виртуализация: ${rows} строк в DOM после раскрытия 20 000 элементов`)
+        if (rows > 1000) console.error('ВИРТУАЛИЗАЦИЯ НЕ РАБОТАЕТ: слишком много строк в DOM')
+    }
     // Редакторы и панели доводят раскладку после первого кадра.
     await page.waitForTimeout(700)
     await page.screenshot({ path: `${OUT}/${screen.name}.png` })

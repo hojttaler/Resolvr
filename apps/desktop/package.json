@@ -25,6 +25,7 @@
         "@codemirror/view": "^6.43.8",
         "@lezer/highlight": "^1.2.3",
         "@resolvr/core": "workspace:*",
+        "@tanstack/react-virtual": "^3.14.13",
         "@tauri-apps/api": "^2.11.1",
         "@tauri-apps/plugin-deep-link": "^2.4.10",
         "@tauri-apps/plugin-dialog": "^2.7.2",
