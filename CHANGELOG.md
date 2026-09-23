@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5 — 2026-09-23
+
+- Linux: the app could crash with heap corruption (`malloc(): unaligned tcache chunk
+  detected`) — the native menu was rebuilt on every start and on every settings change,
+  and replacing a GTK menu is fragile. The menu is now built once in the language from
+  the settings and rebuilt only when the language actually changes.
+
 ## 0.2.4 — 2026-09-23
 
 - Linux: copying to the clipboard did nothing — WebKitGTK rejects the page's clipboard

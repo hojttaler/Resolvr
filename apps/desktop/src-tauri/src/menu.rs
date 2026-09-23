@@ -1,5 +1,7 @@
 use tauri::menu::{AboutMetadataBuilder, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use std::sync::Mutex;
+
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::logs;
 
@@ -372,12 +374,65 @@ fn build_window_menu<R: Runtime>(app: &AppHandle<R>, l: &Labels) -> tauri::Resul
     );
 }
 
-/// Пересобирает меню на выбранном языке; вызывается интерфейсом при старте
-/// и при смене языка в настройках.
+/// Язык, на котором собрано текущее меню.
+pub struct MenuLanguage(pub Mutex<&'static str>);
+
+/// Язык стартового меню — тот же, что выберет интерфейс.
+///
+/// Меню сразу строится на нужном языке, чтобы интерфейсу не пришлось его
+/// пересобирать: замена меню в GTK снимает акселераторы старого и на Linux
+/// приводила к повреждению памяти и падению процесса.
+pub fn initial_language<R: Runtime>(app: &AppHandle<R>) -> &'static str {
+    let setting = app
+        .path()
+        .home_dir()
+        .ok()
+        .and_then(|home| std::fs::read_to_string(home.join("Resolvr").join("settings.json")).ok())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| value.get("language")?.as_str().map(str::to_owned));
+
+    resolve_language(setting.as_deref())
+}
+
+/// `ru` / `en` как есть; `system` и всё незнакомое — по языку ОС, как в
+/// `resolveLanguage` интерфейса.
+fn resolve_language(setting: Option<&str>) -> &'static str {
+    match setting {
+        Some("ru") => "ru",
+        Some("en") => "en",
+        _ => {
+            let system = tauri_plugin_os::locale().unwrap_or_default().to_lowercase();
+            if system.starts_with("ru") {
+                "ru"
+            } else {
+                "en"
+            }
+        }
+    }
+}
+
+/// Переключает язык меню; интерфейс вызывает команду при старте и при
+/// каждом применении настроек.
+///
+/// Меню пересобирается только при действительной смене языка: каждая
+/// пересборка на Linux заменяет GTK-меню целиком, и частая замена роняла
+/// процесс.
 #[tauri::command]
-pub fn set_menu_language<R: Runtime>(app: AppHandle<R>, language: String) -> Result<(), String> {
-    let menu = build_menu(&app, &language).map_err(|error| error.to_string())?;
+pub fn set_menu_language<R: Runtime>(
+    app: AppHandle<R>,
+    current: State<'_, MenuLanguage>,
+    language: String,
+) -> Result<(), String> {
+    let language = resolve_language(Some(&language));
+    let mut current = current.0.lock().map_err(|error| error.to_string())?;
+    if *current == language {
+        return Ok(());
+    }
+
+    let menu = build_menu(&app, language).map_err(|error| error.to_string())?;
     app.set_menu(menu).map_err(|error| error.to_string())?;
+    log::info!("Язык меню: {language}");
+    *current = language;
 
     Ok(())
 }

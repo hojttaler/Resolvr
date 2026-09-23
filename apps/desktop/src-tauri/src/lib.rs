@@ -44,9 +44,11 @@ pub fn run() {
             webview_guard::log_environment();
             watcher::init(handle);
 
-            // Стартовый язык — английский; интерфейс сразу переключит на
-            // выбранный в настройках.
-            let menu = menu::build_menu(handle, "en")?;
+            // Меню сразу строится на языке из настроек: пересборка меню при
+            // старте на Linux повреждала память GTK.
+            let language = menu::initial_language(handle);
+            app.manage(menu::MenuLanguage(std::sync::Mutex::new(language)));
+            let menu = menu::build_menu(handle, language)?;
             app.set_menu(menu)?;
 
             if let Some(main_window) = app.get_webview_window("main") {
