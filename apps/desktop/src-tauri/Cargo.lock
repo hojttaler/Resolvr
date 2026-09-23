@@ -3599,7 +3599,7 @@ dependencies = [
 
 [[package]]
 name = "resolvr"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "futures-util",
  "keyring",
