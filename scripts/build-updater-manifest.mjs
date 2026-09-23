@@ -49,10 +49,16 @@ const api = async (path, init = {}) => {
 // Релиз ищется в списке, а не через `/releases/tags/`: черновик этим
 // маршрутом не находится, а tauri-action создаёт именно черновик.
 const releases = await api(`/repos/${repo}/releases?per_page=100`)
-const release = releases.find((item) => item.tag_name === tag)
-if (!release) {
+const candidates = releases.filter((item) => item.tag_name === tag)
+if (candidates.length === 0) {
     console.error(`✗ релиз с тегом ${tag} не найден`)
     process.exit(1)
+}
+// Несколько черновиков с одним тегом — след параллельного создания релиза;
+// берётся тот, где больше файлов, а про остальные нужно знать.
+const release = candidates.reduce((best, item) => (item.assets.length > best.assets.length ? item : best))
+if (candidates.length > 1) {
+    console.warn(`⚠ релизов с тегом ${tag}: ${candidates.length}; использую ${release.id} (${release.assets.length} файлов)`)
 }
 const assets = release.assets
 
