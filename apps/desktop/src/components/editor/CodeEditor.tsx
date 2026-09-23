@@ -9,7 +9,7 @@ import {
     indentUnit,
 } from '@codemirror/language'
 import { lintKeymap } from '@codemirror/lint'
-import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import {
     drawSelection,
@@ -27,6 +27,13 @@ import { useEffect, useRef } from 'react'
 
 import { useAppStore } from '../../state/store.js'
 import { autoArguments } from './auto-arguments.js'
+import {
+    createEnvCompletion,
+    envPlaceholderHighlight,
+    refreshEnvHighlight,
+    type IEnvVariablesContext,
+} from './env-completion.js'
+import { createSearchPanel } from './search-panel.js'
 import { appEditorTheme } from './theme.js'
 import { createVariablesCompletion } from './variables-completion.js'
 
@@ -50,7 +57,14 @@ export interface ICodeEditorProps {
      * панель переменных дополняет JSON их скелетом.
      */
     onVariablesAdded?: (variables: Record<string, unknown>) => void
+    /**
+     * Переменные окружения для подстановки `{{name}}`: подсказки после `{{`
+     * и подсветка неизвестных имён. Без них эти возможности выключены.
+     */
+    envVariables?: IEnvVariablesContext
 }
+
+const NO_ENV_VARIABLES: IEnvVariablesContext = { variables: [] }
 
 const languageCompartment = new Compartment()
 const readOnlyCompartment = new Compartment()
@@ -77,12 +91,15 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
     const completionQueryRef = useRef(props.completionQuery ?? '')
     const schemaRef = useRef(props.schema)
     const onVariablesAddedRef = useRef(props.onVariablesAdded)
+    const envVariablesRef = useRef(props.envVariables ?? NO_ENV_VARIABLES)
+    const envEnabled = useRef(props.envVariables !== undefined).current
 
     onChangeRef.current = props.onChange
     onRunRef.current = props.onRun
     completionQueryRef.current = props.completionQuery ?? ''
     schemaRef.current = props.schema
     onVariablesAddedRef.current = props.onVariablesAdded
+    envVariablesRef.current = props.envVariables ?? NO_ENV_VARIABLES
 
     useEffect(() => {
         const host = hostRef.current
@@ -113,10 +130,15 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
                                           () => completionQueryRef.current,
                                           () => schemaRef.current,
                                       ),
+                                      ...(envEnabled
+                                          ? [createEnvCompletion(() => envVariablesRef.current)]
+                                          : []),
                                   ]
                                 : undefined,
                     }),
+                    envEnabled ? envPlaceholderHighlight(() => envVariablesRef.current) : [],
                     highlightSelectionMatches(),
+                    search({ top: true, createPanel: createSearchPanel }),
                     EditorState.allowMultipleSelections.of(true),
                     keymap.of([
                         {
@@ -189,6 +211,12 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
 
         updateSchema(view, props.schema)
     }, [props.schema, props.language])
+
+    // Смена окружения меняет, какие `{{name}}` известны, — текст при этом прежний.
+    useEffect(() => {
+        const view = viewRef.current
+        if (view && envEnabled) refreshEnvHighlight(view)
+    }, [props.envVariables, envEnabled])
 
     useEffect(() => {
         viewRef.current?.dispatch({

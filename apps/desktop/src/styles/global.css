@@ -663,6 +663,15 @@ textarea {
     box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+/* Место, куда встанет операция при перетаскивании внутри списка. */
+.tree__row--drop-before {
+    box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.tree__row--drop-after {
+    box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
 .tree__rename {
     flex: 1;
     height: 20px;
@@ -1604,6 +1613,31 @@ input[type='checkbox'] {
     border-bottom: 1px solid var(--separator);
 }
 
+/* Правила сохранения ответа в окружение. */
+.captures {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--pad-sm);
+    padding: var(--pad-sm) var(--pad-md);
+}
+
+.captures__row {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    width: 100%;
+}
+
+.captures__row .input {
+    flex: 1;
+    min-width: 0;
+}
+
+.captures__arrow {
+    color: var(--text-tertiary);
+}
+
 .inherited__row {
     display: flex;
     align-items: baseline;
@@ -1630,6 +1664,24 @@ input[type='checkbox'] {
     border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+/* Короткая плашка над ответом: сохранённые в окружение переменные. */
+.notice--compact {
+    margin: var(--pad-sm) var(--pad-md) 0;
+    border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* Тело ответа принимает фокус ради ⌘A, но рамка фокуса там лишняя. */
+.response-body:focus {
+    outline: none;
+}
+
+/* «Выделено всё» в дереве JSON: подсветка вместо нативного выделения. */
+.response-body--all-selected .json-row,
+.response-body--all-selected .raw {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 /* ── Восстановление в настройках окружения ───────────────────────────────── */
@@ -1772,6 +1824,79 @@ input[type='checkbox'] {
 .btn--on {
     background: var(--surface-active);
     color: var(--text-primary);
+}
+
+/* ── Поиск в редакторе ───────────────────────────────────────────────────── */
+
+.editor-search {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+    padding: var(--pad-xs) var(--pad-sm);
+    background: var(--surface-header);
+    font-family: var(--font-ui);
+    font-size: var(--text-size);
+}
+
+.editor-search__row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/* Строка замены начинается под полем поиска, а не под шевроном. */
+.editor-search__row--replace {
+    gap: var(--pad-xs);
+    padding-left: 24px;
+}
+
+.editor-search__input {
+    flex: 0 1 320px;
+    min-width: 120px;
+    height: 24px;
+    margin-right: var(--pad-xs);
+    font-size: var(--code-size);
+}
+
+.editor-search__input--invalid,
+.editor-search__input--invalid:focus {
+    border-color: var(--danger);
+}
+
+.editor-search__count {
+    min-width: 64px;
+    margin-right: var(--pad-xs);
+    color: var(--text-secondary);
+    font-size: var(--text-size-small);
+    white-space: nowrap;
+}
+
+.editor-search__count--empty {
+    color: var(--danger);
+}
+
+.editor-search__close {
+    margin-left: auto;
+}
+
+.editor-search__expand {
+    transition: transform 0.12s ease;
+}
+
+.editor-search__expand--open {
+    transform: rotate(90deg);
+}
+
+/* Переключатели Aa / .* / W — моноширинные, как в редакторах кода. */
+.editor-search .btn--icon {
+    font-family: var(--font-mono);
+    font-size: var(--text-size-small);
+}
+
+.editor-search .btn--on {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* ── Поиск по ответу ─────────────────────────────────────────────────────── */
@@ -2200,4 +2325,37 @@ input[type='checkbox'] {
     margin-top: 16px;
     justify-content: center;
     flex-wrap: wrap;
+}
+
+/* ── Экран сбоя интерфейса ───────────────────────────────────────────────── */
+
+.crash {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--pad-md);
+    height: 100%;
+    padding: var(--pad-lg);
+    text-align: center;
+}
+
+.crash__title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.crash__message {
+    max-width: 560px;
+    color: var(--danger);
+    font-family: var(--font-mono);
+    font-size: var(--text-size-small);
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.crash__actions {
+    display: flex;
+    gap: var(--pad-sm);
 }

@@ -3,11 +3,17 @@ import {
     HISTORY_BODY_LIMIT,
     type IEndpoint,
     type IEnvironment,
+    type IEnvironmentCapture,
     type IHistoryEntry,
     type IOperationKind,
     type IWorkspace,
 } from '../model/schemas.js'
 import type { ISecretStore } from '../ports/secret-store.js'
+import {
+    EnvironmentWriter,
+    toEnvironmentValue,
+    type IEnvironmentValue,
+} from '../secrets/environment-writer.js'
 import { TokenKeeper } from '../secrets/token-keeper.js'
 import type { TokenInfoStore } from '../secrets/token-info-store.js'
 import type {
@@ -109,6 +115,18 @@ export interface IRunInput {
     skipFlows?: boolean
     /** Значения, добытые цепочкой подготовки: подставляются как `{{name}}`. */
     flowContext?: Record<string, string>
+    /**
+     * Правила сохранения ответа в окружение. Без них берутся правила
+     * сохранённой операции из `operationRef`; шаги цепочек (`skipFlows`)
+     * окружение не меняют — у цепочки для этого есть `extract`.
+     */
+    saveToEnvironment?: IEnvironmentCapture[]
+}
+
+/** Переменная окружения, записанная по правилу операции после запуска. */
+export interface ISavedVariable {
+    name: string
+    secret: boolean
 }
 
 export interface IRunResult {
@@ -138,6 +156,10 @@ export interface IRunResult {
     unresolvedHeaders?: string[]
     endpointId: string
     environmentId?: string
+    /** Переменные, записанные в окружение правилами операции. */
+    savedVariables?: ISavedVariable[]
+    /** Правила, которые не сработали: путь не найден в ответе или нет окружения. */
+    captureWarnings?: string[]
 }
 
 /** След выполнения вспомогательной цепочки внутри запроса. */
@@ -258,11 +280,11 @@ export class RunEngine {
             flowContext = { ...flowContext, ...toStringContext(prerequisite.context) }
         }
 
-        let result = await this._execute({ ...input, flowContext })
+        let executed = await this._execute({ ...input, flowContext })
         let attempt = 0
 
         for (;;) {
-            const recovery = await this._planRecovery(input, result, attempt)
+            const recovery = await this._planRecovery(input, executed.result, attempt)
             if (!recovery) break
 
             attempt += 1
@@ -270,14 +292,84 @@ export class RunEngine {
             if (!recovery.ok) break
 
             flowContext = { ...flowContext, ...toStringContext(recovery.context) }
-            result = await this._execute({ ...input, flowContext })
+            executed = await this._execute({ ...input, flowContext })
         }
+
+        const captured = await this._captureToEnvironment(input, executed)
+        const result = { ...executed.result, ...captured }
 
         return flowRuns.length > 0 ? { ...result, flowRuns } : result
     }
 
+    /**
+     * Сохраняет значения ответа в окружение по правилам операции.
+     *
+     * Значения читаются из немаскированного ответа: в маскированном уже
+     * известный секрет превратился бы в заглушку и испортил переменную.
+     * Срабатывает только на успешном ответе — ошибка сервера не должна
+     * затирать рабочий токен.
+     */
+    private async _captureToEnvironment(
+        input: IRunInput,
+        executed: IExecuted,
+    ): Promise<Pick<IRunResult, 'savedVariables' | 'captureWarnings'>> {
+        if (input.skipFlows || input.skipAuth || !executed.result.ok) return {}
+
+        const rules = input.saveToEnvironment ?? (await this._operationCaptures(input))
+        if (rules.length === 0) return {}
+
+        const environmentId = executed.result.environmentId
+        if (!environmentId) {
+            return { captureWarnings: ['Окружение не выбрано — значения ответа не сохранены'] }
+        }
+
+        const raw = parseRawResponse(executed.response)
+        const source = {
+            status: executed.result.status,
+            data: raw.data,
+            errors: raw.errors,
+            headers: raw.headers,
+        }
+        const values: IEnvironmentValue[] = []
+        const warnings: string[] = []
+        for (const rule of rules) {
+            const value = readPath(source, rule.path)
+            if (value === undefined) {
+                warnings.push(`${rule.variable}: в ответе нет пути "${rule.path}"`)
+                continue
+            }
+
+            values.push({ name: rule.variable, value: toEnvironmentValue(value), secret: rule.secret })
+        }
+
+        await new EnvironmentWriter(this._workspaces, this._resolver, this._tokens).save(
+            input.workspaceId,
+            environmentId,
+            values,
+        )
+
+        return {
+            savedVariables:
+                values.length > 0
+                    ? values.map((item) => ({ name: item.name, secret: item.secret }))
+                    : undefined,
+            captureWarnings: warnings.length > 0 ? warnings : undefined,
+        }
+    }
+
+    private async _operationCaptures(input: IRunInput): Promise<IEnvironmentCapture[]> {
+        if (!input.operationRef) return []
+
+        const operation = await this._workspaces.getOperation(
+            input.workspaceId,
+            parseOperationRef(input.operationRef),
+        )
+
+        return operation.saveToEnvironment
+    }
+
     /** Один проход запроса без цепочек: подготовка, отправка, запись истории. */
-    private async _execute(input: IRunInput): Promise<IRunResult> {
+    private async _execute(input: IRunInput): Promise<IExecuted> {
         const prepared = await this._prepare(input)
 
         const response = await this._transport.request({
@@ -296,7 +388,7 @@ export class RunEngine {
         const result = this._buildResult(prepared, response)
         if (!input.skipHistory) await this._writeHistory(input.workspaceId, prepared, result, input)
 
-        return result
+        return { result, response }
     }
 
     /**
@@ -751,6 +843,32 @@ export class RunEngine {
         }
 
         await this._history.append(workspaceId, entry)
+    }
+}
+
+/**
+ * Результат одного прохода вместе с немаскированным ответом — только для
+ * внутреннего использования. Тело разбирается повторно лишь при наличии
+ * правил сохранения: для большого ответа лишний разбор удваивает память.
+ */
+interface IExecuted {
+    result: IRunResult
+    response: IHttpResponse
+}
+
+interface IRawResponse {
+    data?: unknown
+    errors?: unknown[]
+    headers: Record<string, string>
+}
+
+function parseRawResponse(response: IHttpResponse): IRawResponse {
+    try {
+        const parsed = JSON.parse(response.body) as { data?: unknown; errors?: unknown[] }
+
+        return { data: parsed.data, errors: parsed.errors, headers: response.headers }
+    } catch {
+        return { headers: response.headers }
     }
 }
 

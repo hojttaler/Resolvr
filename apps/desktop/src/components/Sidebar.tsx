@@ -213,8 +213,9 @@ const OPERATION_DRAG_TYPE = 'application/x-resolvr-operation'
  * Дерево коллекций.
  *
  * Управление — правой кнопкой и перетаскиванием: операцию можно перенести в
- * другую коллекцию, переименовать, продублировать и удалить, коллекцию —
- * переименовать и удалить. Переименование идёт прямо в строке дерева.
+ * другую коллекцию или на другое место в своей, переименовать, продублировать
+ * и удалить, коллекцию — переименовать и удалить. Переименование идёт прямо
+ * в строке дерева.
  */
 function CollectionsPanel(): React.JSX.Element {
     const tree = useAppStore((state) => state.tree)
@@ -225,6 +226,7 @@ function CollectionsPanel(): React.JSX.Element {
     const renameCollection = useAppStore((state) => state.renameCollection)
     const deleteCollection = useAppStore((state) => state.deleteCollection)
     const moveOperation = useAppStore((state) => state.moveOperation)
+    const reorderOperation = useAppStore((state) => state.reorderOperation)
     const deleteOperation = useAppStore((state) => state.deleteOperation)
     const duplicateOperation = useAppStore((state) => state.duplicateOperation)
     const linkTo = useAppStore((state) => state.linkTo)
@@ -234,6 +236,7 @@ function CollectionsPanel(): React.JSX.Element {
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
     const [renaming, setRenaming] = useState<IRenaming | undefined>()
     const [dropTarget, setDropTarget] = useState<string | undefined>()
+    const [dropLine, setDropLine] = useState<{ ref: string; position: 'before' | 'after' } | undefined>()
     const [error, setError] = useState<string | undefined>()
     const t = useT()
 
@@ -474,11 +477,47 @@ function CollectionsPanel(): React.JSX.Element {
                                             key={ref}
                                             className={`tree__row tree__row--nested${
                                                 activeRef === ref ? ' tree__row--active' : ''
+                                            }${
+                                                dropLine?.ref === ref
+                                                    ? ` tree__row--drop-${dropLine.position}`
+                                                    : ''
                                             }`}
                                             draggable={!isRenamingOperation}
                                             onDragStart={(event) => {
                                                 event.dataTransfer.setData(OPERATION_DRAG_TYPE, ref)
                                                 event.dataTransfer.effectAllowed = 'move'
+                                            }}
+                                            onDragEnd={() => setDropLine(undefined)}
+                                            onDragOver={(event) => {
+                                                // При поиске видна лишь часть коллекции:
+                                                // позиция среди скрытых операций была бы угадыванием.
+                                                if (needle.length > 0) return
+                                                if (!event.dataTransfer.types.includes(OPERATION_DRAG_TYPE)) return
+                                                event.preventDefault()
+                                                event.stopPropagation()
+                                                event.dataTransfer.dropEffect = 'move'
+
+                                                const box = event.currentTarget.getBoundingClientRect()
+                                                const position =
+                                                    event.clientY < box.top + box.height / 2 ? 'before' : 'after'
+                                                if (dropLine?.ref !== ref || dropLine.position !== position) {
+                                                    setDropLine({ ref, position })
+                                                }
+                                            }}
+                                            onDragLeave={() =>
+                                                setDropLine((current) => (current?.ref === ref ? undefined : current))
+                                            }
+                                            onDrop={(event) => {
+                                                const line = dropLine
+                                                setDropLine(undefined)
+                                                if (!line) return
+
+                                                event.preventDefault()
+                                                event.stopPropagation()
+                                                const source = event.dataTransfer.getData(OPERATION_DRAG_TYPE)
+                                                if (!source || source === ref) return
+
+                                                void guarded(() => reorderOperation(source, ref, line.position))
                                             }}
                                             onClick={() =>
                                                 !isRenamingOperation &&

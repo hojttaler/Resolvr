@@ -1,6 +1,6 @@
 import type { ISchemaChange } from '@resolvr/core'
 
-import { useAppStore } from '../state/store.js'
+import { selectActiveEnvironment, useAppStore } from '../state/store.js'
 import { tn, useT } from '../i18n/index.js'
 
 /**
@@ -10,17 +10,14 @@ import { tn, useT } from '../i18n/index.js'
  * схемы, сохранённый при предыдущей интроспекции, с текущим.
  */
 export function Inspector(): React.JSX.Element {
-    const workspace = useAppStore((state) => state.workspace)
     const schema = useAppStore((state) => state.schema)
     const schemaFetchedAt = useAppStore((state) => state.schemaFetchedAt)
     const refreshSchema = useAppStore((state) => state.refreshSchema)
-    const tabs = useAppStore((state) => state.tabs)
-    const activeTabId = useAppStore((state) => state.activeTabId)
     const compareSchema = useAppStore((state) => state.compareSchema)
     const changes = useAppStore((state) => state.schemaDiff)
     const diffError = useAppStore((state) => state.schemaDiffNote)
 
-    const activeTab = tabs.find((tab) => tab.id === activeTabId)
+    const activeEnvironment = useAppStore(selectActiveEnvironment)
     const t = useT()
 
     return (
@@ -84,11 +81,7 @@ export function Inspector(): React.JSX.Element {
                 <div className="inspector__section">
                     <div className="inspector__label">{t('Environment')}</div>
                     <div className="inspector__value">
-                        {workspace?.environments.find(
-                            (environment) =>
-                                environment.id ===
-                                (activeTab?.environmentId ?? workspace.defaultEnvironmentId),
-                        )?.name ?? '—'}
+                        {activeEnvironment?.name ?? '—'}
                     </div>
                     <div className="inspector__hint">
                         {t('Secrets never land in workspace files or history.')}

@@ -8,6 +8,7 @@ import {
     SettingsSchema,
     WorkspaceSchema,
     type ICollection,
+    type IEnvironmentCapture,
     type IFlow,
     type IOperation,
     type IOperationKind,
@@ -47,6 +48,16 @@ export interface ISaveOperationInput {
     environmentId?: string
     /** Цепочка, выполняемая перед запросом. */
     prerequisiteFlow?: string
+    /** Значения ответа, сохраняемые в окружение после успешного запуска. */
+    saveToEnvironment?: IEnvironmentCapture[]
+}
+
+export interface IMoveOperationOptions {
+    /**
+     * Позиция в целевой коллекции. Без неё переименованная операция остаётся
+     * на прежнем месте, а перенесённая в другую коллекцию встаёт в конец.
+     */
+    index?: number
 }
 
 /**
@@ -327,6 +338,7 @@ export class WorkspaceStore {
             endpointId: input.endpointId,
             environmentId: input.environmentId,
             prerequisiteFlow: input.prerequisiteFlow,
+            saveToEnvironment: input.saveToEnvironment ?? [],
             updatedAt: new Date().toISOString(),
         })
 
@@ -348,12 +360,18 @@ export class WorkspaceStore {
      * Переносит операцию в другую коллекцию и/или под другое имя.
      *
      * Файлы копируются, затем исходные удаляются: прерывание оставит либо
-     * обе копии, либо только старую — но не потеряет операцию.
+     * обе копии, либо только старую — но не потеряет операцию. Ссылки на
+     * операцию из цепочек и из профилей логина окружений переписываются на
+     * новое имя: иначе переименование молча ломало бы цепочки.
+     *
+     * @throws ResolvrError OPERATION_ALREADY_EXISTS — целевое имя занято.
+     * @throws ResolvrError OPERATION_NOT_FOUND — исходной операции нет.
      */
     public async moveOperation(
         workspaceId: string,
         from: IOperationRef,
         to: IOperationRef,
+        options: IMoveOperationOptions = {},
     ): Promise<IOperation> {
         if (from.collectionId === to.collectionId && from.name === to.name) {
             return this.getOperation(workspaceId, from)
@@ -369,6 +387,16 @@ export class WorkspaceStore {
         }
 
         const operation = await this.getOperation(workspaceId, from)
+
+        // Порядок снимается до переноса: после него исходного имени в списке
+        // уже не будет, и позицию восстановить не из чего.
+        const sameCollection = from.collectionId === to.collectionId
+        const targetOrder = await this._displayedOrder(workspaceId, to.collectionId)
+        let index = options.index
+        if (index === undefined && sameCollection) index = targetOrder.indexOf(from.name)
+        const order = targetOrder.filter((name) => name !== from.name)
+        order.splice(index === undefined || index < 0 ? order.length : Math.min(index, order.length), 0, to.name)
+
         const moved = await this.saveOperation(workspaceId, {
             collectionId: to.collectionId,
             name: to.name,
@@ -379,10 +407,47 @@ export class WorkspaceStore {
             endpointId: operation.endpointId,
             environmentId: operation.environmentId,
             prerequisiteFlow: operation.prerequisiteFlow,
+            saveToEnvironment: operation.saveToEnvironment,
         })
         await this.deleteOperation(workspaceId, from)
+        await this._writeCollectionOrder(workspaceId, to.collectionId, order)
+        await this._rewriteOperationRefs(
+            workspaceId,
+            formatOperationRef(from),
+            formatOperationRef(to),
+        )
 
         return moved
+    }
+
+    /**
+     * Задаёт порядок операций коллекции.
+     *
+     * @throws ResolvrError INVALID_REFERENCE — список не совпадает с набором
+     * операций коллекции: порядок, в котором чего-то не хватает, потерял бы
+     * позиции остальных.
+     */
+    public async reorderOperations(
+        workspaceId: string,
+        collectionId: string,
+        names: string[],
+    ): Promise<void> {
+        const existing = await this._displayedOrder(workspaceId, collectionId)
+        const wanted = new Set(names)
+        const matches =
+            wanted.size === names.length &&
+            existing.length === names.length &&
+            existing.every((name) => wanted.has(name))
+
+        if (!matches) {
+            throw new ResolvrError(
+                ErrorCodeEnum.INVALID_REFERENCE,
+                `Новый порядок коллекции "${collectionId}" не совпадает с её операциями`,
+                { workspaceId, collectionId, expected: existing.length, received: names.length },
+            )
+        }
+
+        await this._writeCollectionOrder(workspaceId, collectionId, names)
     }
 
     public async deleteOperation(workspaceId: string, ref: IOperationRef): Promise<void> {
@@ -451,6 +516,63 @@ export class WorkspaceStore {
     }
 
     // ── Приватные помощники ─────────────────────────────────────────────────
+
+    /** Имена операций коллекции в том порядке, в каком их видит пользователь. */
+    private async _displayedOrder(workspaceId: string, collectionId: string): Promise<string[]> {
+        const operations = await this.listOperations(workspaceId, collectionId)
+
+        return operations.map((operation) => operation.name)
+    }
+
+    private async _writeCollectionOrder(
+        workspaceId: string,
+        collectionId: string,
+        order: string[],
+    ): Promise<void> {
+        const collection = await this.getCollection(workspaceId, collectionId)
+        await this.saveCollection(workspaceId, { ...collection, order })
+    }
+
+    /**
+     * Переписывает ссылки на операцию после переноса.
+     *
+     * Ссылки — строки `collection/operation`, поэтому без переписывания шаги
+     * цепочек и логин окружения указывали бы на несуществующий файл.
+     * Перезаписываются только изменившиеся файлы.
+     */
+    private async _rewriteOperationRefs(
+        workspaceId: string,
+        fromRef: string,
+        toRef: string,
+    ): Promise<void> {
+        const flows = await this.listFlows(workspaceId)
+        for (const flow of flows) {
+            if (!flow.steps.some((step) => step.operationRef === fromRef)) continue
+
+            await this.saveFlow(workspaceId, {
+                ...flow,
+                steps: flow.steps.map((step) =>
+                    step.operationRef === fromRef ? { ...step, operationRef: toRef } : step,
+                ),
+            })
+        }
+
+        const workspace = await this.getWorkspace(workspaceId)
+        const usesLogin = workspace.environments.some(
+            (environment) =>
+                environment.auth.type === 'login' && environment.auth.operationRef === fromRef,
+        )
+        if (!usesLogin) return
+
+        await this.saveWorkspace({
+            ...workspace,
+            environments: workspace.environments.map((environment) =>
+                environment.auth.type === 'login' && environment.auth.operationRef === fromRef
+                    ? { ...environment, auth: { ...environment.auth, operationRef: toRef } }
+                    : environment,
+            ),
+        })
+    }
 
     private async _readOperation(
         workspaceId: string,

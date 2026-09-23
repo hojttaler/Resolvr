@@ -201,3 +201,53 @@ describe('toWebSocketUrl', () => {
         )
     })
 })
+
+describe('сохранение ответа в окружение', () => {
+    it('записывает значения по правилам операции, секрет — ссылкой', async () => {
+        const harness = await createHarness(
+            () => '{"data":{"login":{"token":"t-1","user":{"id":7}}}}',
+        )
+        await harness.workspaces.createCollection('api', 'Auth')
+        await harness.workspaces.saveOperation('api', {
+            collectionId: 'auth',
+            name: 'Login',
+            query: 'mutation Login { login { token user { id } } }',
+            saveToEnvironment: [
+                { variable: 'token', path: 'data.login.token', secret: true },
+                { variable: 'userId', path: 'data.login.user.id', secret: false },
+                { variable: 'missing', path: 'data.nope', secret: false },
+            ],
+        })
+
+        const result = await harness.engine.run({ workspaceId: 'api', operationRef: 'auth/Login' })
+
+        expect(result.savedVariables).toEqual([
+            { name: 'token', secret: true },
+            { name: 'userId', secret: false },
+        ])
+        expect(result.captureWarnings).toHaveLength(1)
+
+        const environment = (await harness.workspaces.getWorkspace('api')).environments[0]
+        expect(environment?.variables.userId).toBe('7')
+        expect(environment?.variables.token).toBe('keychain://api/default/token')
+        expect(
+            await harness.secrets.get({ workspace: 'api', environment: 'default', key: 'token' }),
+        ).toBe('t-1')
+    })
+
+    it('не трогает окружение, если ответ с ошибкой', async () => {
+        const harness = await createHarness(
+            () => '{"data":{"login":null},"errors":[{"message":"bad password"}]}',
+        )
+
+        const result = await harness.engine.run({
+            workspaceId: 'api',
+            query: 'mutation Login { login { token } }',
+            saveToEnvironment: [{ variable: 'token', path: 'data.login.token', secret: false }],
+        })
+
+        expect(result.savedVariables).toBeUndefined()
+        const environment = (await harness.workspaces.getWorkspace('api')).environments[0]
+        expect(environment?.variables.token).toBeUndefined()
+    })
+})

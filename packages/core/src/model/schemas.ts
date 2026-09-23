@@ -173,6 +173,21 @@ export const CollectionSchema = z.object({
 
 export const OperationKindSchema = z.enum(['query', 'mutation', 'subscription'])
 
+/**
+ * Правило сохранения значения из ответа в переменную окружения.
+ *
+ * Применяется после каждого успешного запуска операции: токен или id из
+ * ответа попадает в окружение без ручного копирования.
+ */
+export const EnvironmentCaptureSchema = z.object({
+    /** Имя переменной окружения. */
+    variable: z.string().min(1),
+    /** Путь в результате: `data.login.token`, `headers.x-request-id`. */
+    path: z.string().min(1),
+    /** Хранить значение в хранилище секретов, в файле — только ссылка. */
+    secret: z.boolean().default(false),
+})
+
 /** Метаданные операции; сам текст запроса лежит рядом в файле `.graphql`. */
 export const OperationMetaSchema = z.object({
     name: z.string().min(1),
@@ -187,6 +202,7 @@ export const OperationMetaSchema = z.object({
      * нужно повторять вручную перед каждым вызовом.
      */
     prerequisiteFlow: z.string().optional(),
+    saveToEnvironment: z.array(EnvironmentCaptureSchema).default([]),
     updatedAt: z.string(),
 })
 
@@ -281,6 +297,10 @@ export const TabStateSchema = z.object({
     flowId: z.string().optional(),
     /** Открытый тип для вкладки-браузера схемы. */
     schemaType: z.string().optional(),
+    /**
+     * Устаревшие поля: окружение и эндпоинт выбираются на весь workspace
+     * (`SessionSchema.selections`). Читаются только при миграции старой сессии.
+     */
     endpointId: z.string().optional(),
     environmentId: z.string().optional(),
     /** Черновик отличается от сохранённой операции — показывается точкой на вкладке. */
@@ -288,8 +308,14 @@ export const TabStateSchema = z.object({
     pinned: z.boolean().default(false),
     queryCursor: TabCursorSchema.default({ anchor: 0, head: 0, scrollTop: 0 }),
     variablesCursor: TabCursorSchema.default({ anchor: 0, head: 0, scrollTop: 0 }),
-    bottomTab: z.enum(['variables', 'headers']).default('variables'),
+    bottomTab: z.enum(['variables', 'headers', 'captures']).default('variables'),
     responseTab: z.enum(['response', 'raw', 'headers', 'trace']).default('response'),
+})
+
+/** Окружение и эндпоинт, выбранные в workspace; без значения — умолчания workspace. */
+export const WorkspaceSelectionSchema = z.object({
+    environmentId: z.string().optional(),
+    endpointId: z.string().optional(),
 })
 
 export const SessionSchema = z.object({
@@ -301,6 +327,11 @@ export const SessionSchema = z.object({
     activeTabs: z.record(z.string(), z.string()).default({}),
     /** Раскладка панелей по workspace: личное, не попадает в общие файлы. */
     layouts: z.record(z.string(), LayoutStateSchema).default({}),
+    /**
+     * Выбранные окружение и эндпоинт по workspace. Выбор общий для всех
+     * вкладок: две вкладки не должны незаметно ходить в разные окружения.
+     */
+    selections: z.record(z.string(), WorkspaceSelectionSchema).default({}),
     updatedAt: z.string().default(() => new Date().toISOString()),
 })
 
@@ -392,7 +423,6 @@ export const SettingsSchema = z.object({
         .default({ storage: 'file' }),
 })
 
-
 /** Снимок схемы GraphQL с метаданными кэша. */
 export const SchemaCacheSchema = z.object({
     version: z.literal(1).default(1),
@@ -413,6 +443,7 @@ export type IWorkspace = z.infer<typeof WorkspaceSchema>
 export type ICollection = z.infer<typeof CollectionSchema>
 export type IOperationKind = z.infer<typeof OperationKindSchema>
 export type IOperationMeta = z.infer<typeof OperationMetaSchema>
+export type IEnvironmentCapture = z.infer<typeof EnvironmentCaptureSchema>
 export type IFlowAssert = z.infer<typeof FlowAssertSchema>
 export type IFlowStep = z.infer<typeof FlowStepSchema>
 export type IFlow = z.infer<typeof FlowSchema>
@@ -421,6 +452,7 @@ export type ITabKind = z.infer<typeof TabKindSchema>
 export type ITabCursor = z.infer<typeof TabCursorSchema>
 export type ITabState = z.infer<typeof TabStateSchema>
 export type ISession = z.infer<typeof SessionSchema>
+export type IWorkspaceSelection = z.infer<typeof WorkspaceSelectionSchema>
 export type IDraftData = z.infer<typeof DraftDataSchema>
 export type ISettings = z.infer<typeof SettingsSchema>
 export type IWindowMaterial = z.infer<typeof WindowMaterialSchema>

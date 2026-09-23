@@ -330,15 +330,26 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
             environmentId: z.string().optional(),
         },
         run: async (args) => {
+            // Перезапись не должна терять то, что агент не передавал:
+            // цепочку подготовки и правила сохранения в окружение.
+            const existing = await context.workspaces
+                .getOperation(args.workspaceId, {
+                    collectionId: args.collectionId,
+                    name: args.name,
+                })
+                .catch(() => undefined)
+
             const operation = await context.workspaces.saveOperation(args.workspaceId, {
                 collectionId: args.collectionId,
                 name: args.name,
                 query: args.query,
-                description: args.description,
+                description: args.description ?? existing?.description,
                 variables: args.variables,
                 headers: args.headers,
                 endpointId: args.endpointId,
                 environmentId: args.environmentId,
+                prerequisiteFlow: existing?.prerequisiteFlow,
+                saveToEnvironment: existing?.saveToEnvironment,
             })
 
             return {

@@ -544,6 +544,65 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
     'A public countries API: a collection, an environment variable and a smoke flow':
         'Публичный API стран: коллекция, переменная окружения и smoke-цепочка',
 
+    // --- журнал и сбои ---
+    'Logs': 'Логи',
+    'Errors and crashes are written here — attach the file to a bug report':
+        'Сюда пишутся ошибки и сбои — приложите файл к сообщению о проблеме',
+    'Open folder': 'Открыть папку',
+    'Something went wrong': 'Что-то пошло не так',
+    'Open logs': 'Открыть логи',
+    'Reload': 'Перезагрузить',
+
+    // --- копирование ответа ---
+    'Copy': 'Копировать',
+    'Copy the whole tab content': 'Скопировать всё содержимое вкладки',
+
+    // --- закрытие вкладок с изменениями ---
+    'Don’t save': 'Не сохранять',
+    '“{name}” has unsaved changes. Save them before closing?':
+        '«{name}» содержит несохранённые изменения. Сохранить перед закрытием?',
+    '{n} tabs have unsaved changes. Save them before closing?':
+        'Несохранённых вкладок: {n}. Сохранить изменения перед закрытием?',
+
+    // --- переменные окружения в запросе ---
+    '“{name}” is not defined': '«{name}» не задана',
+    '“{name}” is not defined in environment “{env}”': '«{name}» не задана в окружении «{env}»',
+    'Not defined in environment “{env}”: {names}': 'Не заданы в окружении «{env}»: {names}',
+    'from the prerequisite flow': 'из цепочки подготовки',
+
+    // --- сохранение ответа в окружение ---
+    'Save after every run': 'Сохранять после каждого запуска',
+    'the rule is stored in operation “{name}”': 'правило хранится в операции «{name}»',
+    'available for saved operations': 'доступно для сохранённых операций',
+    'Saved to environment:': 'Сохранено в окружение:',
+    'To environment': 'В окружение',
+    'Save response values to the environment after every run':
+        'Сохранять значения ответа в окружение после каждого запуска',
+    'After a successful run the values are written to environment “{env}”.':
+        'После успешного запуска значения записываются в окружение «{env}».',
+    'variable': 'переменная',
+    '+ Rule': '+ Правило',
+
+    // --- большой сырой ответ ---
+    'Showing the first {shown} of {total}': 'Показаны первые {shown} из {total}',
+    'Show all': 'Показать всё',
+
+    // --- поиск в редакторе ---
+    'Find': 'Найти',
+    'Replace': 'Заменить',
+    'Replace all': 'Заменить все',
+    'Replace all matches': 'Заменить все совпадения',
+    'Replace the current match (Enter)': 'Заменить текущее совпадение (Enter)',
+    'Previous match (Shift+Enter)': 'Предыдущее совпадение (Shift+Enter)',
+    'Next match (Enter)': 'Следующее совпадение (Enter)',
+    'Match case': 'Учитывать регистр',
+    'Regular expression': 'Регулярное выражение',
+    'Whole word': 'Слово целиком',
+    'Close (Esc)': 'Закрыть (Esc)',
+    'invalid pattern': 'ошибка в выражении',
+    'no matches': 'нет совпадений',
+    '{current} of {total}': '{current} из {total}',
+
     // --- множественное число: формы 1 / 2 / 5 ---
     'error|errors': ['ошибка', 'ошибки', 'ошибок'],
     'field|fields': ['поле', 'поля', 'полей'],

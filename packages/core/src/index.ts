@@ -26,6 +26,7 @@ export * from './storage/demo-workspace.js'
 export * from './schema/validate-variables.js'
 export * from './secrets/jwt.js'
 export * from './secrets/token-keeper.js'
+export * from './secrets/environment-writer.js'
 export * from './secrets/token-info-store.js'
 
 export * from './activity/activity-model.js'

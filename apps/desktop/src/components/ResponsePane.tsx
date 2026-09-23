@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { IVariableProblem } from '@resolvr/core'
+import type { IRunResult, IVariableProblem } from '@resolvr/core'
 
 import { t as translate, tn, useT } from '../i18n/index.js'
 import { isModKey, kbd } from '../lib/keys.js'
-import { extractOperationName, useAppStore, type ITabRun } from '../state/store.js'
+import { SELECT_ALL_EVENT } from '../lib/select-all.js'
+import { extractOperationName, selectActiveEnvironment, useAppStore, type ITabRun } from '../state/store.js'
 import { countMatches } from './json-search.js'
 import { JsonViewer } from './JsonViewer.js'
 import { SaveValueDialog } from './SaveValueDialog.js'
@@ -16,6 +17,8 @@ const RESPONSE_TABS = [
     { id: 'trace', label: 'Trace' },
 ] as const
 
+type IResponseView = (typeof RESPONSE_TABS)[number]['id']
+
 /** Панель результата: данные, ошибки, заголовки и тайминги. */
 export function ResponsePane(): React.JSX.Element {
     const activeTabId = useAppStore((state) => state.activeTabId)
@@ -23,11 +26,79 @@ export function ResponsePane(): React.JSX.Element {
     const run = useAppStore((state) => (state.activeTabId ? state.runs[state.activeTabId] : undefined))
     const setResponseTab = useAppStore((state) => state.setResponseTab)
     const expandDepth = useAppStore((state) => state.settings.response.expandDepth)
-    const [saving, setSaving] = useState<{ path: string; value: string } | undefined>()
+    const [saving, setSaving] = useState<{ path: string; value: unknown } | undefined>()
     const [search, setSearch] = useState('')
     const [searchOpen, setSearchOpen] = useState(false)
+    const [allSelected, setAllSelected] = useState(false)
+    const [copied, setCopied] = useState(false)
     const searchInput = useRef<HTMLInputElement>(null)
+    const body = useRef<HTMLDivElement>(null)
     const t = useT()
+
+    const view = tab?.responseTab ?? 'response'
+    const canCopy = run !== undefined && (run.status === 'done' ? run.result !== undefined : run.events.length > 0)
+
+    // Поиск по большому ответу обходит всё дерево: ввод не должен ждать
+    // этого обхода на каждой букве.
+    const deferredSearch = useDeferredValue(search)
+    const needle = deferredSearch.trim().toLowerCase()
+    const matches = useMemo(
+        () =>
+            searchOpen
+                ? countMatches({ data: run?.result?.data, errors: run?.result?.errors }, needle)
+                : 0,
+        [searchOpen, run?.result?.data, run?.result?.errors, needle],
+    )
+
+    /**
+     * «Выделить всё» в ответе.
+     *
+     * Сырой ответ — обычный текст, и выделяется нативно. Дерево JSON
+     * виртуализировано и обрезает длинные строки, поэтому нативное выделение
+     * захватило бы только видимый кусок: выделение показывается подсветкой,
+     * а ⌘C копирует полный текст ответа.
+     */
+    function selectAll(): void {
+        // Обрезанный сырой ответ выделяется так же, как дерево: нативное
+        // выделение захватило бы только показанное начало.
+        const pre = body.current?.querySelector('pre')
+        const clipped = (run?.result?.body.length ?? 0) > RAW_RENDER_LIMIT
+        if (view === 'raw' && pre && !clipped) {
+            window.getSelection()?.selectAllChildren(pre)
+
+            return
+        }
+
+        window.getSelection()?.removeAllRanges()
+        setAllSelected(true)
+    }
+
+    // Текст собирается только по запросу: сериализация большого ответа на
+    // каждой перерисовке стоила бы сотни мегабайт.
+    async function copy(): Promise<void> {
+        const text = responseText(view, run)
+        if (text === undefined) return
+
+        await navigator.clipboard.writeText(text)
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1500)
+    }
+
+    // Выделение относится к конкретному содержимому: при смене вкладки
+    // ответа или нового запуска оно снимается.
+    useEffect(() => {
+        setAllSelected(false)
+    }, [activeTabId, view, run])
+
+    useEffect(() => {
+        const element = body.current
+        if (!element) return undefined
+
+        const onSelectAll = (): void => selectAll()
+        element.addEventListener(SELECT_ALL_EVENT, onSelectAll)
+
+        return () => element.removeEventListener(SELECT_ALL_EVENT, onSelectAll)
+    })
 
     // ⌘F ищет по ответу, но только когда фокус не в редакторе: там это
     // сочетание принадлежит поиску по тексту запроса.
@@ -81,6 +152,16 @@ export function ResponsePane(): React.JSX.Element {
 
                 <button
                     type="button"
+                    className="btn btn--quiet"
+                    disabled={!canCopy}
+                    onClick={() => void copy()}
+                    title={t('Copy the whole tab content')}
+                >
+                    {copied ? t('Copied') : t('Copy')}
+                </button>
+
+                <button
+                    type="button"
                     className={`btn btn--quiet btn--icon${searchOpen ? ' btn--on' : ''}`}
                     onClick={() => {
                         setSearchOpen((current) => !current)
@@ -99,10 +180,7 @@ export function ResponsePane(): React.JSX.Element {
                 <SearchBar
                     inputRef={searchInput}
                     value={search}
-                    matches={countMatches(
-                        { data: run?.result?.data, errors: run?.result?.errors },
-                        search.trim().toLowerCase(),
-                    )}
+                    matches={matches}
                     onChange={setSearch}
                     onClose={() => {
                         setSearchOpen(false)
@@ -111,12 +189,40 @@ export function ResponsePane(): React.JSX.Element {
                 />
             )}
 
-            <div className="panel__content">
+            <SavedVariablesNotice result={run?.result} />
+
+            <div
+                ref={body}
+                className={`panel__content response-body${allSelected ? ' response-body--all-selected' : ''}`}
+                tabIndex={0}
+                data-select-all=""
+                onMouseDown={() => setAllSelected(false)}
+                onKeyDown={(event) => {
+                    // Поле поиска и прочие поля ввода внутри панели выделяют
+                    // собственный текст.
+                    if (event.target instanceof HTMLInputElement) return
+
+                    if (event.key === 'Escape') {
+                        setAllSelected(false)
+
+                        return
+                    }
+                    if (!isModKey(event.nativeEvent)) return
+
+                    if (event.key === 'a') {
+                        event.preventDefault()
+                        selectAll()
+                    } else if (event.key === 'c' && allSelected) {
+                        event.preventDefault()
+                        void copy()
+                    }
+                }}
+            >
                 <ResponseBody
                     run={run}
                     view={tab.responseTab}
                     expandDepth={expandDepth}
-                    search={search}
+                    search={deferredSearch}
                     onSaveValue={setSaving}
                 />
             </div>
@@ -167,10 +273,10 @@ function ResponseStatus({ run }: { run: ITabRun | undefined }): React.JSX.Elemen
 
 interface IResponseBodyProps {
     run: ITabRun | undefined
-    view: 'response' | 'raw' | 'headers' | 'trace'
+    view: IResponseView
     expandDepth: number
     search: string
-    onSaveValue: (input: { path: string; value: string }) => void
+    onSaveValue: (input: { path: string; value: unknown }) => void
 }
 
 function ResponseBody({
@@ -227,9 +333,7 @@ function ResponseBody({
 
     const { result } = run
 
-    if (view === 'raw') {
-        return <pre className="raw mono selectable">{formatRaw(result.body)}</pre>
-    }
+    if (view === 'raw') return <RawBody body={result.body} />
 
     if (view === 'headers') {
         return (
@@ -242,19 +346,7 @@ function ResponseBody({
     if (view === 'trace') {
         return (
             <div style={{ padding: 'var(--pad-sm) var(--pad-md)' }}>
-                <JsonViewer
-                    value={{
-                        endpointId: result.endpointId,
-                        environmentId: result.environmentId,
-                        kind: result.kind,
-                        status: `${result.status} ${result.statusText}`,
-                        totalMs: Math.round(result.durationMs),
-                        firstByteMs: result.firstByteMs ? Math.round(result.firstByteMs) : undefined,
-                        responseBytes: result.responseBytes,
-                        requestHeaders: result.requestHeaders,
-                    }}
-                    defaultExpandDepth={expandDepth}
-                />
+                <JsonViewer value={traceOf(result)} defaultExpandDepth={expandDepth} />
             </div>
         )
     }
@@ -282,7 +374,7 @@ function ResponseBody({
                 )}
 
             {result.data === undefined ? (
-                <pre className="raw mono selectable">{formatRaw(result.body)}</pre>
+                <RawBody body={result.body} />
             ) : (
                 <JsonViewer
                     value={result.data}
@@ -303,16 +395,12 @@ function ResponseBody({
  * прямо здесь: возвращаться за ней в шапку окна или в настройки не нужно.
  */
 function UnresolvedHeadersNotice({ headers }: { headers: string[] }): React.JSX.Element {
-    const workspace = useAppStore((state) => state.workspace)
-    const tab = useAppStore((state) => state.tabs.find((item) => item.id === state.activeTabId))
     const refreshToken = useAppStore((state) => state.refreshToken)
     const refreshing = useAppStore((state) => state.tokenRefreshing)
     const setDialog = useAppStore((state) => state.setDialog)
     const t = useT()
 
-    const environment = workspace?.environments.find(
-        (item) => item.id === (tab?.environmentId ?? workspace.defaultEnvironmentId),
-    )
+    const environment = useAppStore(selectActiveEnvironment)
     const canRefresh = Boolean(environment?.recovery?.flowId)
 
     return (
@@ -513,8 +601,136 @@ function IdleResponse(): React.JSX.Element {
     )
 }
 
+/**
+ * Плашка о переменных, сохранённых в окружение правилами операции.
+ *
+ * Без неё автосохранение было бы незаметным, а пропущенный путь в ответе
+ * обнаруживался бы только по нераскрытой переменной в следующем запросе.
+ */
+function SavedVariablesNotice({ result }: { result: IRunResult | undefined }): React.JSX.Element | null {
+    const t = useT()
+    if (!result?.savedVariables && !result?.captureWarnings) return null
+
+    return (
+        <div className="notice notice--compact">
+            {result.savedVariables && (
+                <div>
+                    {t('Saved to environment:')}{' '}
+                    <span className="mono">
+                        {result.savedVariables.map((item) => item.name).join(', ')}
+                    </span>
+                </div>
+            )}
+            {result.captureWarnings?.map((warning) => (
+                <div key={warning} className="inspector__hint">
+                    {warning}
+                </div>
+            ))}
+        </div>
+    )
+}
+
+/** Сведения о запросе для вкладки Trace. */
+function traceOf(result: IRunResult): Record<string, unknown> {
+    return {
+        endpointId: result.endpointId,
+        environmentId: result.environmentId,
+        kind: result.kind,
+        status: `${result.status} ${result.statusText}`,
+        totalMs: Math.round(result.durationMs),
+        firstByteMs: result.firstByteMs ? Math.round(result.firstByteMs) : undefined,
+        responseBytes: result.responseBytes,
+        requestHeaders: result.requestHeaders,
+    }
+}
+
+/**
+ * Полный текст вкладки ответа — для копирования.
+ *
+ * Берётся из данных, а не из отрисованного дерева: на экране длинные строки
+ * обрезаны и свёрнутые ветки отсутствуют.
+ */
+function responseText(view: IResponseView, run: ITabRun | undefined): string | undefined {
+    if (run?.status === 'streaming' || (run && run.events.length > 0)) {
+        return JSON.stringify(
+            run.events.map((event) => event.payload),
+            null,
+            2,
+        )
+    }
+
+    const result = run?.result
+    if (!result || run.status !== 'done') return undefined
+
+    switch (view) {
+        case 'raw':
+            return formatRaw(result.body)
+        case 'headers':
+            return JSON.stringify(result.headers, null, 2)
+        case 'trace':
+            return JSON.stringify(traceOf(result), null, 2)
+        case 'response':
+            if (result.data === undefined) return formatRaw(result.body)
+
+            return JSON.stringify(
+                result.errors && result.errors.length > 0
+                    ? { data: result.data, errors: result.errors }
+                    : result.data,
+                null,
+                2,
+            )
+    }
+}
+
+/**
+ * Сырое тело ответа.
+ *
+ * Текст в десятки мегабайт одним узлом WebKit раскладывает целиком и может
+ * исчерпать память процесса страницы, поэтому показывается начало, а весь
+ * текст — по кнопке. Копирование всегда берёт полный текст.
+ */
+function RawBody({ body }: { body: string }): React.JSX.Element {
+    const [full, setFull] = useState(false)
+    const t = useT()
+    const text = useMemo(() => formatRaw(body), [body])
+
+    useEffect(() => setFull(false), [body])
+
+    const clipped = !full && text.length > RAW_RENDER_LIMIT
+
+    return (
+        <>
+            <pre className="raw mono selectable">{clipped ? text.slice(0, RAW_RENDER_LIMIT) : text}</pre>
+            {clipped && (
+                <div className="row" style={{ padding: 'var(--pad-sm) var(--pad-md)' }}>
+                    <span className="inspector__hint">
+                        {t('Showing the first {shown} of {total}', {
+                            shown: formatBytes(RAW_RENDER_LIMIT),
+                            total: formatBytes(text.length),
+                        })}
+                    </span>
+                    <button type="button" className="btn btn--quiet" onClick={() => setFull(true)}>
+                        {t('Show all')}
+                    </button>
+                </div>
+            )}
+        </>
+    )
+}
+
+/** Сколько символов сырого ответа рисовать без явного запроса. */
+const RAW_RENDER_LIMIT = 1024 * 1024
+
+/**
+ * С этого размера тело не переформатируется: красивый JSON вдвое длиннее
+ * исходного и ради показа удваивал бы память.
+ */
+const RAW_FORMAT_LIMIT = 5_000_000
+
 /** Форматирует тело ответа, если это JSON; иначе показывает как есть. */
 function formatRaw(body: string): string {
+    if (body.length > RAW_FORMAT_LIMIT) return body
+
     try {
         return JSON.stringify(JSON.parse(body), null, 2)
     } catch {

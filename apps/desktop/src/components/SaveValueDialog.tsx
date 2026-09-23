@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 
-import { useAppStore } from '../state/store.js'
+import { toEnvironmentValue } from '@resolvr/core'
+
+import { findOperation, selectActiveEnvironment, useAppStore } from '../state/store.js'
 import { useT } from '../i18n/index.js'
 
 export interface ISaveValueDialogProps {
     /** Путь в ответе — из него предлагается имя переменной. */
     path: string
-    value: string
+    /** Значение любого типа: объекты и массивы сохраняются JSON-текстом. */
+    value: unknown
     onClose: () => void
 }
 
@@ -22,10 +25,15 @@ const TOKEN_HINT = /token|secret|key|password|jwt/i
  */
 export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element {
     const t = useT()
-    const workspace = useAppStore((state) => state.workspace)
-    const tabs = useAppStore((state) => state.tabs)
-    const activeTabId = useAppStore((state) => state.activeTabId)
     const saveValue = useAppStore((state) => state.saveValueToEnvironment)
+    const setEnvironmentCaptures = useAppStore((state) => state.setEnvironmentCaptures)
+    const operationRef = useAppStore(
+        (state) => state.tabs.find((tab) => tab.id === state.activeTabId)?.operationRef,
+    )
+    const operation = useAppStore((state) => findOperation(state.tree, operationRef))
+    const text = toEnvironmentValue(props.value)
+    // Правило читает путь от корня ответа; путь события подписки к нему не привязан.
+    const canCapture = operation !== undefined && /^data(\.|$)/.test(props.path)
 
     const suggested = suggestName(props.path)
     const looksLikeToken = TOKEN_HINT.test(props.path)
@@ -33,12 +41,10 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
     const [name, setName] = useState(suggested)
     const [secret, setSecret] = useState(looksLikeToken)
     const [asAuthHeader, setAsAuthHeader] = useState(looksLikeToken)
+    const [everyRun, setEveryRun] = useState(false)
     const [error, setError] = useState<string | undefined>()
 
-    const activeTab = tabs.find((tab) => tab.id === activeTabId)
-    const environment = workspace?.environments.find(
-        (item) => item.id === (activeTab?.environmentId ?? workspace.defaultEnvironmentId),
-    )
+    const environment = useAppStore(selectActiveEnvironment)
 
     useEffect(() => {
         function onKeyDown(event: KeyboardEvent): void {
@@ -58,7 +64,16 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
         }
 
         try {
-            await saveValue({ name: name.trim(), value: props.value, secret, asAuthHeader })
+            await saveValue({ name: name.trim(), value: text, secret, asAuthHeader })
+
+            // Правило заменяет прежнее для той же переменной: две записи в
+            // одну переменную спорили бы, чья победит.
+            if (everyRun && canCapture && operationRef && operation) {
+                await setEnvironmentCaptures(operationRef, [
+                    ...operation.saveToEnvironment.filter((item) => item.variable !== name.trim()),
+                    { variable: name.trim(), path: props.path, secret },
+                ])
+            }
             props.onClose()
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : String(caught))
@@ -122,9 +137,26 @@ export function SaveValueDialog(props: ISaveValueDialogProps): React.JSX.Element
                         </span>
                     </label>
 
+                    <label className="row">
+                        <input
+                            type="checkbox"
+                            checked={everyRun}
+                            disabled={!canCapture}
+                            onChange={(event) => setEveryRun(event.target.checked)}
+                        />
+                        <span>
+                            {t('Save after every run')}
+                            <div className="inspector__hint">
+                                {canCapture
+                                    ? t('the rule is stored in operation “{name}”', { name: operation.name })
+                                    : t('available for saved operations')}
+                            </div>
+                        </span>
+                    </label>
+
                     <div className="raw mono selectable" style={{ maxHeight: 90, overflow: 'auto' }}>
-                        {props.value.slice(0, 300)}
-                        {props.value.length > 300 ? '…' : ''}
+                        {text.slice(0, 300)}
+                        {text.length > 300 ? '…' : ''}
                     </div>
 
                     {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}

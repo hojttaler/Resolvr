@@ -74,7 +74,7 @@ describe('JsonViewer: длинные строки', () => {
 
 describe('JsonViewer: сохранение значения', () => {
     it('предлагает сохранить строку в переменную окружения', () => {
-        const saved: Array<{ path: string; value: string }> = []
+        const saved: Array<{ path: string; value: unknown }> = []
         const { container } = render(
             <JsonViewer
                 value={{ accessToken: 'tok-123' }}
@@ -90,6 +90,23 @@ describe('JsonViewer: сохранение значения', () => {
         fireEvent.click(screen.getByText('Сохранить в переменную окружения…'))
 
         expect(saved).toEqual([{ path: 'data.accessToken', value: 'tok-123' }])
+    })
+
+    it('предлагает сохранить и число — не только строку', () => {
+        const saved: Array<{ path: string; value: unknown }> = []
+        const { container } = render(
+            <JsonViewer
+                value={{ id: 42 }}
+                defaultExpandDepth={3}
+                rootPath="data"
+                onSaveValue={(input) => saved.push(input)}
+            />,
+        )
+
+        fireEvent.contextMenu(container.querySelectorAll('.json-row')[1]!)
+        fireEvent.click(screen.getByText('Сохранить в переменную окружения…'))
+
+        expect(saved).toEqual([{ path: 'data.id', value: 42 }])
     })
 
     it('без действия сохранения пункт не появляется', () => {

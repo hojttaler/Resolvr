@@ -16,6 +16,7 @@ import { useAppEvents, useShowWindowWhenReady } from './hooks/use-app-events.js'
 import { useDeepLinks } from './hooks/use-deep-links.js'
 import { tn, useT } from './i18n/index.js'
 import { isModKey, kbd } from './lib/keys.js'
+import { selectAllInFocus } from './lib/select-all.js'
 import { useAppStore } from './state/store.js'
 
 export function App(): React.JSX.Element {
@@ -85,6 +86,11 @@ export function App(): React.JSX.Element {
                 break
             case 'palette.open':
                 store.setPaletteOpen(true)
+                break
+            // «Выделить всё» — своя команда меню: системный пункт выделял бы
+            // документ целиком мимо панели ответа и редакторов.
+            case 'edit.selectAll':
+                selectAllInFocus()
                 break
             case 'layout.classic':
                 store.setLayoutPreset('classic')

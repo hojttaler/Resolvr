@@ -148,9 +148,7 @@ function useCommands(): ICommand[] {
                 id: `env:${environment.id}`,
                 label: translate('Environment: {name}', { name: environment.name }),
                 badge: 'ENV',
-                run: () => {
-                    if (activeTabId) store.getState().setTabEnvironment(activeTabId, environment.id)
-                },
+                run: () => store.getState().setActiveEnvironment(environment.id),
             })
         }
 

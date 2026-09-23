@@ -84,10 +84,16 @@ pub async fn http_request(input: HttpRequestInput) -> Result<HttpResponseOutput,
         request = request.body(body);
     }
 
-    let response = request
-        .send()
-        .await
-        .map_err(|error| describe_transport_error(&input.url, &error))?;
+    let response = request.send().await.map_err(|error| {
+        log::warn!(
+            "HTTP {} {}: {} через {:.0} мс",
+            input.method,
+            log_host(&input.url),
+            error_kind(&error),
+            started.elapsed().as_secs_f64() * 1000.0,
+        );
+        describe_transport_error(&input.url, &error)
+    })?;
 
     let first_byte_ms = started.elapsed().as_secs_f64() * 1000.0;
     let status = response.status();
@@ -103,10 +109,33 @@ pub async fn http_request(input: HttpRequestInput) -> Result<HttpResponseOutput,
         }
     }
 
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("Не удалось прочитать тело ответа: {error}"))?;
+    let body = response.text().await.map_err(|error| {
+        log::warn!(
+            "HTTP {} {}: не удалось прочитать тело ответа ({}), статус {}",
+            input.method,
+            log_host(&input.url),
+            error_kind(&error),
+            status.as_u16(),
+        );
+        format!("Не удалось прочитать тело ответа: {error}")
+    })?;
+
+    let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+    if status.is_server_error() {
+        log::warn!(
+            "HTTP {} {} → {} за {total_ms:.0} мс",
+            input.method,
+            log_host(&input.url),
+            status.as_u16(),
+        );
+    } else {
+        log::debug!(
+            "HTTP {} {} → {} за {total_ms:.0} мс",
+            input.method,
+            log_host(&input.url),
+            status.as_u16(),
+        );
+    }
 
     Ok(HttpResponseOutput {
         status: status.as_u16(),
@@ -114,10 +143,40 @@ pub async fn http_request(input: HttpRequestInput) -> Result<HttpResponseOutput,
         headers,
         body,
         timings: ResponseTimings {
-            total_ms: started.elapsed().as_secs_f64() * 1000.0,
+            total_ms,
             first_byte_ms,
         },
     })
+}
+
+/// Хост и порт запроса для журнала.
+///
+/// Путь и query-строка в журнал не попадают: в них бывают токены и
+/// идентификаторы пользователей. Тела запросов и заголовки не пишутся вовсе.
+fn log_host(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(parsed) => match (parsed.host_str(), parsed.port()) {
+            (Some(host), Some(port)) => format!("{host}:{port}"),
+            (Some(host), None) => host.to_string(),
+            (None, _) => "<без хоста>".to_string(),
+        },
+        Err(_) => "<некорректный URL>".to_string(),
+    }
+}
+
+/// Вид сетевой ошибки для журнала — без текста reqwest, который содержит URL.
+fn error_kind(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "таймаут"
+    } else if error.is_connect() {
+        "нет соединения"
+    } else if error.is_request() {
+        "ошибка запроса"
+    } else if error.is_body() || error.is_decode() {
+        "ошибка тела ответа"
+    } else {
+        "сетевая ошибка"
+    }
 }
 
 /// Понятное объяснение сетевой ошибки вместо строки из reqwest.

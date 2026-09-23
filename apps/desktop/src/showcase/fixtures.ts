@@ -301,6 +301,7 @@ function makeOperation(
         description: '',
         variables: {},
         headers: {},
+        saveToEnvironment: [],
         query: QUERY,
         kind,
         updatedAt: '2026-09-01T10:00:00.000Z',

@@ -4,6 +4,7 @@ import { resolveResource } from '@tauri-apps/api/path'
 import { arch, platform, version as osVersion } from '@tauri-apps/plugin-os'
 
 import { getAppContext } from './context.js'
+import { readLogDirPath } from './logger.js'
 
 /** Сведения для «О программе» и для баг-репорта. */
 export interface IAboutInfo {
@@ -14,6 +15,8 @@ export interface IAboutInfo {
     libraryRoot: string
     /** Команда регистрации MCP-сервера, вложенного в приложение. */
     mcpCommand: string
+    /** Каталог журнала приложения; неизвестен вне Tauri. */
+    logDir?: string
 }
 
 export async function readAboutInfo(): Promise<IAboutInfo> {
@@ -38,6 +41,7 @@ export async function readAboutInfo(): Promise<IAboutInfo> {
         arch: arch(),
         libraryRoot: context.paths.root,
         mcpCommand: `claude mcp add resolvr -- node "${mcpPath}"`,
+        logDir: await readLogDirPath(),
     }
 }
 
@@ -53,6 +57,7 @@ export function formatDiagnostics(
         `Resolvr ${info.appVersion}`,
         `${info.platform} ${info.osVersion} (${info.arch})`,
         `Library: ${info.libraryRoot}`,
+        info.logDir ? `Logs: ${info.logDir}` : undefined,
         `Secrets: ${extra.secretStorage}`,
         `Workspaces: ${extra.workspaces}`,
         extra.lastError ? `Last error: ${extra.lastError}` : undefined,

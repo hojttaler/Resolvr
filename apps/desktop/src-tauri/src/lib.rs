@@ -1,5 +1,6 @@
 mod http;
 mod keychain;
+mod logs;
 mod menu;
 mod watcher;
 mod window;
@@ -15,7 +16,12 @@ const BEFORE_QUIT_EVENT: &str = "before-quit";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logs::install_panic_hook();
+
     tauri::Builder::default()
+        // Журнал подключается первым, чтобы в него попадали ошибки
+        // инициализации остальных плагинов.
+        .plugin(logs::plugin())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -29,6 +35,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle();
+            logs::log_startup(handle);
             watcher::init(handle);
 
             // Стартовый язык — английский; интерфейс сразу переключит на
@@ -40,7 +47,7 @@ pub fn run() {
                 if let Err(error) = window::apply_window_effects(&main_window) {
                     // Отсутствие размытия не мешает работать — приложение
                     // просто получает обычный фон.
-                    eprintln!("{error}");
+                    log::warn!("Эффекты окна не применены: {error}");
                 }
             }
 
@@ -65,6 +72,8 @@ pub fn run() {
             window::show_main_window,
             window::set_window_material,
             menu::set_menu_language,
+            logs::open_log_dir,
+            logs::log_dir_path,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить приложение");

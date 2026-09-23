@@ -15,6 +15,7 @@ import {
     findJwt,
     readJwtInfo,
     TokenKeeper,
+    EnvironmentWriter,
     validateVariables,
     toErrorMessage,
     type ICollection,
@@ -41,7 +42,11 @@ import {
     type ISession,
     type ISettings,
     type ITabState,
+    type IEndpoint,
+    type IEnvironment,
+    type IEnvironmentCapture,
     type IWorkspace,
+    type IWorkspaceSelection,
 } from '@resolvr/core'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { parse, print, type GraphQLSchema } from 'graphql'
@@ -107,6 +112,9 @@ export interface IConfirmRequest {
     /** Метка PROD в заголовке. */
     production?: boolean
     run: () => Promise<void> | void
+    /** Третья кнопка между «Отмена» и основным действием — например, «Не сохранять». */
+    secondaryLabel?: string
+    secondaryRun?: () => Promise<void> | void
 }
 
 const AUTOSAVE_DELAY_MS = 300
@@ -126,6 +134,12 @@ export interface IAppState {
     tree: ICollectionNode[]
     flows: IFlow[]
     history: IHistoryEntry[]
+
+    /**
+     * Выбранные окружение и эндпоинт по workspace. Выбор общий для всех вкладок:
+     * переключение в одной вкладке меняет его везде.
+     */
+    selections: Record<string, IWorkspaceSelection>
 
     /** Вкладки текущего workspace; вкладки остальных ждут в `tabsByWorkspace`. */
     tabs: ITabState[]
@@ -161,6 +175,8 @@ export interface IAppState {
     tokenRefreshing: boolean
     /** Запрос подтверждения перед необратимым или боевым действием. */
     confirm?: IConfirmRequest
+    /** Вкладка-черновик, которую закрыть сразу после сохранения через диалог. */
+    closeAfterSaveTabId?: string
 
     /** Найденное обновление; `null` — проверяли, обновлений нет. */
     update?: IAvailableUpdate | null
@@ -221,8 +237,15 @@ export interface IAppActions {
     updateFlowDraft(tabId: string, flow: IFlow): void
     /** Сохраняет черновик цепочки из вкладки; возвращает ошибку валидации. */
     saveFlowTab(tabId: string): Promise<string | undefined>
+    /** Закрывает вкладку; несохранённые изменения — только после вопроса. */
     closeTab(tabId: string): Promise<void>
+    /** Закрывает вкладки без вопросов; черновики удаляются. */
     closeTabs(tabIds: string[]): Promise<void>
+    /**
+     * Закрывает вкладки, предлагая сохранить изменённые: «Сохранить»,
+     * «Не сохранять» или «Отмена».
+     */
+    requestCloseTabs(tabIds: string[]): Promise<void>
     closeOtherTabs(tabId: string): Promise<void>
     closeTabsToLeft(tabId: string): Promise<void>
     closeTabsToRight(tabId: string): Promise<void>
@@ -231,9 +254,11 @@ export interface IAppActions {
     updateQuery(tabId: string, query: string): void
     updateVariables(tabId: string, variables: string): void
     updateHeaders(tabId: string, headers: Record<string, string>): void
-    setTabEnvironment(tabId: string, environmentId: string): void
-    setTabEndpoint(tabId: string, endpointId: string): void
-    setBottomTab(tabId: string, tab: 'variables' | 'headers'): void
+    /** Выбирает окружение для всего workspace. */
+    setActiveEnvironment(environmentId: string): void
+    /** Выбирает эндпоинт для всего workspace и подгружает его схему из кэша. */
+    setActiveEndpoint(endpointId: string): Promise<void>
+    setBottomTab(tabId: string, tab: ITabState['bottomTab']): void
     setResponseTab(tabId: string, tab: 'response' | 'raw' | 'headers' | 'trace'): void
 
     runActiveTab(options?: { force?: boolean; confirmed?: boolean }): Promise<void>
@@ -251,8 +276,17 @@ export interface IAppActions {
     importFromBundle(bundle: IImportBundle): Promise<IImportResult>
     renameCollection(collectionId: string, name: string): Promise<void>
     deleteCollection(collectionId: string): Promise<void>
-    /** Перенос или переименование операции; открытые вкладки следуют за ней. */
-    moveOperation(from: string, to: { collectionId: string; name: string }): Promise<void>
+    /**
+     * Перенос или переименование операции; открытые вкладки и черновики
+     * цепочек следуют за ней. `index` — позиция в целевой коллекции.
+     */
+    moveOperation(
+        from: string,
+        to: { collectionId: string; name: string },
+        options?: { index?: number },
+    ): Promise<void>
+    /** Переставляет операцию внутри коллекции перед или после другой. */
+    reorderOperation(ref: string, targetRef: string, position: 'before' | 'after'): Promise<void>
     deleteOperation(operationRef: string): Promise<void>
     duplicateOperation(operationRef: string): Promise<void>
     /**
@@ -289,6 +323,8 @@ export interface IAppActions {
     syncTokenInfo(): Promise<void>
     saveWorkspaceSettings(workspace: IWorkspace): Promise<void>
     setPrerequisiteFlow(operationRef: string, flowId: string | undefined): Promise<void>
+    /** Задаёт правила сохранения ответа операции в окружение после каждого запуска. */
+    setEnvironmentCaptures(operationRef: string, captures: IEnvironmentCapture[]): Promise<void>
     saveValueToEnvironment(input: {
         name: string
         value: string
@@ -321,6 +357,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     history: [],
     tabs: [],
     tabsByWorkspace: {},
+    selections: {},
     contents: {},
     runs: {},
     flowDrafts: {},
@@ -405,12 +442,14 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 layouts[workspace.id] = workspace.layout
             }
             const layout = workspace ? layouts[workspace.id] : undefined
+            const selections = migrateSelections(session.selections, allTabs, split.activeTabId)
 
             set({
                 ready: true,
                 settings,
                 workspaces,
                 workspace,
+                selections,
                 tabs: split.tabs,
                 activeTabId: split.activeTabId,
                 tabsByWorkspace: split.rest,
@@ -429,7 +468,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             if (workspace) {
                 await get().reloadTree()
                 await get().loadHistory()
-                await loadCachedSchema(workspace, set)
+                await loadCachedSchema(workspace, activeEndpointOf(workspace, selections), set)
 
                 // Старые файлы истории удаляются при старте: чистка на каждой
                 // записи била бы по скорости выполнения запросов.
@@ -502,7 +541,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         await get().reloadTree()
         await get().loadHistory()
-        await loadCachedSchema(workspace, set)
+        await loadCachedSchema(workspace, activeEndpointOf(workspace, get().selections), set)
         await get().syncTokenInfo()
         scheduleSessionSave(get)
     },
@@ -566,8 +605,6 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             workspaceId: workspace?.id,
             title,
             operationRef: input.operationRef,
-            environmentId: workspace?.defaultEnvironmentId,
-            endpointId: workspace?.defaultEndpointId,
             dirty: false,
         })
 
@@ -582,7 +619,46 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     },
 
     async closeTab(tabId) {
-        await get().closeTabs([tabId])
+        await get().requestCloseTabs([tabId])
+    },
+
+    async requestCloseTabs(tabIds) {
+        const dirty = get().tabs.filter(
+            (tab) => tabIds.includes(tab.id) && tab.dirty && (tab.kind === 'operation' || tab.kind === 'flow'),
+        )
+        if (dirty.length === 0) {
+            await get().closeTabs(tabIds)
+
+            return
+        }
+
+        const [single] = dirty
+        get().requestConfirm({
+            title: t('Unsaved changes'),
+            description:
+                dirty.length === 1 && single
+                    ? t('“{name}” has unsaved changes. Save them before closing?', { name: single.title })
+                    : t('{n} tabs have unsaved changes. Save them before closing?', { n: dirty.length }),
+            actionLabel: t('Save'),
+            danger: false,
+            secondaryLabel: t('Don’t save'),
+            secondaryRun: () => get().closeTabs(tabIds),
+            run: async () => {
+                const keep = new Set<string>()
+                for (const tab of dirty) {
+                    if (!(await saveTab(tab.id, set, get))) keep.add(tab.id)
+                }
+                await get().closeTabs(tabIds.filter((tabId) => !keep.has(tabId)))
+
+                // Черновик без места хранения сохраняется через диалог; вкладка
+                // закроется, когда диалог сохранит её.
+                const draft = get().tabs.find((tab) => keep.has(tab.id) && tab.kind === 'operation')
+                if (draft) {
+                    get().activateTab(draft.id)
+                    set({ closeAfterSaveTabId: draft.id, dialog: 'save' })
+                }
+            },
+        })
     },
 
     async closeTabs(tabIds) {
@@ -638,23 +714,23 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     },
 
     async closeOtherTabs(tabId) {
-        await get().closeTabs(get().tabs.filter((tab) => tab.id !== tabId).map((tab) => tab.id))
+        await get().requestCloseTabs(get().tabs.filter((tab) => tab.id !== tabId).map((tab) => tab.id))
     },
 
     async closeTabsToLeft(tabId) {
         const { tabs } = get()
         const index = tabs.findIndex((tab) => tab.id === tabId)
-        await get().closeTabs(tabs.slice(0, Math.max(index, 0)).map((tab) => tab.id))
+        await get().requestCloseTabs(tabs.slice(0, Math.max(index, 0)).map((tab) => tab.id))
     },
 
     async closeTabsToRight(tabId) {
         const { tabs } = get()
         const index = tabs.findIndex((tab) => tab.id === tabId)
-        await get().closeTabs(tabs.slice(index + 1).map((tab) => tab.id))
+        await get().requestCloseTabs(tabs.slice(index + 1).map((tab) => tab.id))
     },
 
     async closeAllTabs() {
-        await get().closeTabs(get().tabs.map((tab) => tab.id))
+        await get().requestCloseTabs(get().tabs.map((tab) => tab.id))
     },
 
     async openHistoryEntry(entry) {
@@ -668,9 +744,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         // Вкладка из истории — не черновик: текст и переменные взяты как есть.
         set((state) => ({
             tabs: state.tabs.map((tab) =>
-                tab.id === tabId
-                    ? { ...tab, dirty: false, environmentId: entry.environmentId ?? tab.environmentId, endpointId: entry.endpointId }
-                    : tab,
+                tab.id === tabId ? { ...tab, dirty: false } : tab,
             ),
         }))
 
@@ -913,18 +987,38 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         scheduleDraftSave(tabId, get)
     },
 
-    setTabEnvironment(tabId, environmentId) {
+    setActiveEnvironment(environmentId) {
+        const { workspace } = get()
+        if (!workspace) return
+
         set((state) => ({
-            tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, environmentId } : tab)),
+            selections: {
+                ...state.selections,
+                [workspace.id]: { ...state.selections[workspace.id], environmentId },
+            },
         }))
         scheduleSessionSave(get)
     },
 
-    setTabEndpoint(tabId, endpointId) {
+    async setActiveEndpoint(endpointId) {
+        const { workspace } = get()
+        if (!workspace) return
+
         set((state) => ({
-            tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, endpointId } : tab)),
+            selections: {
+                ...state.selections,
+                [workspace.id]: { ...state.selections[workspace.id], endpointId },
+            },
         }))
         scheduleSessionSave(get)
+
+        // Автокомплит должен соответствовать схеме выбранного эндпоинта.
+        const endpoint = activeEndpointOf(workspace, get().selections)
+        if (endpoint) {
+            const context = await getAppContext()
+            const schema = await context.schemas.getSchema(workspace.id, endpoint.id)
+            set({ schema: schema ?? undefined, schemaFetchedAt: undefined })
+        }
     },
 
     setBottomTab(tabId, bottomTab) {
@@ -977,9 +1071,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         }
 
         // Мутация на боевом окружении выполняется только после подтверждения.
-        const environment = workspace.environments.find(
-            (item) => item.id === (tab.environmentId ?? workspace.defaultEnvironmentId),
-        )
+        const environment = selectActiveEnvironment(state)
         if (kind === 'mutation' && environment?.production && !options.confirmed) {
             get().requestConfirm(
                 productionConfirm(
@@ -1008,13 +1100,21 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 query: content.query,
                 variables,
                 headers: content.headers,
-                endpointId: tab.endpointId,
-                environmentId: tab.environmentId,
+                endpointId: selectActiveEndpoint(state)?.id,
+                environmentId: environment?.id,
                 operationName: extractOperationName(content.query),
                 timeoutMs: state.settings.request.timeoutMs,
+                saveToEnvironment: findOperation(state.tree, tab.operationRef)?.saveToEnvironment ?? [],
             })
 
             setRun(set, tab.id, { status: 'done', result, events: [] })
+            if (result.savedVariables) {
+                set({
+                    workspace: await context.tokens.attach(
+                        await context.workspaces.getWorkspace(workspace.id),
+                    ),
+                })
+            }
             await get().loadHistory()
         } catch (error) {
             setRun(set, tab.id, { status: 'error', error: toErrorMessage(error), events: [] })
@@ -1045,52 +1145,22 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     },
 
     async saveActiveTab(collectionId, name) {
-        const state = get()
-        const tab = state.tabs.find((item) => item.id === state.activeTabId)
-        const workspace = state.workspace
-        if (!tab || !workspace) return
+        const { activeTabId } = get()
+        if (!activeTabId) return
 
-        const content = state.contents[tab.id]
-        if (!content) return
+        await saveOperationTab(activeTabId, collectionId, name, set, get)
 
-        const context = await getAppContext()
-        const variables = parseVariables(content.variables)
-
-        await context.workspaces.saveOperation(workspace.id, {
-            collectionId,
-            name,
-            query: content.query,
-            variables: variables instanceof Error ? {} : variables,
-            headers: content.headers,
-            endpointId: tab.endpointId,
-            environmentId: tab.environmentId,
-        })
-
-        set((state) => ({
-            tabs: state.tabs.map((item) =>
-                item.id === tab.id
-                    ? {
-                          ...item,
-                          dirty: false,
-                          title: name,
-                          operationRef: formatOperationRef({ collectionId, name }),
-                      }
-                    : item,
-            ),
-        }))
-
-        await get().reloadTree()
-        scheduleSessionSave(get)
+        if (get().closeAfterSaveTabId === activeTabId) {
+            set({ closeAfterSaveTabId: undefined })
+            await get().closeTabs([activeTabId])
+        }
     },
 
     async refreshSchema() {
-        const { workspace, tabs, activeTabId } = get()
+        const { workspace } = get()
         if (!workspace) return
 
-        const activeTab = tabs.find((tab) => tab.id === activeTabId)
-        const endpointId = activeTab?.endpointId ?? workspace.defaultEndpointId
-        const endpoint =
-            workspace.endpoints.find((item) => item.id === endpointId) ?? workspace.endpoints[0]
+        const endpoint = selectActiveEndpoint(get())
 
         if (!endpoint) {
             set({ schemaError: t('The workspace has no endpoints') })
@@ -1116,12 +1186,10 @@ export const useAppStore = create<IAppStore>((set, get) => ({
      * инспектора, а результат должен переживать переключение лейаута.
      */
     async compareSchema() {
-        const { workspace, tabs, activeTabId } = get()
+        const { workspace } = get()
         if (!workspace) return
 
-        const activeTab = tabs.find((tab) => tab.id === activeTabId)
-        const endpointId =
-            activeTab?.endpointId ?? workspace.defaultEndpointId ?? workspace.endpoints[0]?.id
+        const endpointId = selectActiveEndpoint(get())?.id
         if (!endpointId) return
 
         const context = await getAppContext()
@@ -1225,9 +1293,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const { workspace } = get()
         if (!workspace) return
 
-        const activeTab = get().tabs.find((tab) => tab.id === get().activeTabId)
-        const environmentId = activeTab?.environmentId ?? workspace.defaultEnvironmentId
-        const environment = workspace.environments.find((item) => item.id === environmentId)
+        const environment = selectActiveEnvironment(get())
+        const environmentId = environment?.id
 
         // Цепочка почти всегда содержит мутации — на боевом окружении она
         // требует того же подтверждения, что и одиночная мутация.
@@ -1244,7 +1311,6 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         const context = await getAppContext()
         try {
-
             const run = await context.flows.run(workspace.id, flowId, { environmentId })
             set({ flowRun: run })
 
@@ -1278,12 +1344,11 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     },
 
     async runAllFlows(options = {}) {
-        const { workspace, flows, tabs, activeTabId } = get()
+        const { workspace, flows } = get()
         if (!workspace || flows.length === 0 || get().reportRunning) return
 
-        const activeTab = tabs.find((tab) => tab.id === activeTabId)
-        const environmentId = activeTab?.environmentId ?? workspace.defaultEnvironmentId
-        const environment = workspace.environments.find((item) => item.id === environmentId)
+        const environment = selectActiveEnvironment(get())
+        const environmentId = environment?.id
 
         if (environment?.production && !options.confirmed) {
             get().requestConfirm(
@@ -1503,21 +1568,86 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         await get().reloadTree()
     },
 
-    async moveOperation(from, to) {
+    async moveOperation(from, to, options = {}) {
         const { workspace } = get()
         if (!workspace) return
 
         const context = await getAppContext()
-        await context.workspaces.moveOperation(workspace.id, parseOperationRef(from), to)
+        await context.workspaces.moveOperation(workspace.id, parseOperationRef(from), to, options)
 
+        // Файлы цепочек ядро уже переписало; открытые черновики цепочек
+        // переписываются здесь, иначе сохранение черновика вернуло бы старую ссылку.
         const nextRef = formatOperationRef(to)
+        const changedDrafts: string[] = []
+        set((state) => {
+            const flowDrafts = { ...state.flowDrafts }
+            for (const [tabId, draft] of Object.entries(flowDrafts)) {
+                if (!draft.steps.some((step) => step.operationRef === from)) continue
+
+                flowDrafts[tabId] = {
+                    ...draft,
+                    steps: draft.steps.map((step) =>
+                        step.operationRef === from ? { ...step, operationRef: nextRef } : step,
+                    ),
+                }
+                changedDrafts.push(tabId)
+            }
+
+            return {
+                flowDrafts,
+                tabs: state.tabs.map((tab) =>
+                    tab.operationRef === from ? { ...tab, operationRef: nextRef, title: to.name } : tab,
+                ),
+            }
+        })
+        for (const tabId of changedDrafts) scheduleFlowDraftSave(tabId, get)
+        scheduleSessionSave(get)
+
+        set({ workspace: await context.tokens.attach(await context.workspaces.getWorkspace(workspace.id)) })
+        await get().reloadTree()
+    },
+
+    async reorderOperation(ref, targetRef, position) {
+        const { workspace, tree } = get()
+        if (!workspace || ref === targetRef) return
+
+        const source = parseOperationRef(ref)
+        const target = parseOperationRef(targetRef)
+        const node = tree.find((item) => item.collection.id === target.collectionId)
+        if (!node) return
+
+        if (source.collectionId !== target.collectionId) {
+            const names = node.operations.map((operation) => operation.name)
+            const index = names.indexOf(target.name) + (position === 'after' ? 1 : 0)
+            await get().moveOperation(ref, { collectionId: target.collectionId, name: source.name }, { index })
+
+            return
+        }
+
+        const rest = node.operations.filter((operation) => operation.name !== source.name)
+        const moving = node.operations.find((operation) => operation.name === source.name)
+        if (!moving) return
+
+        const index = rest.findIndex((operation) => operation.name === target.name) + (position === 'after' ? 1 : 0)
+        const operations = [...rest.slice(0, index), moving, ...rest.slice(index)]
+
+        // Дерево обновляется сразу: иначе строка «прыгала» бы обратно до конца записи.
         set((state) => ({
-            tabs: state.tabs.map((tab) =>
-                tab.operationRef === from ? { ...tab, operationRef: nextRef, title: to.name } : tab,
+            tree: state.tree.map((item) =>
+                item.collection.id === target.collectionId ? { ...item, operations } : item,
             ),
         }))
-        scheduleSessionSave(get)
-        await get().reloadTree()
+
+        const context = await getAppContext()
+        try {
+            await context.workspaces.reorderOperations(
+                workspace.id,
+                target.collectionId,
+                operations.map((operation) => operation.name),
+            )
+        } finally {
+            await get().reloadTree()
+        }
     },
 
     async deleteOperation(operationRef) {
@@ -1565,6 +1695,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             endpointId: operation.endpointId,
             environmentId: operation.environmentId,
             prerequisiteFlow: operation.prerequisiteFlow,
+            saveToEnvironment: operation.saveToEnvironment,
         })
         await get().reloadTree()
     },
@@ -1583,8 +1714,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             query: content.query,
             variables: variables instanceof Error ? {} : variables,
             headers: content.headers,
-            endpointId: tab.endpointId,
-            environmentId: tab.environmentId,
+            endpointId: selectActiveEndpoint(state)?.id,
+            environmentId: selectActiveEnvironment(state)?.id,
             operationName: extractOperationName(content.query),
             skipFlows: true,
         })
@@ -1653,13 +1784,10 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     },
 
     async refreshToken() {
-        const { workspace, tabs, activeTabId } = get()
+        const { workspace } = get()
         if (!workspace) return
 
-        const activeTab = tabs.find((tab) => tab.id === activeTabId)
-        const environment = workspace.environments.find(
-            (item) => item.id === (activeTab?.environmentId ?? workspace.defaultEnvironmentId),
-        )
+        const environment = selectActiveEnvironment(get())
         if (!environment?.recovery?.flowId) return
 
         set({ tokenRefreshing: true })
@@ -1719,6 +1847,31 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             endpointId: operation.endpointId,
             environmentId: operation.environmentId,
             prerequisiteFlow: flowId,
+            saveToEnvironment: operation.saveToEnvironment,
+        })
+
+        await get().reloadTree()
+    },
+
+    async setEnvironmentCaptures(operationRef, captures) {
+        const { workspace } = get()
+        if (!workspace) return
+
+        const context = await getAppContext()
+        const ref = parseOperationRef(operationRef)
+        const operation = await context.workspaces.getOperation(workspace.id, ref)
+
+        await context.workspaces.saveOperation(workspace.id, {
+            collectionId: ref.collectionId,
+            name: operation.name,
+            query: operation.query,
+            description: operation.description,
+            variables: operation.variables,
+            headers: operation.headers,
+            endpointId: operation.endpointId,
+            environmentId: operation.environmentId,
+            prerequisiteFlow: operation.prerequisiteFlow,
+            saveToEnvironment: captures,
         })
 
         await get().reloadTree()
@@ -1732,46 +1885,26 @@ export const useAppStore = create<IAppStore>((set, get) => ({
      * заголовок авторизации, который его использует.
      */
     async saveValueToEnvironment(input) {
-        const { workspace, tabs, activeTabId } = get()
+        const { workspace } = get()
         if (!workspace) return
 
-        const activeTab = tabs.find((tab) => tab.id === activeTabId)
-        const environmentId = activeTab?.environmentId ?? workspace.defaultEnvironmentId
-        const environment =
-            workspace.environments.find((item) => item.id === environmentId) ??
-            workspace.environments[0]
+        const environment = selectActiveEnvironment(get()) ?? workspace.environments[0]
         if (!environment) return
 
         const context = await getAppContext()
 
-        // Секрет уходит в Keychain, в файле остаётся только ссылка на него.
-        environment.variables[input.name] = input.secret
-            ? await context.resolver.storeSecret(
-                  workspace.id,
-                  environment.id,
-                  input.name,
-                  input.value,
-              )
-            : input.value
+        // Секрет уходит в хранилище секретов, в файле остаётся только ссылка на него.
+        await new EnvironmentWriter(context.workspaces, context.resolver, context.tokens).save(
+            workspace.id,
+            environment.id,
+            [{ name: input.name, value: input.value, secret: input.secret }],
+            { authHeaderFor: input.asAuthHeader ? input.name : undefined },
+        )
 
-        if (input.asAuthHeader) {
-            environment.headers = {
-                ...environment.headers,
-                authorization: `Bearer {{${input.name}}}`,
-            }
-        }
-
-        // Срок жизни из `exp` позволяет обновить токен заранее и показать
-        // остаток времени в шапке.
-        const info = readJwtInfo(input.value)
-        if (info) {
-            await context.tokens.set(workspace.id, environment.id, {
-                expiresAt: info.expiresAt.toISOString(),
-                subject: info.subject,
-            })
-        }
-
-        await get().saveWorkspaceSettings({ ...workspace })
+        set({
+            workspace: await context.tokens.attach(await context.workspaces.getWorkspace(workspace.id)),
+            workspaces: await context.workspaces.listWorkspaces(),
+        })
     },
 
     /** Перечитывает журнал действий агента с диска. */
@@ -1818,7 +1951,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     },
 
     setDialog(dialog) {
-        set({ dialog })
+        // Отменённое сохранение черновика отменяет и его закрытие.
+        set(dialog === 'save' ? { dialog } : { dialog, closeAfterSaveTabId: undefined })
     },
 
     async flushAll() {
@@ -1857,14 +1991,101 @@ function applySettings(settings: ISettings): void {
 /** Читает схему из кэша, чтобы автокомплит работал сразу после запуска. */
 async function loadCachedSchema(
     workspace: IWorkspace,
+    endpoint: IEndpoint | undefined,
     set: (partial: Partial<IAppState>) => void,
 ): Promise<void> {
-    const endpointId = workspace.defaultEndpointId ?? workspace.endpoints[0]?.id
-    if (!endpointId) return
+    if (!endpoint) return
 
     const context = await getAppContext()
-    const schema = await context.schemas.getSchema(workspace.id, endpointId)
+    const schema = await context.schemas.getSchema(workspace.id, endpoint.id)
     if (schema) set({ schema })
+}
+
+/**
+ * Окружение, выбранное в workspace.
+ *
+ * Выбор, указывающий на удалённое окружение, игнорируется — действует
+ * окружение по умолчанию.
+ */
+function activeEnvironmentOf(
+    workspace: IWorkspace,
+    selections: Record<string, IWorkspaceSelection>,
+): IEnvironment | undefined {
+    const selected = selections[workspace.id]?.environmentId
+
+    return (
+        workspace.environments.find((item) => item.id === selected) ??
+        workspace.environments.find((item) => item.id === workspace.defaultEnvironmentId)
+    )
+}
+
+/** Эндпоинт, выбранный в workspace; иначе — по умолчанию или первый. */
+function activeEndpointOf(
+    workspace: IWorkspace,
+    selections: Record<string, IWorkspaceSelection>,
+): IEndpoint | undefined {
+    const selected = selections[workspace.id]?.endpointId
+
+    return (
+        workspace.endpoints.find((item) => item.id === selected) ??
+        workspace.endpoints.find((item) => item.id === workspace.defaultEndpointId) ??
+        workspace.endpoints[0]
+    )
+}
+
+/** Окружение, общее для всех вкладок текущего workspace. */
+export function selectActiveEnvironment(
+    state: Pick<IAppState, 'workspace' | 'selections'>,
+): IEnvironment | undefined {
+    return state.workspace ? activeEnvironmentOf(state.workspace, state.selections) : undefined
+}
+
+/** Эндпоинт, общий для всех вкладок текущего workspace. */
+export function selectActiveEndpoint(
+    state: Pick<IAppState, 'workspace' | 'selections'>,
+): IEndpoint | undefined {
+    return state.workspace ? activeEndpointOf(state.workspace, state.selections) : undefined
+}
+
+/**
+ * Выбор окружения из сессий старых версий.
+ *
+ * Раньше окружение выбиралось во вкладке: для workspace без общего выбора
+ * берётся выбор его активной (или первой) вкладки, чтобы после обновления
+ * запросы не ушли в другое окружение.
+ */
+function migrateSelections(
+    saved: Record<string, IWorkspaceSelection>,
+    tabs: ITabState[],
+    activeTabId: string | undefined,
+): Record<string, IWorkspaceSelection> {
+    const selections = { ...saved }
+    const ordered = [...tabs].sort((left, right) =>
+        left.id === activeTabId ? -1 : right.id === activeTabId ? 1 : 0,
+    )
+
+    for (const tab of ordered) {
+        if (!tab.workspaceId || selections[tab.workspaceId]) continue
+        if (!tab.environmentId && !tab.endpointId) continue
+
+        selections[tab.workspaceId] = {
+            environmentId: tab.environmentId,
+            endpointId: tab.endpointId,
+        }
+    }
+
+    return selections
+}
+
+/** Операция дерева коллекций по ссылке `collection/operation`. */
+export function findOperation(tree: ICollectionNode[], operationRef: string | undefined): IOperation | undefined {
+    if (!operationRef) return undefined
+
+    const ref = parseOperationRef(operationRef)
+
+    return tree
+        .find((node) => node.collection.id === ref.collectionId)
+        ?.operations.find((operation) => operation.name === ref.name)
 }
 
 function requireContent(
@@ -1935,6 +2156,7 @@ function scheduleSessionSave(get: () => IAppStore): void {
             tabs: [...state.tabs, ...others.flatMap(([, group]) => group.tabs)],
             activeTabs,
             layouts,
+            selections: state.selections,
         })
 
         await context.sessions.save(session)
@@ -2072,8 +2294,8 @@ async function startSubscription(
                 query: content.query,
                 variables,
                 headers: content.headers,
-                endpointId: tab.endpointId,
-                environmentId: tab.environmentId,
+                endpointId: selectActiveEndpoint(get())?.id,
+                environmentId: selectActiveEnvironment(get())?.id,
                 operationName: extractOperationName(content.query),
             },
             {
@@ -2127,6 +2349,95 @@ async function startSubscription(
             },
         }))
     }
+}
+
+/**
+ * Сохраняет вкладку-операцию под указанным именем.
+ *
+ * Перезапись существующей операции сохраняет то, чего нет во вкладке:
+ * описание, цепочку подготовки и правила сохранения в окружение.
+ */
+async function saveOperationTab(
+    tabId: string,
+    collectionId: string,
+    name: string,
+    set: (updater: (state: IAppState) => Partial<IAppState>) => void,
+    get: () => IAppStore,
+): Promise<void> {
+    const state = get()
+    const tab = state.tabs.find((item) => item.id === tabId)
+    const workspace = state.workspace
+    if (!tab || !workspace) return
+
+    const content = state.contents[tab.id]
+    if (!content) return
+
+    const context = await getAppContext()
+    const variables = parseVariables(content.variables)
+
+    // Перезапись существующей операции сохраняет то, чего нет во вкладке:
+    // описание, цепочку подготовки и правила сохранения в окружение.
+    const existing = await context.workspaces
+        .getOperation(workspace.id, { collectionId, name })
+        .catch(() => undefined)
+
+    await context.workspaces.saveOperation(workspace.id, {
+        collectionId,
+        name,
+        query: content.query,
+        description: existing?.description,
+        variables: variables instanceof Error ? {} : variables,
+        headers: content.headers,
+        endpointId: selectActiveEndpoint(state)?.id,
+        environmentId: selectActiveEnvironment(state)?.id,
+        prerequisiteFlow: existing?.prerequisiteFlow,
+        saveToEnvironment: existing?.saveToEnvironment,
+    })
+
+    set((state) => ({
+        tabs: state.tabs.map((item) =>
+            item.id === tab.id
+                ? {
+                      ...item,
+                      dirty: false,
+                      title: name,
+                      operationRef: formatOperationRef({ collectionId, name }),
+                  }
+                : item,
+        ),
+    }))
+
+    await get().reloadTree()
+    scheduleSessionSave(get)
+}
+
+/**
+ * Сохраняет вкладку туда, откуда она открыта.
+ *
+ * Возвращает `false`, если сохранить некуда (новый черновик) или цепочка
+ * заполнена с ошибкой: такую вкладку закрывать нельзя.
+ */
+async function saveTab(
+    tabId: string,
+    set: (updater: (state: IAppState) => Partial<IAppState>) => void,
+    get: () => IAppStore,
+): Promise<boolean> {
+    const tab = get().tabs.find((item) => item.id === tabId)
+    if (!tab) return true
+
+    if (tab.kind === 'flow') {
+        const error = await get().saveFlowTab(tabId)
+        if (error) get().activateTab(tabId)
+
+        return error === undefined
+    }
+
+    if (!tab.operationRef) return false
+
+    const ref = parseOperationRef(tab.operationRef)
+    await saveOperationTab(tabId, ref.collectionId, ref.name, set, get)
+
+    return true
 }
 
 /** Разбирает текст переменных; ошибка возвращается значением, а не исключением. */

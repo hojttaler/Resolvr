@@ -62,6 +62,12 @@ const editorTheme = EditorView.theme({
         color: 'var(--accent-contrast)',
     },
     '.cm-completionDetail': { color: 'var(--text-tertiary)', fontStyle: 'normal' },
+    // `{{name}}` — переменная окружения; неизвестная окружению подчёркнута.
+    '.cm-env-var, .cm-env-var > span': { color: 'var(--accent)' },
+    '.cm-env-var--unknown, .cm-env-var--unknown > span': {
+        color: 'var(--warning)',
+        textDecoration: 'underline wavy var(--warning)',
+    },
     '.cm-diagnostic-error': { borderLeftColor: 'var(--danger)' },
     '.cm-lintRange-error': {
         backgroundImage: 'none',
@@ -70,8 +76,9 @@ const editorTheme = EditorView.theme({
     '.cm-panels': {
         backgroundColor: 'var(--surface-raised)',
         color: 'var(--text-primary)',
-        borderTop: '1px solid var(--separator)',
     },
+    '.cm-panels-top': { borderBottom: '1px solid var(--separator)' },
+    '.cm-panels-bottom': { borderTop: '1px solid var(--separator)' },
     '.cm-searchMatch': {
         backgroundColor: 'color-mix(in srgb, var(--warning) 32%, transparent)',
     },

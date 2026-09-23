@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+- Response pane: a "Copy" button copies the whole Response / Raw / Headers / Trace tab;
+  ⌘A / Ctrl+A selects the tab content (the JSON tree is highlighted and ⌘C copies the full
+  text, not only the visible rows).
+- Collections: operations are reordered by drag and drop, within a collection and into a
+  specific position of another one.
+- Closing a tab with unsaved changes asks "Save / Don't save / Cancel"; a new draft opens
+  the save dialog and closes after saving.
+- Environment variables in requests: `{{` in the variables editor suggests the variables of
+  the active environment (secrets masked) and of the prerequisite flow; unknown names are
+  underlined, unknown names in headers are listed under the header editor.
+- Saving response values to the environment: any value (numbers, booleans, objects as JSON),
+  and per-operation rules "after every successful run save `data.…` to `{{variable}}`"
+  (the "To environment" tab of a saved operation, or the checkbox in the save dialog).
+  Rules also apply to runs through MCP.
+- Logs: the app writes a log file (`resolvr.log` in the system log folder) including
+  crashes and unhandled UI errors; Settings → About → "Open folder" and the app menu open
+  it. A render error shows a recovery screen instead of a blank window.
+- Editor search: a redesigned find/replace panel in the app's style — match counter
+  ("3 of 12"), case / regexp / whole-word toggles, replace row behind a chevron,
+  Enter / Shift+Enter / Esc; labels are translated.
+- Fixed: renaming or moving an operation broke flows and login profiles that referenced
+  it; references are now rewritten, and a renamed operation keeps its position.
+- Fixed: the environment and endpoint were chosen per tab, so two tabs could silently hit
+  different environments. The choice is now shared by all tabs of a workspace (the old
+  per-tab choice of the active tab is migrated).
+- Fixed on Linux: the Window menu did nothing, and "About Resolvr" showed an empty dialog
+  with a broken icon.
+- Large responses: the Raw tab shows the first 1 MB with a "Show all" button and does not
+  re-format bodies over 5 MB; search over the response no longer blocks typing. Copying
+  still takes the full text.
+- Fixed: saving over an existing operation (in the app or via MCP `operation_save`) dropped
+  its description and prerequisite flow.
+
 ## 0.2.1 — 2026-09-22
 
 - Fixed "Signature Verification Failed" on update: the release manifest could mix

@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Group, Panel, Separator, type GroupImperativeHandle } from 'react-resizable-panels'
+
+import { toErrorMessage, type IEnvironmentCapture } from '@resolvr/core'
 
 import { useT } from '../i18n/index.js'
 import { kbd } from '../lib/keys.js'
-import { useAppStore, parseVariables } from '../state/store.js'
+import {
+    findOperation,
+    parseVariables,
+    selectActiveEndpoint,
+    selectActiveEnvironment,
+    useAppStore,
+} from '../state/store.js'
 import { CodeEditor } from './editor/CodeEditor.js'
+import { findUnknownPlaceholders, type IEnvVariablesContext } from './editor/env-completion.js'
 import { buildVariablesSkeleton } from './editor/variables-completion.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { KeyValueEditor } from './KeyValueEditor.js'
@@ -41,6 +50,7 @@ export function RequestPane(): React.JSX.Element {
     const activeTabAsCurl = useAppStore((state) => state.activeTabAsCurl)
     const linkTo = useAppStore((state) => state.linkTo)
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
+    const environment = useAppStore(selectActiveEnvironment)
     const t = useT()
 
     const prerequisiteFlow = tree
@@ -49,6 +59,27 @@ export function RequestPane(): React.JSX.Element {
             (operation) =>
                 `${operation.collectionId}/${operation.name}` === tab?.operationRef,
         )?.prerequisiteFlow
+
+    // Для `{{name}}` доступны переменные окружения и то, что добывает цепочка
+    // подготовки операции: её значения подставляются перед запуском.
+    const prerequisiteExtract = flows.find((flow) => flow.id === prerequisiteFlow)
+    const envVariables = useMemo<IEnvVariablesContext>(() => {
+        const fromEnvironment = Object.entries(environment?.variables ?? {}).map(([name, value]) => ({
+            name,
+            secret: value.startsWith('keychain://'),
+            value: value.startsWith('keychain://') ? undefined : value,
+            source: 'environment' as const,
+        }))
+        const fromFlow = (prerequisiteExtract?.steps ?? [])
+            .flatMap((step) => Object.keys(step.extract))
+            .filter((name) => !fromEnvironment.some((variable) => variable.name === name))
+            .map((name) => ({ name, secret: false, source: 'flow' as const }))
+
+        return { variables: [...fromEnvironment, ...fromFlow], environmentName: environment?.name }
+    }, [environment, prerequisiteExtract])
+    const unknownInHeaders = content
+        ? findUnknownPlaceholders(Object.values(content.headers).join('\n'), envVariables.variables)
+        : []
 
     const groupHandle = useRef<GroupImperativeHandle | null>(null)
     const groupElement = useRef<HTMLDivElement | null>(null)
@@ -298,6 +329,18 @@ export function RequestPane(): React.JSX.Element {
                                     ? ` (${Object.keys(content.headers).length})`
                                     : ''}
                             </button>
+                            {tab.operationRef && (
+                                <button
+                                    type="button"
+                                    className={`segmented__item${
+                                        tab.bottomTab === 'captures' ? ' segmented__item--active' : ''
+                                    }`}
+                                    onClick={() => setBottomTab(activeTabId, 'captures')}
+                                    title={t('Save response values to the environment after every run')}
+                                >
+                                    {t('To environment')}
+                                </button>
+                            )}
                         </div>
 
                         <span className="panel__spacer" />
@@ -334,9 +377,12 @@ export function RequestPane(): React.JSX.Element {
                                 language="json"
                                 schema={schema}
                                 completionQuery={content.query}
+                                envVariables={envVariables}
                                 onChange={(value) => updateVariables(activeTabId, value)}
                                 onRun={() => void runActiveTab()}
                             />
+                        ) : tab.bottomTab === 'captures' && tab.operationRef ? (
+                            <EnvironmentCaptures key={tab.operationRef} operationRef={tab.operationRef} />
                         ) : (
                             <div style={{ padding: 'var(--pad-sm) var(--pad-md)' }}>
                                 <InheritedHeaders />
@@ -348,6 +394,15 @@ export function RequestPane(): React.JSX.Element {
                                     valuePlaceholder={t('value or {{variable}}')}
                                     addLabel={t('+ Header')}
                                 />
+
+                                {unknownInHeaders.length > 0 && (
+                                    <div className="inspector__hint" style={{ color: 'var(--warning)' }}>
+                                        {t('Not defined in environment “{env}”: {names}', {
+                                            env: environment?.name ?? '—',
+                                            names: unknownInHeaders.join(', '),
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -368,17 +423,15 @@ function InheritedHeaders(): React.JSX.Element | null {
     const workspace = useAppStore((state) => state.workspace)
     const tree = useAppStore((state) => state.tree)
     const tab = useAppStore((state) => state.tabs.find((item) => item.id === state.activeTabId))
+    const activeEndpoint = useAppStore(selectActiveEndpoint)
+    const activeEnvironment = useAppStore(selectActiveEnvironment)
     const setDialog = useAppStore((state) => state.setDialog)
     const t = useT()
 
     if (!workspace || !tab) return null
 
-    const endpoint = workspace.endpoints.find(
-        (item) => item.id === (tab.endpointId ?? workspace.defaultEndpointId),
-    )
-    const environment = workspace.environments.find(
-        (item) => item.id === (tab.environmentId ?? workspace.defaultEnvironmentId),
-    )
+    const endpoint = activeEndpoint
+    const environment = activeEnvironment
     const collection = tab.operationRef
         ? tree.find((node) => node.collection.id === tab.operationRef?.split('/')[0])?.collection
         : undefined
@@ -429,6 +482,102 @@ function InheritedHeaders(): React.JSX.Element | null {
                     </div>
                 ))
             )}
+        </div>
+    )
+}
+
+/**
+ * Правила сохранения ответа операции в окружение.
+ *
+ * Хранятся в метаданных операции, а не во вкладке: срабатывают при любом
+ * запуске — из приложения и через MCP. Правило записывается сразу при
+ * изменении, отдельного сохранения операции не требует.
+ */
+function EnvironmentCaptures({ operationRef }: { operationRef: string }): React.JSX.Element {
+    const operation = useAppStore((state) => findOperation(state.tree, operationRef))
+    const setEnvironmentCaptures = useAppStore((state) => state.setEnvironmentCaptures)
+    const environment = useAppStore(selectActiveEnvironment)
+    const [rows, setRows] = useState<IEnvironmentCapture[]>(() => operation?.saveToEnvironment ?? [])
+    const [error, setError] = useState<string | undefined>()
+    const t = useT()
+
+    function commit(next: IEnvironmentCapture[]): void {
+        setRows(next)
+        const complete = next.filter(
+            (row) => row.variable.trim().length > 0 && row.path.trim().length > 0,
+        )
+        setError(undefined)
+        void setEnvironmentCaptures(
+            operationRef,
+            complete.map((row) => ({ ...row, variable: row.variable.trim(), path: row.path.trim() })),
+        ).catch((caught: unknown) => setError(toErrorMessage(caught)))
+    }
+
+    function update(index: number, patch: Partial<IEnvironmentCapture>): void {
+        setRows((current) => current.map((row, position) => (position === index ? { ...row, ...patch } : row)))
+    }
+
+    return (
+        <div className="captures">
+            <div className="inspector__hint">
+                {t('After a successful run the values are written to environment “{env}”.', {
+                    env: environment?.name ?? '—',
+                })}
+            </div>
+
+            {rows.map((row, index) => (
+                <div key={index} className="captures__row">
+                    <input
+                        className="input mono"
+                        placeholder={t('variable')}
+                        value={row.variable}
+                        spellCheck={false}
+                        onChange={(event) => update(index, { variable: event.target.value })}
+                        onBlur={() => commit(rows)}
+                    />
+                    <span className="captures__arrow">←</span>
+                    <input
+                        className="input mono"
+                        placeholder="data.login.token"
+                        value={row.path}
+                        spellCheck={false}
+                        onChange={(event) => update(index, { path: event.target.value })}
+                        onBlur={() => commit(rows)}
+                    />
+                    <label className="row" title={t('Secret — keep in the secret store')}>
+                        <input
+                            type="checkbox"
+                            checked={row.secret}
+                            onChange={(event) =>
+                                commit(
+                                    rows.map((item, position) =>
+                                        position === index ? { ...item, secret: event.target.checked } : item,
+                                    ),
+                                )
+                            }
+                        />
+                        {t('secret')}
+                    </label>
+                    <button
+                        type="button"
+                        className="btn btn--quiet"
+                        onClick={() => commit(rows.filter((_, position) => position !== index))}
+                        aria-label={t('Delete')}
+                    >
+                        ×
+                    </button>
+                </div>
+            ))}
+
+            <button
+                type="button"
+                className="btn btn--quiet"
+                onClick={() => setRows((current) => [...current, { variable: '', path: 'data.', secret: false }])}
+            >
+                {t('+ Rule')}
+            </button>
+
+            {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
         </div>
     )
 }

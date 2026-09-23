@@ -195,4 +195,127 @@ describe('перенос операций', () => {
             ),
         ).rejects.toThrow(/уже существует/)
     })
+
+    it('при переименовании оставляет операцию на прежнем месте', async () => {
+        const store = await createTwoCollections()
+        await store.saveOperation('api', { collectionId: 'users', name: 'List', query: '{ a }' })
+        await store.saveOperation('api', { collectionId: 'users', name: 'Create', query: '{ b }' })
+
+        await store.moveOperation(
+            'api',
+            { collectionId: 'users', name: 'List' },
+            { collectionId: 'users', name: 'All' },
+        )
+
+        expect((await store.listOperations('api', 'users')).map((item) => item.name)).toEqual([
+            'Me',
+            'All',
+            'Create',
+        ])
+    })
+
+    it('переписывает ссылки из цепочек и профиля логина на новое имя', async () => {
+        const store = await createTwoCollections()
+        await store.saveFlow('api', {
+            id: 'login',
+            name: 'Login',
+            description: '',
+            steps: [
+                {
+                    id: 's1',
+                    name: 'me',
+                    operationRef: 'users/Me',
+                    variables: {},
+                    extract: {},
+                    assert: [],
+                    continueOnFailure: false,
+                },
+                {
+                    id: 's2',
+                    name: 'other',
+                    operationRef: 'admin/Other',
+                    variables: {},
+                    extract: {},
+                    assert: [],
+                    continueOnFailure: false,
+                },
+            ],
+        })
+        const workspace = await store.getWorkspace('api')
+        await store.saveWorkspace({
+            ...workspace,
+            environments: workspace.environments.map((environment) => ({
+                ...environment,
+                auth: {
+                    type: 'login' as const,
+                    operationRef: 'users/Me',
+                    tokenPath: 'data.login.token',
+                    storeAs: 'token',
+                    headerName: 'Authorization',
+                    prefix: 'Bearer ',
+                    ttlSeconds: 3300,
+                    variables: {},
+                },
+            })),
+        })
+
+        await store.moveOperation(
+            'api',
+            { collectionId: 'users', name: 'Me' },
+            { collectionId: 'admin', name: 'Profile' },
+        )
+
+        const flow = await store.getFlow('api', 'login')
+        expect(flow.steps.map((step) => step.operationRef)).toEqual(['admin/Profile', 'admin/Other'])
+        const auth = (await store.getWorkspace('api')).environments[0]?.auth
+        expect(auth?.type === 'login' ? auth.operationRef : undefined).toBe('admin/Profile')
+    })
+
+    it('ставит перенесённую операцию на указанную позицию', async () => {
+        const store = await createTwoCollections()
+        await store.saveOperation('api', { collectionId: 'admin', name: 'A', query: '{ a }' })
+        await store.saveOperation('api', { collectionId: 'admin', name: 'B', query: '{ b }' })
+
+        await store.moveOperation(
+            'api',
+            { collectionId: 'users', name: 'Me' },
+            { collectionId: 'admin', name: 'Me' },
+            { index: 1 },
+        )
+
+        expect((await store.listOperations('api', 'admin')).map((item) => item.name)).toEqual([
+            'A',
+            'Me',
+            'B',
+        ])
+    })
+})
+
+describe('порядок операций', () => {
+    it('сохраняет порядок, заданный перетаскиванием', async () => {
+        const { store } = createStore()
+        await store.createWorkspace({ name: 'API' })
+        await store.createCollection('api', 'Users')
+        for (const name of ['A', 'B', 'C']) {
+            await store.saveOperation('api', { collectionId: 'users', name, query: '{ a }' })
+        }
+
+        await store.reorderOperations('api', 'users', ['C', 'A', 'B'])
+
+        expect((await store.listOperations('api', 'users')).map((item) => item.name)).toEqual([
+            'C',
+            'A',
+            'B',
+        ])
+    })
+
+    it('отклоняет порядок, в котором не хватает операций', async () => {
+        const { store } = createStore()
+        await store.createWorkspace({ name: 'API' })
+        await store.createCollection('api', 'Users')
+        await store.saveOperation('api', { collectionId: 'users', name: 'A', query: '{ a }' })
+        await store.saveOperation('api', { collectionId: 'users', name: 'B', query: '{ b }' })
+
+        await expect(store.reorderOperations('api', 'users', ['B'])).rejects.toThrow(/не совпадает/)
+    })
 })

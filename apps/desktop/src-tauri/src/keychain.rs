@@ -12,8 +12,24 @@ fn service_name(workspace: &str, environment: &str) -> String {
 }
 
 fn entry(workspace: &str, environment: &str, key: &str) -> Result<Entry, String> {
-    Entry::new(&service_name(workspace, environment), key)
-        .map_err(|error| format!("Не удалось обратиться к Keychain: {error}"))
+    Entry::new(&service_name(workspace, environment), key).map_err(|error| {
+        log::error!("Keychain недоступен ({workspace}/{environment}): {error}");
+        format!("Не удалось обратиться к Keychain: {error}")
+    })
+}
+
+/// Записывает сбой Keychain в журнал.
+///
+/// В запись попадают только операция, окружение, имя ключа и вид ошибки
+/// `keyring`; значение секрета не логируется никогда.
+fn log_failure(
+    operation: &str,
+    workspace: &str,
+    environment: &str,
+    key: &str,
+    error: &keyring::Error,
+) {
+    log::error!("Keychain: {operation} {workspace}/{environment}/{key} — {error}");
 }
 
 #[tauri::command]
@@ -25,7 +41,10 @@ pub fn keychain_get(
     match entry(&workspace, &environment, &key)?.get_password() {
         Ok(value) => Ok(Some(value)),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(error) => Err(format!("Ошибка чтения секрета \"{key}\": {error}")),
+        Err(error) => {
+            log_failure("чтение", &workspace, &environment, &key, &error);
+            Err(format!("Ошибка чтения секрета \"{key}\": {error}"))
+        }
     }
 }
 
@@ -38,7 +57,10 @@ pub fn keychain_set(
 ) -> Result<(), String> {
     entry(&workspace, &environment, &key)?
         .set_password(&value)
-        .map_err(|error| format!("Ошибка записи секрета \"{key}\": {error}"))
+        .map_err(|error| {
+            log_failure("запись", &workspace, &environment, &key, &error);
+            format!("Ошибка записи секрета \"{key}\": {error}")
+        })
 }
 
 #[tauri::command]
@@ -46,6 +68,9 @@ pub fn keychain_delete(workspace: String, environment: String, key: String) -> R
     match entry(&workspace, &environment, &key)?.delete_credential() {
         // Удаление идемпотентно: отсутствие записи не считается ошибкой.
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(format!("Ошибка удаления секрета \"{key}\": {error}")),
+        Err(error) => {
+            log_failure("удаление", &workspace, &environment, &key, &error);
+            Err(format!("Ошибка удаления секрета \"{key}\": {error}"))
+        }
     }
 }

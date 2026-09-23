@@ -45,7 +45,10 @@ pub fn watch_library(
     let root_path = PathBuf::from(&root);
     if !root_path.exists() {
         std::fs::create_dir_all(&root_path)
-            .map_err(|error| format!("Не удалось создать библиотеку {root}: {error}"))?;
+            .map_err(|error| {
+                log::error!("Не удалось создать библиотеку {root}: {error}");
+                format!("Не удалось создать библиотеку {root}: {error}")
+            })?;
     }
 
     let app_handle = app.clone();
@@ -55,7 +58,15 @@ pub fn watch_library(
         Duration::from_millis(DEBOUNCE_MS),
         None,
         move |result: Result<Vec<DebouncedEvent>, Vec<notify::Error>>| {
-            let Ok(events) = result else { return };
+            let events = match result {
+                Ok(events) => events,
+                Err(errors) => {
+                    for error in errors {
+                        log::warn!("Ошибка наблюдения за библиотекой: {error}");
+                    }
+                    return;
+                }
+            };
 
             let paths = collect_relevant_paths(&events, &root_for_events);
             if paths.is_empty() {
@@ -65,11 +76,18 @@ pub fn watch_library(
             let _ = app_handle.emit(EVENT_NAME, LibraryChangedEvent { paths });
         },
     )
-    .map_err(|error| format!("Не удалось запустить наблюдение за файлами: {error}"))?;
+    .map_err(|error| {
+        log::error!("Не удалось запустить наблюдение за файлами: {error}");
+        format!("Не удалось запустить наблюдение за файлами: {error}")
+    })?;
 
     debouncer
         .watch(&root_path, RecursiveMode::Recursive)
-        .map_err(|error| format!("Не удалось начать наблюдение за {root}: {error}"))?;
+        .map_err(|error| {
+            log::error!("Не удалось начать наблюдение за {root}: {error}");
+            format!("Не удалось начать наблюдение за {root}: {error}")
+        })?;
+    log::info!("Наблюдение за библиотекой {root} запущено");
 
     let mut guard = state
         .inner

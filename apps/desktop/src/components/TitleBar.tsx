@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { useT } from '../i18n/index.js'
 import { kbd } from '../lib/keys.js'
-import { useAppStore } from '../state/store.js'
+import { selectActiveEndpoint, selectActiveEnvironment, useAppStore } from '../state/store.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { initials, LogoMark } from './Logo.js'
 
@@ -21,19 +21,15 @@ export function TitleBar(): React.JSX.Element {
     const selectWorkspace = useAppStore((state) => state.selectWorkspace)
     const tabs = useAppStore((state) => state.tabs)
     const activeTabId = useAppStore((state) => state.activeTabId)
-    const setTabEnvironment = useAppStore((state) => state.setTabEnvironment)
-    const setTabEndpoint = useAppStore((state) => state.setTabEndpoint)
+    const setActiveEnvironment = useAppStore((state) => state.setActiveEnvironment)
+    const setActiveEndpoint = useAppStore((state) => state.setActiveEndpoint)
+    const activeEnvironment = useAppStore(selectActiveEnvironment)
+    const activeEndpoint = useAppStore(selectActiveEndpoint)
     const setPaletteOpen = useAppStore((state) => state.setPaletteOpen)
     const setDialog = useAppStore((state) => state.setDialog)
     const t = useT()
 
     const activeTab = tabs.find((tab) => tab.id === activeTabId)
-    const activeEnvironment = workspace?.environments.find(
-        (item) => item.id === (activeTab?.environmentId ?? workspace.defaultEnvironmentId),
-    )
-    const activeEndpoint = workspace?.endpoints.find(
-        (endpoint) => endpoint.id === (activeTab?.endpointId ?? workspace.defaultEndpointId),
-    )
 
     return (
         <div className="titlebar">
@@ -75,9 +71,9 @@ export function TitleBar(): React.JSX.Element {
                 {activeTab && workspace && workspace.endpoints.length > 1 && (
                     <select
                         className="select"
-                        value={activeTab.endpointId ?? workspace.defaultEndpointId ?? ''}
+                        value={activeEndpoint?.id ?? ''}
                         onMouseDown={(event) => event.stopPropagation()}
-                        onChange={(event) => setTabEndpoint(activeTab.id, event.target.value)}
+                        onChange={(event) => void setActiveEndpoint(event.target.value)}
                         title={t('Endpoint')}
                     >
                         {workspace.endpoints.map((endpoint) => (
@@ -95,9 +91,9 @@ export function TitleBar(): React.JSX.Element {
                         />
                         <select
                             className={`select${activeEnvironment?.production ? ' select--prod' : ''}`}
-                            value={activeTab.environmentId ?? workspace.defaultEnvironmentId ?? ''}
+                            value={activeEnvironment?.id ?? ''}
                             onMouseDown={(event) => event.stopPropagation()}
-                            onChange={(event) => setTabEnvironment(activeTab.id, event.target.value)}
+                            onChange={(event) => setActiveEnvironment(event.target.value)}
                             title={
                                 activeEnvironment?.production
                                     ? t('Production environment: mutations and flows ask for confirmation')
@@ -201,9 +197,6 @@ function LinkIcon(): React.JSX.Element {
  * токен обнаруживался только по ошибке очередного запроса.
  */
 function TokenStatus(): React.JSX.Element | null {
-    const workspace = useAppStore((state) => state.workspace)
-    const tabs = useAppStore((state) => state.tabs)
-    const activeTabId = useAppStore((state) => state.activeTabId)
     const refreshToken = useAppStore((state) => state.refreshToken)
     const refreshing = useAppStore((state) => state.tokenRefreshing)
     const setDialog = useAppStore((state) => state.setDialog)
@@ -220,10 +213,7 @@ function TokenStatus(): React.JSX.Element | null {
         return () => clearInterval(timer)
     }, [])
 
-    const activeTab = tabs.find((tab) => tab.id === activeTabId)
-    const environment = workspace?.environments.find(
-        (item) => item.id === (activeTab?.environmentId ?? workspace.defaultEnvironmentId),
-    )
+    const environment = useAppStore(selectActiveEnvironment)
 
     const canRefresh = Boolean(environment?.recovery?.flowId)
 

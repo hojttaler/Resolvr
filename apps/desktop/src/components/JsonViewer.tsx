@@ -22,7 +22,7 @@ export interface IJsonViewerProps {
      * Сохранение значения наружу — например, в переменную окружения.
      * Пункт появляется в меню правой кнопки только когда действие передано.
      */
-    onSaveValue?: (input: { path: string; value: string }) => void
+    onSaveValue?: (input: { path: string; value: unknown }) => void
     /**
      * Подстрока поиска. Показываются только ветки, содержащие совпадение;
      * сами совпадения подсвечиваются, а ветки на пути к ним раскрываются.
@@ -116,12 +116,12 @@ export const JsonViewer = memo(function JsonViewer(props: IJsonViewerProps): Rea
                 : JSON.stringify(request.value, null, 2)
 
         const items = [
-            ...(onSaveValue && typeof request.value === 'string'
+            ...(onSaveValue
                 ? [
                       {
                           label: t('Save to environment variable…'),
                           hint: t('for {{substitution}}'),
-                          run: () => onSaveValue({ path: request.path, value: request.value as string }),
+                          run: () => onSaveValue({ path: request.path, value: request.value }),
                       },
                   ]
                 : []),

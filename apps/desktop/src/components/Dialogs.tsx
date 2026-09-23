@@ -199,6 +199,18 @@ export function ConfirmDialog(): React.JSX.Element | null {
                     <button type="button" className="btn" onClick={dismiss} autoFocus>
                         {t('Cancel')}
                     </button>
+                    {confirm.secondaryLabel && (
+                        <button
+                            type="button"
+                            className="btn"
+                            onClick={() => {
+                                dismiss()
+                                void confirm.secondaryRun?.()
+                            }}
+                        >
+                            {confirm.secondaryLabel}
+                        </button>
+                    )}
                     <button
                         type="button"
                         className={`btn ${confirm.danger ? 'btn--danger' : 'btn--primary'}`}

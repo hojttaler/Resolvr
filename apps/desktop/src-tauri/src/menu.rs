@@ -1,5 +1,7 @@
-use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{AboutMetadataBuilder, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+use crate::logs;
 
 /// Событие выбора пункта меню, доставляемое в интерфейс.
 pub const MENU_EVENT: &str = "menu-action";
@@ -11,8 +13,12 @@ pub const MENU_EVENT: &str = "menu-action";
 struct Labels {
     about: &'static str,
     settings: &'static str,
+    logs_open: &'static str,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     hide: &'static str,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     hide_others: &'static str,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     show_all: &'static str,
     quit: &'static str,
     file: &'static str,
@@ -47,13 +53,20 @@ struct Labels {
     agent_activity: &'static str,
     window: &'static str,
     minimize: &'static str,
+    /// «Zoom» на macOS: так называется системный пункт.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    zoom: &'static str,
+    /// Тот же пункт на Windows и Linux, где привычно «Maximize».
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     maximize: &'static str,
     close_window: &'static str,
+    about_comments: &'static str,
 }
 
 const EN: Labels = Labels {
     about: "About Resolvr",
     settings: "Settings…",
+    logs_open: "Open Logs",
     hide: "Hide Resolvr",
     hide_others: "Hide Others",
     show_all: "Show All",
@@ -90,13 +103,16 @@ const EN: Labels = Labels {
     agent_activity: "Agent Activity…",
     window: "Window",
     minimize: "Minimize",
-    maximize: "Zoom",
+    zoom: "Zoom",
+    maximize: "Maximize",
     close_window: "Close Window",
+    about_comments: "GraphQL client with persistent state and agent access",
 };
 
 const RU: Labels = Labels {
     about: "О Resolvr",
     settings: "Настройки…",
+    logs_open: "Открыть логи",
     hide: "Скрыть Resolvr",
     hide_others: "Скрыть остальные",
     show_all: "Показать все",
@@ -133,8 +149,10 @@ const RU: Labels = Labels {
     agent_activity: "Действия агента…",
     window: "Окно",
     minimize: "Свернуть",
+    zoom: "Развернуть",
     maximize: "Развернуть",
     close_window: "Закрыть окно",
+    about_comments: "GraphQL-клиент с сохранением состояния и доступом для агента",
 };
 
 fn labels_for(language: &str) -> &'static Labels {
@@ -159,17 +177,22 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, language: &str) -> tauri::Resu
         "Resolvr",
         true,
         &[
-            &PredefinedMenuItem::about(app, Some(l.about), Some(AboutMetadata::default()))?,
+            &PredefinedMenuItem::about(app, Some(l.about), Some(about_metadata(app, l)))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "settings", l.settings, true, Some("CmdOrCtrl+,"))?,
+            &MenuItem::with_id(app, "logs.open", l.logs_open, true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, Some(l.hide))?,
-            &PredefinedMenuItem::hide_others(app, Some(l.hide_others))?,
-            &PredefinedMenuItem::show_all(app, Some(l.show_all))?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, Some(l.quit))?,
         ],
     )?;
+    // Скрытие приложения — понятие macOS; в GTK эти пункты не работают.
+    #[cfg(target_os = "macos")]
+    app_menu.append_items(&[
+        &PredefinedMenuItem::hide(app, Some(l.hide))?,
+        &PredefinedMenuItem::hide_others(app, Some(l.hide_others))?,
+        &PredefinedMenuItem::show_all(app, Some(l.show_all))?,
+        &PredefinedMenuItem::separator(app)?,
+    ])?;
+    app_menu.append(&PredefinedMenuItem::quit(app, Some(l.quit))?)?;
 
     let file_menu = Submenu::with_items(
         app,
@@ -210,7 +233,11 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, language: &str) -> tauri::Resu
             &PredefinedMenuItem::cut(app, Some(l.cut))?,
             &PredefinedMenuItem::copy(app, Some(l.copy))?,
             &PredefinedMenuItem::paste(app, Some(l.paste))?,
-            &PredefinedMenuItem::select_all(app, Some(l.select_all))?,
+            // Свой пункт вместо predefined на всех платформах: системный
+            // `selectAll:` уходит напрямую в WKWebView/GTK, и обработчик
+            // панели ответа не получает сочетание. Интерфейс сам решает, что
+            // выделять, и для полей ввода вызывает стандартное выделение.
+            &MenuItem::with_id(app, "edit.selectAll", l.select_all, true, Some("CmdOrCtrl+A"))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "editor.format", l.editor_format, true, Some("CmdOrCtrl+Shift+F"))?,
             &MenuItem::with_id(app, "palette.open", l.palette, true, Some("CmdOrCtrl+K"))?,
@@ -229,7 +256,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, language: &str) -> tauri::Resu
             &MenuItem::with_id(app, "sidebar.toggle", l.sidebar_toggle, true, Some("CmdOrCtrl+B"))?,
             &MenuItem::with_id(app, "response.toggle", l.response_toggle, true, Some("CmdOrCtrl+Shift+E"))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::fullscreen(app, Some(l.fullscreen))?,
+            &*fullscreen_item(app, l)?,
         ],
     )?;
 
@@ -250,17 +277,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, language: &str) -> tauri::Resu
         ],
     )?;
 
-    let window_menu = Submenu::with_items(
-        app,
-        l.window,
-        true,
-        &[
-            &PredefinedMenuItem::minimize(app, Some(l.minimize))?,
-            &PredefinedMenuItem::maximize(app, Some(l.maximize))?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::close_window(app, Some(l.close_window))?,
-        ],
-    )?;
+    let window_menu = build_window_menu(app, l)?;
 
     Menu::with_items(
         app,
@@ -275,6 +292,86 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, language: &str) -> tauri::Resu
     )
 }
 
+/// Сведения для окна «О Resolvr».
+///
+/// На macOS системная панель берёт недостающее из Info.plist, а GTK-диалог
+/// на Linux показывает только переданное — с пустыми метаданными он пуст.
+fn about_metadata<'a, R: Runtime>(
+    app: &AppHandle<R>,
+    l: &Labels,
+) -> tauri::menu::AboutMetadata<'a> {
+    let builder = AboutMetadataBuilder::new()
+        .name(Some("Resolvr"))
+        .version(Some(app.package_info().version.to_string()))
+        .comments(Some(l.about_comments))
+        .copyright(Some("© hojttaler"))
+        .website(Some("https://github.com/hojttaler/Resolvr"))
+        .website_label(Some("GitHub"))
+        .license(Some("FSL-1.1-Apache-2.0"));
+
+    // Иконка окна по умолчанию — первая PNG из `bundle.icon` (32×32), для
+    // диалога она слишком мелкая. На macOS панель берёт иконку из бандла.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.icon(
+        tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
+            .ok()
+            .map(tauri::image::Image::to_owned),
+    );
+
+    builder.build()
+}
+
+/// «Во весь экран»: в GTK predefined-пункта нет, переключение делает Rust.
+fn fullscreen_item<R: Runtime>(
+    app: &AppHandle<R>,
+    l: &Labels,
+) -> tauri::Result<Box<dyn IsMenuItem<R>>> {
+    #[cfg(target_os = "macos")]
+    return Ok(Box::new(PredefinedMenuItem::fullscreen(app, Some(l.fullscreen))?));
+
+    #[cfg(not(target_os = "macos"))]
+    return Ok(Box::new(MenuItem::with_id(
+        app,
+        "view.fullscreen",
+        l.fullscreen,
+        true,
+        Some("F11"),
+    )?));
+}
+
+/// Раздел «Окно».
+///
+/// Predefined-пункты minimize/maximize/close_window в GTK не
+/// поддерживаются и остаются неактивными, поэтому вне macOS раздел
+/// собирается из обычных пунктов, которые обрабатывает Rust.
+fn build_window_menu<R: Runtime>(app: &AppHandle<R>, l: &Labels) -> tauri::Result<Submenu<R>> {
+    #[cfg(target_os = "macos")]
+    return Submenu::with_items(
+        app,
+        l.window,
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, Some(l.minimize))?,
+            &PredefinedMenuItem::maximize(app, Some(l.zoom))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::close_window(app, Some(l.close_window))?,
+        ],
+    );
+
+    #[cfg(not(target_os = "macos"))]
+    return Submenu::with_items(
+        app,
+        l.window,
+        true,
+        &[
+            &MenuItem::with_id(app, "window.minimize", l.minimize, true, None::<&str>)?,
+            &MenuItem::with_id(app, "window.maximize", l.maximize, true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "window.close", l.close_window, true, None::<&str>)?,
+        ],
+    );
+}
+
 /// Пересобирает меню на выбранном языке; вызывается интерфейсом при старте
 /// и при смене языка в настройках.
 #[tauri::command]
@@ -285,12 +382,40 @@ pub fn set_menu_language<R: Runtime>(app: AppHandle<R>, language: String) -> Res
     Ok(())
 }
 
-/// Пересылает выбранный пункт меню в интерфейс.
+/// Обрабатывает выбранный пункт меню.
 ///
 /// Логика команд живёт в интерфейсе — там же, где состояние вкладок и
-/// редактора, поэтому Rust только транслирует идентификатор пункта.
+/// редактора, поэтому Rust в основном транслирует идентификатор пункта.
+/// Исключение — управление окном и открытие журнала: состояния интерфейса
+/// они не касаются, а журнал должен открываться даже при сломанном UI.
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit(MENU_EVENT, id.to_string());
+    if id == "logs.open" {
+        // Ошибка уже записана в журнал внутри `open_dir`.
+        let _ = logs::open_dir(app);
+        return;
+    }
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    let result = match id {
+        "window.minimize" => window.minimize(),
+        "window.maximize" => window.is_maximized().and_then(|maximized| {
+            if maximized {
+                window.unmaximize()
+            } else {
+                window.maximize()
+            }
+        }),
+        "window.close" => window.close(),
+        "view.fullscreen" => window
+            .is_fullscreen()
+            .and_then(|fullscreen| window.set_fullscreen(!fullscreen)),
+        _ => window.emit(MENU_EVENT, id.to_string()),
+    };
+
+    if let Err(error) = result {
+        log::warn!("Пункт меню {id} не выполнен: {error}");
     }
 }

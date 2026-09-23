@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { useT } from '../i18n/index.js'
 import { formatDiagnostics, readAboutInfo, type IAboutInfo } from '../platform/about.js'
+import { logError, openLogDir } from '../platform/logger.js'
 
 /** Размытие и прозрачность окна существуют только на macOS. */
 function isMacOs(): boolean {
@@ -405,6 +406,24 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
                     title={t('Version, OS and library path — attach to a bug report')}
                 >
                     {copied ? t('Copied') : t('Copy diagnostics')}
+                </button>
+            </SettingRow>
+
+            <SettingRow
+                label={t('Logs')}
+                hint={t('Errors and crashes are written here — attach the file to a bug report')}
+            >
+                <button
+                    type="button"
+                    className="btn"
+                    onClick={() =>
+                        void openLogDir().catch((error: unknown) =>
+                            logError('Не удалось открыть журнал', error),
+                        )
+                    }
+                    title={info?.logDir}
+                >
+                    {t('Open folder')}
                 </button>
             </SettingRow>
 
