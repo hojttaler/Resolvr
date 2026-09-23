@@ -60,7 +60,9 @@
         ],
         "category": "DeveloperTool",
         "copyright": "© hojttaler",
-        "shortDescription": "GraphQL-клиент с сохранением состояния",
+        "shortDescription": "Desktop GraphQL client and IDE",
+        "longDescription": "Resolvr is a desktop GraphQL client: tabs and drafts that survive crashes, collections in git-friendly files, environments that refresh tokens, flows as smoke tests, a schema browser and a built-in MCP server for AI agents.",
+        "homepage": "https://github.com/hojttaler/Resolvr",
         "macOS": {
             "minimumSystemVersion": "13.0"
         },

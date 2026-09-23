@@ -18,9 +18,15 @@ GraphQL-клиент для команды: коллекции запросов 
 
 ### Linux и Windows
 
-Сборки `.AppImage` / `.deb` и `.msi` / `.exe` собираются в CI (`.github/workflows/build.yml`).
+Скачайте файл со страницы [Releases](https://github.com/hojttaler/Resolvr/releases/latest):
+
+- **Linux** — `.AppImage` (запуск без установки: `chmod +x` и открыть), `.deb` для
+  Debian/Ubuntu или `.rpm` для Fedora/openSUSE. Нужен WebKitGTK 4.1 — в `.deb` и `.rpm`
+  он подтягивается зависимостью.
+- **Windows** — установщик `_x64-setup.exe` или `.msi`.
+
 На этих системах нет нативного размытия окна и Keychain — секреты хранятся в файле
-библиотеки (это режим по умолчанию).
+библиотеки (это режим по умолчанию). Приложение обновляется само из Releases.
 
 ## Первый запуск
 

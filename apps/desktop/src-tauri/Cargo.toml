@@ -1,7 +1,7 @@
 [package]
 name = "resolvr"
 version = "0.2.4"
-description = "GraphQL-клиент для macOS с сохранением состояния и доступом для агента"
+description = "Desktop GraphQL client and IDE for macOS, Linux and Windows with an MCP server for AI agents"
 authors = ["hojttaler"]
 edition = "2021"
 rust-version = "1.82"
