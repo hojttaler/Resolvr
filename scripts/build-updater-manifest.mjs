@@ -54,13 +54,14 @@ if (candidates.length === 0) {
     console.error(`✗ релиз с тегом ${tag} не найден`)
     process.exit(1)
 }
-// Несколько черновиков с одним тегом — след параллельного создания релиза;
-// берётся тот, где больше файлов, а про остальные нужно знать.
-const release = candidates.reduce((best, item) => (item.assets.length > best.assets.length ? item : best))
 if (candidates.length > 1) {
-    console.warn(`⚠ релизов с тегом ${tag}: ${candidates.length}; использую ${release.id} (${release.assets.length} файлов)`)
+    console.warn(`⚠ релизов с тегом ${tag}: ${candidates.length}; использую первый — ${candidates[0].id}`)
 }
-const assets = release.assets
+const release = candidates[0]
+
+// Файлы запрашиваются отдельно: в списке релизов у свежего черновика поле
+// `assets` приходит пустым, хотя файлы уже загружены.
+const assets = await api(`/repos/${repo}/releases/${release.id}/assets?per_page=100`)
 
 const platforms = {}
 for (const asset of assets) {

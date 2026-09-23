@@ -2,9 +2,9 @@
 
 ## 0.2.3 — 2026-09-23
 
-0.2.2 was tagged but never published: its release build split the files across several
-draft releases, and the update manifest could not be built. The release pipeline now
-creates the draft once before the builds.
+0.2.2 was tagged but never published: the update manifest job read the files of the draft
+release from the releases list, which returns no files for a fresh draft, so the manifest
+could not be built. The files are now read from the release itself.
 
 - Response pane: a "Copy" button copies the whole Response / Raw / Headers / Trace tab;
   ⌘A / Ctrl+A selects the tab content (the JSON tree is highlighted and ⌘C copies the full
