@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.4 — 2026-09-23
 
 - Linux: copying to the clipboard did nothing — WebKitGTK rejects the page's clipboard
   API. Copying now goes through the app on every platform.
