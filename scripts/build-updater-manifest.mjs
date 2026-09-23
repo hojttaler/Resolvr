@@ -84,8 +84,11 @@ for (const asset of assets) {
 
         return response.text()
     })
+    // Ссылка строится из тега: `browser_download_url` черновика указывает на
+    // временный адрес `untagged-…`, который после публикации отдаёт 404.
+    const url = `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(asset.name)}`
     for (const key of rule.keys) {
-        platforms[key] = { signature: signature.trim(), url: asset.browser_download_url }
+        platforms[key] = { signature: signature.trim(), url }
     }
     console.log(`✓ ${asset.name} → ${rule.keys.join(', ')}`)
 }
