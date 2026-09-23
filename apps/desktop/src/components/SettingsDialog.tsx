@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { formatDiagnostics, readAboutInfo, type IAboutInfo } from '../platform/about.js'
 import { logError, openLogDir } from '../platform/logger.js'
@@ -393,7 +394,7 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
                     disabled={!info}
                     onClick={() => {
                         if (!info) return
-                        void navigator.clipboard.writeText(
+                        void copyText(
                             formatDiagnostics(info, {
                                 secretStorage: props.secretStorage,
                                 workspaces: workspaces.length,
@@ -462,7 +463,7 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
                     className="btn"
                     disabled={!info}
                     onClick={() => {
-                        if (info) void navigator.clipboard.writeText(info.mcpCommand)
+                        if (info) void copyText(info.mcpCommand)
                     }}
                     title={info?.mcpCommand}
                 >

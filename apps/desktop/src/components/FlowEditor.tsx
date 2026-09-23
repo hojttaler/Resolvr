@@ -8,6 +8,7 @@ import {
 } from '@resolvr/core'
 import { useEffect, useState } from 'react'
 
+import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { isModKey, kbd } from '../lib/keys.js'
 import { useAppStore } from '../state/store.js'
@@ -167,7 +168,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                         type="button"
                         className="btn btn--quiet"
                         onClick={() =>
-                            void navigator.clipboard.writeText(linkTo({ flowId: draft.id }) ?? '')
+                            void copyText(linkTo({ flowId: draft.id }) ?? '')
                         }
                         title={t('Copy resolvr:// link to this flow')}
                     >
@@ -268,7 +269,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                             type="button"
                             className="btn btn--quiet"
                             onClick={() =>
-                                void navigator.clipboard.writeText(
+                                void copyText(
                                     JSON.stringify(run.context, null, 2),
                                 )
                             }

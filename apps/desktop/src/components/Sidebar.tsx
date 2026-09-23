@@ -14,6 +14,7 @@ import {
 import { isObjectType, type GraphQLField, type GraphQLSchema } from 'graphql'
 import { useMemo, useState } from 'react'
 
+import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { kbd } from '../lib/keys.js'
 import { useAppStore } from '../state/store.js'
@@ -336,7 +337,7 @@ function CollectionsPanel(): React.JSX.Element {
                 {
                     label: t('Copy link'),
                     hint: 'resolvr://',
-                    run: () => navigator.clipboard.writeText(linkTo({ operationRef: ref }) ?? ''),
+                    run: () => copyText(linkTo({ operationRef: ref }) ?? ''),
                 },
                 ...others.map((node, index) => ({
                     label: t('Move to “{name}”', { name: node.collection.name }),

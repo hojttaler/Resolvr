@@ -18,6 +18,7 @@
         "updater:default",
         "process:default",
         "log:default",
+        "clipboard-manager:allow-write-text",
         {
             "identifier": "fs:scope",
             "allow": [

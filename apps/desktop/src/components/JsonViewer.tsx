@@ -1,6 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
+import { copyText } from '../lib/clipboard.js'
 import { plural, t as translate, useT } from '../i18n/index.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { flattenJson, type IJsonRow } from './json-rows.js'
@@ -128,7 +129,7 @@ export const JsonViewer = memo(function JsonViewer(props: IJsonViewerProps): Rea
             {
                 label: t('Copy value'),
                 separated: onSaveValue !== undefined,
-                run: () => navigator.clipboard.writeText(raw ?? ''),
+                run: () => copyText(raw ?? ''),
             },
         ]
 
@@ -140,17 +141,17 @@ export const JsonViewer = memo(function JsonViewer(props: IJsonViewerProps): Rea
                 {
                     label: t('Copy as JSON'),
                     run: () =>
-                        navigator.clipboard.writeText(JSON.stringify(request.value, null, 2) ?? ''),
+                        copyText(JSON.stringify(request.value, null, 2) ?? ''),
                 },
                 {
                     label: t('Copy path'),
                     hint: request.path || t('root'),
-                    run: () => navigator.clipboard.writeText(request.path),
+                    run: () => copyText(request.path),
                 },
                 {
                     label: t('Copy “path: value”'),
                     separated: true,
-                    run: () => navigator.clipboard.writeText(`${request.path}: ${raw ?? ''}`),
+                    run: () => copyText(`${request.path}: ${raw ?? ''}`),
                 },
             ],
         })

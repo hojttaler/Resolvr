@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 export interface IContextMenuItem {
     label: string
     hint?: string
-    run: () => void | Promise<void>
+    run: () => void | Promise<unknown>
     /** Разделитель рисуется перед пунктом. */
     separated?: boolean
     /** Пункт виден, но неприменим — например, «закрыть слева» у первой вкладки. */

@@ -3,6 +3,7 @@ mod keychain;
 mod logs;
 mod menu;
 mod watcher;
+mod webview_guard;
 mod window;
 
 use tauri::{Emitter, Manager, WindowEvent};
@@ -17,6 +18,7 @@ const BEFORE_QUIT_EVENT: &str = "before-quit";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logs::install_panic_hook();
+    webview_guard::prepare_environment();
 
     tauri::Builder::default()
         // Журнал подключается первым, чтобы в него попадали ошибки
@@ -33,9 +35,13 @@ pub fn run() {
         // Обновления из GitHub Releases: подпись minisign, независимая от Apple.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Буфер обмена через Rust: WebKitGTK запрещает странице
+        // `navigator.clipboard.writeText`, и копирование на Linux не работало.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let handle = app.handle();
             logs::log_startup(handle);
+            webview_guard::log_environment();
             watcher::init(handle);
 
             // Стартовый язык — английский; интерфейс сразу переключит на
@@ -44,6 +50,7 @@ pub fn run() {
             app.set_menu(menu)?;
 
             if let Some(main_window) = app.get_webview_window("main") {
+                webview_guard::watch(&main_window);
                 if let Err(error) = window::apply_window_effects(&main_window) {
                     // Отсутствие размытия не мешает работать — приложение
                     // просто получает обычный фон.

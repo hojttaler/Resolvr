@@ -8,6 +8,7 @@ import {
 } from '@resolvr/core'
 import { useEffect, useMemo, useState } from 'react'
 
+import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { useAppStore } from '../state/store.js'
 
@@ -146,7 +147,7 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
                     type="button"
                     className="btn btn--quiet"
                     onClick={() => {
-                        void navigator.clipboard.writeText(info.sdl)
+                        void copyText(info.sdl)
                         setCopied(true)
                         window.setTimeout(() => setCopied(false), 1500)
                     }}

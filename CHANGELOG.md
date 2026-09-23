@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Linux: copying to the clipboard did nothing — WebKitGTK rejects the page's clipboard
+  API. Copying now goes through the app on every platform.
+- Linux with the NVIDIA driver: the interface could crash or turn blank because of the
+  WebKitGTK DMA-BUF renderer; it is now turned off when the NVIDIA driver is detected
+  (unless `WEBKIT_DISABLE_DMABUF_RENDERER` is set by the user).
+- Linux: if the WebKit page process dies, the reason ("crashed" / "exceeded the memory
+  limit") is written to the log and the interface reloads instead of staying blank.
+
 ## 0.2.3 — 2026-09-23
 
 0.2.2 was tagged but never published: the update manifest job read the files of the draft

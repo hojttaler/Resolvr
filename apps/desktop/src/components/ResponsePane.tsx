@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { IRunResult, IVariableProblem } from '@resolvr/core'
 
+import { copyText } from '../lib/clipboard.js'
 import { t as translate, tn, useT } from '../i18n/index.js'
 import { isModKey, kbd } from '../lib/keys.js'
 import { SELECT_ALL_EVENT } from '../lib/select-all.js'
@@ -79,7 +80,7 @@ export function ResponsePane(): React.JSX.Element {
         const text = responseText(view, run)
         if (text === undefined) return
 
-        await navigator.clipboard.writeText(text)
+        if (!(await copyText(text))) return
         setCopied(true)
         window.setTimeout(() => setCopied(false), 1500)
     }

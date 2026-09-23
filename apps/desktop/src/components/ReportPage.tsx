@@ -6,6 +6,7 @@ import {
 } from '@resolvr/core'
 import { useState } from 'react'
 
+import { copyText } from '../lib/clipboard.js'
 import { plural, tn, useT } from '../i18n/index.js'
 import { useAppStore } from '../state/store.js'
 import { JsonViewer } from './JsonViewer.js'
@@ -54,7 +55,7 @@ export function ReportPage(props: { tabId: string }): React.JSX.Element {
                     type="button"
                     className="btn btn--quiet"
                     onClick={() => {
-                        void navigator.clipboard.writeText(formatReportMarkdown(report))
+                        void copyText(formatReportMarkdown(report))
                         setCopied(true)
                         window.setTimeout(() => setCopied(false), 1500)
                     }}

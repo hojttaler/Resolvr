@@ -3,6 +3,7 @@ import { Group, Panel, Separator, type GroupImperativeHandle } from 'react-resiz
 
 import { toErrorMessage, type IEnvironmentCapture } from '@resolvr/core'
 
+import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { kbd } from '../lib/keys.js'
 import {
@@ -179,7 +180,7 @@ export function RequestPane(): React.JSX.Element {
                                             label: t('Copy as curl'),
                                             hint: t('with token'),
                                             run: async () =>
-                                                navigator.clipboard.writeText(
+                                                copyText(
                                                     await activeTabAsCurl({ maskSecrets: false }),
                                                 ),
                                         },
@@ -187,7 +188,7 @@ export function RequestPane(): React.JSX.Element {
                                             label: t('Copy as curl without secrets'),
                                             hint: t('for a bug report'),
                                             run: async () =>
-                                                navigator.clipboard.writeText(
+                                                copyText(
                                                     await activeTabAsCurl({ maskSecrets: true }),
                                                 ),
                                         },
@@ -198,7 +199,7 @@ export function RequestPane(): React.JSX.Element {
                                                       hint: 'resolvr://',
                                                       separated: true,
                                                       run: () =>
-                                                          navigator.clipboard.writeText(
+                                                          copyText(
                                                               linkTo({
                                                                   operationRef: tab.operationRef,
                                                               }) ?? '',
