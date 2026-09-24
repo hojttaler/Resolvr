@@ -9,9 +9,11 @@ import { LibraryPaths } from '../storage/paths.js'
 import { WorkspaceStore } from '../storage/workspace-store.js'
 import { FakeTransport, MemorySecretStore } from '../testing/fakes.js'
 import { MemoryFileSystem } from '../testing/memory-file-system.js'
-import { evaluateAssert, FlowRunner } from './flow-runner.js'
+import { evaluateAssert, FlowRunner, judgeStep } from './flow-runner.js'
 
-async function createHarness(responder: (body: string) => string) {
+async function createHarness(
+    responder: (body: string) => string | { status: number; body: string },
+) {
     const fs = new MemoryFileSystem()
     const paths = new LibraryPaths('/library')
     const workspaces = new WorkspaceStore(fs, paths)
@@ -256,5 +258,72 @@ describe('имя переменной токена', () => {
         expect(run.ok).toBe(true)
         expect(harness.transport.exchanges).toHaveLength(1)
         expect(harness.transport.exchanges[0]?.request.headers.authorization).toBeUndefined()
+    })
+})
+
+describe('ожидаемый результат шага', () => {
+    /** Негативный тест: без токена сервер отказывает, после отказа цепочка идёт дальше. */
+    const negativeFlow = FlowSchema.parse({
+        id: 'negative',
+        name: 'Negative',
+        steps: [
+            {
+                id: 'anonymous',
+                name: 'Без токена',
+                query: 'query Me { me { id } }',
+                expect: 'error',
+                assert: [{ path: 'errors.0.message', op: 'contains', value: 'Unauthorized' }],
+            },
+            {
+                id: 'ping',
+                name: 'Дальше',
+                query: 'query Ping { ping }',
+            },
+        ],
+    })
+
+    it('засчитывает ожидаемую ошибку и продолжает цепочку', async () => {
+        const harness = await createHarness((body) =>
+            body.includes('Me')
+                ? { status: 401, body: '{"errors":[{"message":"Unauthorized"}],"data":null}' }
+                : '{"data":{"ping":true}}',
+        )
+
+        const result = await harness.flows.runFlow('api', negativeFlow)
+
+        expect(result.ok).toBe(true)
+        expect(result.steps.map((step) => [step.ok, step.skipped])).toEqual([
+            [true, false],
+            [true, false],
+        ])
+    })
+
+    it('проваливает негативный шаг, если запрос неожиданно прошёл', async () => {
+        const harness = await createHarness(() => '{"data":{"me":{"id":"u1"},"ping":true}}')
+
+        const result = await harness.flows.runFlow('api', negativeFlow)
+
+        expect(result.ok).toBe(false)
+        expect(result.steps[0]?.error).toMatch(/Ожидалась ошибка/)
+        expect(result.steps[1]?.skipped).toBe(true)
+    })
+
+    it('проваливает негативный шаг с ошибкой не той природы', async () => {
+        const harness = await createHarness(
+            () => '{"errors":[{"message":"Internal server error"}],"data":null}',
+        )
+
+        const result = await harness.flows.runFlow('api', negativeFlow)
+
+        expect(result.steps[0]?.ok).toBe(false)
+        expect(result.steps[0]?.error).toBe('Проверки шага не прошли')
+    })
+
+    it('в режиме any решают только проверки', () => {
+        const failed = { ok: false, status: 400, errors: [{}] }
+
+        expect(judgeStep('any', failed, true)).toEqual({ ok: true })
+        expect(judgeStep('any', { ok: true, status: 200 }, false).ok).toBe(false)
+        expect(judgeStep('success', failed, true).ok).toBe(false)
     })
 })

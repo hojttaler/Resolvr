@@ -1,5 +1,11 @@
 import { ResolvrError } from '../model/errors.js'
-import type { IEnvironment, IFlow, IFlowAssert, IFlowStep } from '../model/schemas.js'
+import type {
+    IEnvironment,
+    IFlow,
+    IFlowAssert,
+    IFlowStep,
+    IFlowStepExpect,
+} from '../model/schemas.js'
 import { isSecretRef } from '../ports/secret-store.js'
 import { readPath, type IRunResult, type RunEngine } from '../run/run-engine.js'
 import { interpolateJson } from '../secrets/secret-resolver.js'
@@ -166,22 +172,19 @@ export class FlowRunner {
 
             const asserts = step.assert.map((assertion) => evaluateAssert(assertion, payload))
             const assertsPassed = asserts.every((item) => item.passed)
+            const outcome = judgeStep(step.expect, result, assertsPassed)
 
             return {
                 stepId: step.id,
                 name: step.name,
-                ok: result.ok && assertsPassed,
+                ok: outcome.ok,
                 skipped: false,
                 status: result.status,
                 durationMs: Date.now() - startedAt,
                 asserts,
                 extracted,
                 result,
-                error: result.ok
-                    ? assertsPassed
-                        ? undefined
-                        : 'Проверки шага не прошли'
-                    : `HTTP ${result.status}, ошибок GraphQL: ${result.errors?.length ?? 0}`,
+                error: outcome.error,
             }
         } catch (error) {
             return {
@@ -214,6 +217,30 @@ export class FlowRunner {
             error: 'Пропущен из-за падения предыдущего шага',
         }
     }
+}
+
+/**
+ * Итог шага по ожидаемому результату.
+ *
+ * Для негативного теста ошибка сервера — это успех шага, а неожиданно
+ * успешный ответ — провал: иначе проверка «без прав — отказ» проходила бы
+ * и тогда, когда права перестали проверяться. Проверки шага обязательны при
+ * любом ожидании.
+ */
+export function judgeStep(
+    expect: IFlowStepExpect,
+    result: Pick<IRunResult, 'ok' | 'status' | 'errors'>,
+    assertsPassed: boolean,
+): { ok: boolean; error?: string } {
+    const failure = `HTTP ${result.status}, ошибок GraphQL: ${result.errors?.length ?? 0}`
+
+    if (expect === 'success' && !result.ok) return { ok: false, error: failure }
+    if (expect === 'error' && result.ok) {
+        return { ok: false, error: `Ожидалась ошибка, а запрос выполнился успешно (HTTP ${result.status})` }
+    }
+    if (!assertsPassed) return { ok: false, error: 'Проверки шага не прошли' }
+
+    return { ok: true }
 }
 
 /** Проверяет одно утверждение против результата шага. */

@@ -228,6 +228,7 @@ describe('перенос операций', () => {
                     variables: {},
                     extract: {},
                     assert: [],
+                    expect: 'success' as const,
                     continueOnFailure: false,
                 },
                 {
@@ -237,6 +238,7 @@ describe('перенос операций', () => {
                     variables: {},
                     extract: {},
                     assert: [],
+                    expect: 'success' as const,
                     continueOnFailure: false,
                 },
             ],

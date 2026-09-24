@@ -603,6 +603,15 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
     'no matches': 'нет совпадений',
     '{current} of {total}': '{current} из {total}',
 
+    // --- ожидаемый результат шага цепочки ---
+    'Expected result': 'Ожидаемый результат',
+    'Success': 'Успех',
+    'Any response': 'Любой ответ',
+    'a response without errors, and the checks pass': 'ответ без ошибок, и проверки прошли',
+    'the server returns an error (HTTP not 2xx or GraphQL errors), and the checks pass — for negative tests':
+        'сервер вернул ошибку (HTTP не 2xx или ошибки GraphQL), и проверки прошли — для негативных тестов',
+    'only the checks decide': 'решают только проверки',
+
     // --- множественное число: формы 1 / 2 / 5 ---
     'error|errors': ['ошибка', 'ошибки', 'ошибок'],
     'field|fields': ['поле', 'поля', 'полей'],

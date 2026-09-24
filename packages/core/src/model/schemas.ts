@@ -213,6 +213,8 @@ export const FlowAssertSchema = z.object({
     value: z.unknown().optional(),
 })
 
+export const FlowStepExpectSchema = z.enum(['success', 'error', 'any'])
+
 export const FlowStepSchema = z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -226,6 +228,14 @@ export const FlowStepSchema = z.object({
     /** `{ "token": "data.login.accessToken" }` — извлечённое доступно следующим шагам. */
     extract: z.record(z.string(), z.string()).default({}),
     assert: z.array(FlowAssertSchema).default([]),
+    /**
+     * Какой ответ шаг считает успешным.
+     *
+     * `success` — ответ без ошибок; `error` — сервер вернул ошибку (негативный
+     * тест: «без токена — Unauthorized»); `any` — решают только проверки.
+     * Во всех случаях должны пройти и проверки шага.
+     */
+    expect: FlowStepExpectSchema.default('success'),
     /** Продолжать выполнение флоу, даже если шаг упал. */
     continueOnFailure: z.boolean().default(false),
 })
@@ -446,6 +456,7 @@ export type IOperationMeta = z.infer<typeof OperationMetaSchema>
 export type IEnvironmentCapture = z.infer<typeof EnvironmentCaptureSchema>
 export type IFlowAssert = z.infer<typeof FlowAssertSchema>
 export type IFlowStep = z.infer<typeof FlowStepSchema>
+export type IFlowStepExpect = z.infer<typeof FlowStepExpectSchema>
 export type IFlow = z.infer<typeof FlowSchema>
 export type IHistoryEntry = z.infer<typeof HistoryEntrySchema>
 export type ITabKind = z.infer<typeof TabKindSchema>

@@ -2359,3 +2359,11 @@ input[type='checkbox'] {
     display: flex;
     gap: var(--pad-sm);
 }
+
+/* Ожидаемый результат шага цепочки: выбор и пояснение в одну строку. */
+.flow__expect {
+    display: flex;
+    align-items: center;
+    gap: var(--pad-sm);
+    min-width: 0;
+}

@@ -639,6 +639,12 @@ const FLOW_STEP_INPUT = z.object({
             }),
         )
         .optional(),
+    expect: z
+        .enum(['success', 'error', 'any'])
+        .optional()
+        .describe(
+            'Какой ответ считать успехом шага: success (по умолчанию) — без ошибок; error — сервер вернул ошибку, для негативных тестов (уточняйте её через assert по errors.0.message или errors.0.extensions.code); any — решают только assert',
+        ),
     continueOnFailure: z.boolean().optional().describe('Не останавливать цепочку, если шаг упал'),
     environmentId: z.string().optional(),
     endpointId: z.string().optional(),

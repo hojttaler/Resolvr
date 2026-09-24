@@ -4,6 +4,7 @@ import {
     type IFlow,
     type IFlowAssert,
     type IFlowStep,
+    type IFlowStepExpect,
     type IFlowStepResult,
 } from '@resolvr/core'
 import { useEffect, useState } from 'react'
@@ -20,6 +21,17 @@ export interface IFlowPageProps {
     /** Вкладка-редактор; черновик цепочки лежит в состоянии под её идентификатором. */
     tabId: string
 }
+
+/** Какой ответ шаг считает успешным; `error` — для негативных тестов. */
+const EXPECT_OPTIONS: Array<{ value: IFlowStepExpect; label: string; hint: string }> = [
+    { value: 'success', label: 'Success', hint: 'a response without errors, and the checks pass' },
+    {
+        value: 'error',
+        label: 'Error',
+        hint: 'the server returns an error (HTTP not 2xx or GraphQL errors), and the checks pass — for negative tests',
+    },
+    { value: 'any', label: 'Any response', hint: 'only the checks decide' },
+]
 
 const ASSERT_OPS: Array<{ value: IFlowAssert['op']; label: string; needsValue: boolean }> = [
     { value: 'exists', label: 'exists', needsValue: false },
@@ -101,6 +113,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                     variables: {},
                     extract: {},
                     assert: [],
+                    expect: 'success',
                     continueOnFailure: false,
                 },
             ],
@@ -476,6 +489,26 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     addLabel={t('+ Extraction')}
                     valueSuggestions={payload ? collectPaths(payload) : undefined}
                 />
+
+                <label className="field__label">{t('Expected result')}</label>
+                <div className="flow__expect">
+                    <select
+                        className="select"
+                        value={step.expect}
+                        onChange={(event) =>
+                            props.onPatch({ expect: event.target.value as IFlowStepExpect })
+                        }
+                    >
+                        {EXPECT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                                {t(option.label)}
+                            </option>
+                        ))}
+                    </select>
+                    <span className="inspector__hint">
+                        {t(EXPECT_OPTIONS.find((option) => option.value === step.expect)?.hint ?? '')}
+                    </span>
+                </div>
 
                 <label className="field__label">{t('Checks')}</label>
                 <AssertEditor
