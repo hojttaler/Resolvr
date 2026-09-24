@@ -67,7 +67,8 @@
             "minimumSystemVersion": "13.0"
         },
         "resources": {
-            "../../../packages/mcp-server/dist/index.js": "mcp/index.js"
+            "../../../packages/mcp-server/dist/index.js": "mcp/index.js",
+            "resources/mcp-package.json": "mcp/package.json"
         },
         "createUpdaterArtifacts": true
     }
