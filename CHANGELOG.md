@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- MCP: agents can create and edit flows — `flow_save` (steps with a saved operation or
+  an inline query, variables, `extract`, `assert`), `flow_get` and `flow_delete`.
+  References to operations, environments and endpoints are checked before the flow is
+  written, and every problem is reported at once.
+
 ## 0.2.6 — 2026-09-24
 
 - MCP: the server bundled in the app did not start on Node.js 20 ("Cannot use import

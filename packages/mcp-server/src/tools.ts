@@ -1,6 +1,9 @@
 import {
     buildSchemaSummary,
     diffSchemas,
+    ErrorCodeEnum,
+    findFlowProblems,
+    FlowSchema,
     formatOperationRef,
     isResolvrError,
     maskSecretsInJson,
@@ -8,9 +11,11 @@ import {
     listRootFields,
     printTypeLimited,
     readPath,
+    ResolvrError,
     searchSchema,
     SECRET_MASK,
     toErrorMessage,
+    toSlug,
 } from '@resolvr/core'
 import type { INodeContext } from '@resolvr/core/node'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -608,6 +613,37 @@ function registerSchemaTools(register: IRegisterTool, context: INodeContext): vo
     })
 }
 
+/** Шаг цепочки в том виде, в каком его передаёт агент: id можно не указывать. */
+const FLOW_STEP_INPUT = z.object({
+    id: z.string().optional().describe('Идентификатор шага; без него выдаётся "step-N"'),
+    name: z.string().min(1).describe('Название шага — видно в отчёте'),
+    operationRef: z
+        .string()
+        .optional()
+        .describe('Сохранённая операция "collection/operation" — либо она, либо query'),
+    query: z.string().optional().describe('Встроенный текст запроса, если операции нет'),
+    variables: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Переменные шага; "{{name}}" подставляет значение из extract прошлых шагов или окружения'),
+    extract: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe('Что сохранить для следующих шагов: { "token": "data.login.accessToken" }'),
+    assert: z
+        .array(
+            z.object({
+                path: z.string().describe('Путь: "status", "data.user.id", "errors"'),
+                op: z.enum(['eq', 'ne', 'exists', 'notExists', 'contains', 'gt', 'lt']),
+                value: z.unknown().optional(),
+            }),
+        )
+        .optional(),
+    continueOnFailure: z.boolean().optional().describe('Не останавливать цепочку, если шаг упал'),
+    environmentId: z.string().optional(),
+    endpointId: z.string().optional(),
+})
+
 function registerFlowTools(register: IRegisterTool, context: INodeContext): void {
     register({
         name: 'flow_list',
@@ -624,6 +660,84 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
             }))
         },
         summarize: (result) => `${result.length} цепочек`,
+    })
+
+    register({
+        name: 'flow_get',
+        title: 'Прочитать флоу',
+        description:
+            'Возвращает цепочку целиком: шаги, переменные, extract и assert. Нужен, чтобы дополнить существующую цепочку через flow_save, не потеряв её шаги.',
+        inputSchema: { workspaceId: z.string(), flowId: z.string() },
+        run: async (args) => context.workspaces.getFlow(args.workspaceId, args.flowId),
+        summarize: (result) => `${result.name}: ${result.steps.length} шагов`,
+    })
+
+    register({
+        name: 'flow_save',
+        title: 'Сохранить флоу',
+        description:
+            'Создаёт или перезаписывает цепочку (smoke-тест) из шагов. Каждый шаг — сохранённая операция (operationRef) или встроенный query; extract передаёт значения следующим шагам как {{name}}, assert проверяет ответ. Ссылки на операции, окружения и эндпоинты проверяются до записи. Перезапись заменяет шаги целиком — для правки сначала прочитайте цепочку через flow_get.',
+        inputSchema: {
+            workspaceId: z.string(),
+            flowId: z
+                .string()
+                .optional()
+                .describe('Идентификатор (имя файла); без него выводится из name. Существующий — перезаписывается'),
+            name: z.string().min(1),
+            description: z.string().optional(),
+            environmentId: z.string().optional().describe('Окружение по умолчанию для всех шагов'),
+            endpointId: z.string().optional(),
+            steps: z.array(FLOW_STEP_INPUT).min(1),
+        },
+        run: async (args) => {
+            const flow = FlowSchema.parse({
+                id: args.flowId ?? toSlug(args.name),
+                name: args.name,
+                description: args.description ?? '',
+                environmentId: args.environmentId,
+                endpointId: args.endpointId,
+                steps: args.steps.map((step, index) => ({
+                    ...step,
+                    id: step.id ?? `step-${index + 1}`,
+                })),
+            })
+
+            const problems = await findFlowProblems(context.workspaces, args.workspaceId, flow)
+            if (problems.length > 0) {
+                const lines = problems.map((problem) =>
+                    problem.step ? `шаг "${problem.step}": ${problem.message}` : problem.message,
+                )
+                throw new ResolvrError(
+                    ErrorCodeEnum.INVALID_REFERENCE,
+                    `Цепочка "${flow.id}" не сохранена: ${lines.join('; ')}`,
+                    { workspaceId: args.workspaceId, flowId: flow.id, problems: lines },
+                )
+            }
+
+            const existed = await context.workspaces
+                .getFlow(args.workspaceId, flow.id)
+                .then(() => true)
+                .catch(() => false)
+            await context.workspaces.saveFlow(args.workspaceId, flow)
+
+            return { saved: flow.id, created: !existed, steps: flow.steps.length }
+        },
+        summarize: (result) =>
+            `${result.created ? 'создана' : 'перезаписана'} ${result.saved}: ${result.steps} шагов`,
+    })
+
+    register({
+        name: 'flow_delete',
+        title: 'Удалить флоу',
+        description: 'Удаляет цепочку. Операции, на которые она ссылалась, остаются.',
+        inputSchema: { workspaceId: z.string(), flowId: z.string() },
+        run: async (args) => {
+            await context.workspaces.getFlow(args.workspaceId, args.flowId)
+            await context.workspaces.deleteFlow(args.workspaceId, args.flowId)
+
+            return { deleted: args.flowId }
+        },
+        summarize: (result) => `удалена ${result.deleted}`,
     })
 
     register({

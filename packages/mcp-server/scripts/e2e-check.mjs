@@ -7,7 +7,7 @@
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 
 const HOME = '/tmp/gqlai-mcp-check'
 const SERVER = new URL('../dist/index.js', import.meta.url).pathname
@@ -112,35 +112,60 @@ await call('note', {
     step: 2,
 })
 
-// Файл цепочки создаётся напрямую — так же, как это сделал бы агент.
-mkdirSync(`${HOME}/workspaces/mock/flows`, { recursive: true })
-writeFileSync(
-    `${HOME}/workspaces/mock/flows/smoke.flow.json`,
-    JSON.stringify(
+// Ошибка в ссылке должна остановить сохранение, а не всплыть при запуске.
+const rejected = await call('flow_save', {
+    intent: 'Проверяю, что цепочка с несуществующей операцией не сохраняется',
+    expectation: 'Отказ со списком проблем',
+    step: 3,
+    workspaceId: 'mock',
+    name: 'Сломанная',
+    steps: [{ name: 'Нет такой', operationRef: 'users/nope' }],
+})
+
+const saved = await call('flow_save', {
+    intent: 'Создаю цепочку логин → профиль → пользователь',
+    expectation: 'Цепочка создана с тремя шагами',
+    step: 3,
+    workspaceId: 'mock',
+    flowId: 'smoke',
+    name: 'Логин и профиль',
+    steps: [
         {
-            id: 'smoke',
-            name: 'Логин и профиль',
-            steps: [
-                {
-                    id: 'login',
-                    name: 'Логин',
-                    query: 'mutation Login($email: String!, $password: String!) { login(email: $email, password: $password) { accessToken } }',
-                    variables: { email: 'ada@example.com', password: 'secret' },
-                    extract: { token: 'data.login.accessToken' },
-                    assert: [{ path: 'data.login.accessToken', op: 'exists' }],
-                },
-                {
-                    id: 'me',
-                    name: 'Профиль по токену',
-                    query: 'query Me { me { id email } }',
-                    assert: [{ path: 'data.me.id', op: 'eq', value: 'u1' }],
-                },
-            ],
+            id: 'login',
+            name: 'Логин',
+            query: 'mutation Login($email: String!, $password: String!) { login(email: $email, password: $password) { accessToken } }',
+            variables: { email: 'ada@example.com', password: 'secret' },
+            extract: { token: 'data.login.accessToken' },
+            assert: [{ path: 'data.login.accessToken', op: 'exists' }],
         },
-        null,
-        4,
-    ),
-)
+        {
+            id: 'me',
+            name: 'Профиль по токену',
+            query: 'query Me { me { id email } }',
+            assert: [{ path: 'data.me.id', op: 'eq', value: 'u1' }],
+        },
+        {
+            name: 'Сохранённая операция',
+            operationRef: 'users/getUser',
+            variables: { id: 'u1' },
+            assert: [{ path: 'data.user.email', op: 'eq', value: 'ada@example.com' }],
+        },
+    ],
+})
+
+const read = await call('flow_get', {
+    intent: 'Читаю цепочку обратно',
+    step: 3,
+    workspaceId: 'mock',
+    flowId: 'smoke',
+})
+
+const flowToolsOk =
+    rejected.isError &&
+    saved.parsed?.created === true &&
+    read.parsed?.steps?.length === 3 &&
+    read.parsed?.steps?.[2]?.id === 'step-3'
+console.log(`\nflow_save/flow_get: ${flowToolsOk ? 'ok' : 'НЕ РАБОТАЮТ'}`)
 
 await call('flow_list', {
     intent: 'Убеждаюсь, что цепочка видна серверу',
@@ -202,7 +227,9 @@ const journalOk =
     records.some((record) => record.kind === 'plan') &&
     calls.length >= 9 &&
     withoutIntent.length === 0 &&
-    failed.length === 1
+    // Намеренные отказы: flow_save со ссылкой на несуществующую операцию и
+    // operation_get несуществующей операции.
+    failed.length === 2
 
 console.log(`\nИТОГ: цепочка ${flow.parsed?.ok ? 'зелёная' : 'красная'}, журнал ${journalOk ? 'полный' : 'НЕПОЛНЫЙ'}`)
-process.exit(flow.parsed?.ok && journalOk ? 0 : 1)
+process.exit(flow.parsed?.ok && journalOk && flowToolsOk ? 0 : 1)
