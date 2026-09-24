@@ -1,3 +1,6 @@
+// Первым: переключает IPC на Linux до того, как любой модуль отправит команду.
+import './platform/linux-ipc.js'
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 

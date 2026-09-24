@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Linux: fixed the crash with heap corruption (`malloc(): unaligned tcache/fastbin chunk
+  detected`). Both symbolized backtraces pointed at the path where the webview answers
+  an IPC call made through the `ipc://` URI scheme (WebKitGTK custom scheme response in
+  `wry`). On Linux the app now sends IPC through `postMessage`, Tauri's built-in fallback,
+  which answers on the main thread without a WebKit request object.
+
 ## 0.2.8 — 2026-09-24
 
 - Flows: negative tests. A step has an expected result — **Success** (default), **Error**
