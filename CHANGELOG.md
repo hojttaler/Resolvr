@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.7 — 2026-09-24
 
 - MCP: agents can create and edit flows — `flow_save` (steps with a saved operation or
   an inline query, variables, `extract`, `assert`), `flow_get` and `flow_delete`.
