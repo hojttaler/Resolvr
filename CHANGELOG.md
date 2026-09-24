@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Flows: negative tests. A step has an expected result — **Success** (default), **Error**
+  or **Any response**. With **Error** the step passes when the server returns an error and
+  the checks pass (for example `errors.0.message contains "Unauthorized"`), and the flow
+  goes on; a request that unexpectedly succeeds fails the step. Available in the flow
+  editor and in MCP `flow_save` (`expect`).
+- Diagnostics: release builds keep the symbol table, so a native crash backtrace (gdb, crash
+  reports) shows function names instead of `???`. The binary grows by about 1.5 MB.
+
 ## 0.2.7 — 2026-09-24
 
 - MCP: agents can create and edit flows — `flow_save` (steps with a saved operation or
