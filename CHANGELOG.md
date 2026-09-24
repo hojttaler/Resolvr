@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.9 — 2026-09-24
 
 - Linux: fixed the crash with heap corruption (`malloc(): unaligned tcache/fastbin chunk
   detected`). Both symbolized backtraces pointed at the path where the webview answers
