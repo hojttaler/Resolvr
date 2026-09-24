@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6 — 2026-09-24
 
 - MCP: the server bundled in the app did not start on Node.js 20 ("Cannot use import
   statement outside a module") — the app now ships it as an ES module package, so
