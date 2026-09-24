@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.8 — 2026-09-24
 
 - Flows: negative tests. A step has an expected result — **Success** (default), **Error**
   or **Any response**. With **Error** the step passes when the server returns an error and

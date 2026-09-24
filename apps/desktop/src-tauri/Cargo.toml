@@ -1,6 +1,6 @@
 [package]
 name = "resolvr"
-version = "0.2.7"
+version = "0.2.8"
 description = "Desktop GraphQL client and IDE for macOS, Linux and Windows with an MCP server for AI agents"
 authors = ["hojttaler"]
 edition = "2021"
