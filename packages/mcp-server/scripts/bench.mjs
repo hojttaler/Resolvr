@@ -2,7 +2,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
-const SERVER = '/Users/hojttaler/Projects/pets/resolvr/packages/mcp-server/dist/index.js'
+const SERVER = new URL('../dist/index.js', import.meta.url).pathname
 
 const started = Date.now()
 const client = new Client({ name: 'bench', version: '1.0.0' })
