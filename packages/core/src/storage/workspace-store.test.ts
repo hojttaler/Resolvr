@@ -221,6 +221,8 @@ describe('перенос операций', () => {
             name: 'Login',
             description: '',
             variables: {},
+            tags: [],
+            preconditions: '',
             steps: [
                 {
                     id: 's1',
