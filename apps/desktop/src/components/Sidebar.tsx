@@ -815,6 +815,7 @@ function HistoryPanel(): React.JSX.Element {
  */
 function FlowsPanel(): React.JSX.Element {
     const flows = useAppStore((state) => state.flows)
+    const flowRuns = useAppStore((state) => state.flowRuns)
     const runFlow = useAppStore((state) => state.runFlow)
     const flowRun = useAppStore((state) => state.flowRun)
     const openFlowTab = useAppStore((state) => state.openFlowTab)
@@ -857,6 +858,21 @@ function FlowsPanel(): React.JSX.Element {
                                 ▶
                             </button>
                             <span className="tree__label">{flow.name}</span>
+                            {/* Свежесть проверки видна в списке: иначе «когда
+                                это последний раз проходило» пришлось бы
+                                держать в голове или в отдельном документе. */}
+                            {flowRuns[flow.id]?.lastGreenAt && (
+                                <span
+                                    className="badge badge--ok"
+                                    title={t('Last green run: {date}', {
+                                        date: new Date(
+                                            flowRuns[flow.id]?.lastGreenAt ?? '',
+                                        ).toLocaleString(),
+                                    })}
+                                >
+                                    ✓
+                                </span>
+                            )}
                             <span className="badge">{flow.steps.length}</span>
                         </div>
 

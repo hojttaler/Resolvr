@@ -268,7 +268,36 @@ export const FlowSchema = z.object({
      * Запуск может передать свои значения — они важнее.
      */
     variables: z.record(z.string(), z.unknown()).default({}),
+    /**
+     * Метки цепочки: фича, признак изменения данных, набор для прогона.
+     *
+     * По ним набор запускается одной командой (`flow_run_many`), а реестр
+     * smoke-тестов живёт рядом с самими цепочками, а не в отдельном документе,
+     * который расходится с ними.
+     */
+    tags: z.array(z.string()).default([]),
+    /** Предусловия прогона человеческим текстом: что должно быть в данных. */
+    preconditions: z.string().default(''),
     steps: z.array(FlowStepSchema).default([]),
+})
+
+/**
+ * Итог последнего прогона цепочки.
+ *
+ * Лежит в `.state`, а не в файле цепочки: дата прогона — личное и меняется
+ * каждый раз, и в общем репозитории давала бы конфликт на каждый запуск.
+ */
+export const FlowRunStateSchema = z.object({
+    lastRunAt: z.string(),
+    ok: z.boolean(),
+    durationMs: z.number(),
+    /** Когда цепочка последний раз прошла целиком; отсутствует — ни разу. */
+    lastGreenAt: z.string().optional(),
+    failedStep: z.string().optional(),
+})
+
+export const FlowRunStateFileSchema = z.object({
+    flows: z.record(z.string(), FlowRunStateSchema).default({}),
 })
 
 export const HistoryEntrySchema = z.object({
@@ -481,6 +510,7 @@ export type IFlowAssert = z.infer<typeof FlowAssertSchema>
 export type IFlowStep = z.infer<typeof FlowStepSchema>
 export type IFlowStepExpect = z.infer<typeof FlowStepExpectSchema>
 export type IFlow = z.infer<typeof FlowSchema>
+export type IFlowRunState = z.infer<typeof FlowRunStateSchema>
 export type IHistoryEntry = z.infer<typeof HistoryEntrySchema>
 export type ITabKind = z.infer<typeof TabKindSchema>
 export type ITabCursor = z.infer<typeof TabCursorSchema>

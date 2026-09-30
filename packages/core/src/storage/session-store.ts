@@ -77,6 +77,8 @@ export class SessionStore {
                 name: typeof parsed.name === 'string' ? parsed.name : '',
                 description: typeof parsed.description === 'string' ? parsed.description : '',
                 variables: FlowSchema.shape.variables.parse(parsed.variables ?? {}),
+                tags: FlowSchema.shape.tags.parse(parsed.tags ?? []),
+                preconditions: FlowSchema.shape.preconditions.parse(parsed.preconditions ?? ''),
                 steps: FlowSchema.shape.steps.parse(parsed.steps ?? []),
                 endpointId: parsed.endpointId,
                 environmentId: parsed.environmentId,

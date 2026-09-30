@@ -103,6 +103,11 @@ export class LibraryPaths {
         return `${this.stateDir()}/tokens.json`
     }
 
+    /** Итоги прогонов цепочек: личное состояние, не попадает в репозиторий. */
+    public flowRunsFile(workspaceId: string): string {
+        return `${this.stateDir()}/flow-runs.${workspaceId}.json`
+    }
+
     public sessionFile(): string {
         return `${this.stateDir()}/session.json`
     }

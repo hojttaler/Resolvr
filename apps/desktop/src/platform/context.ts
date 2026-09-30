@@ -1,6 +1,7 @@
 import {
     FileSecretStore,
     FlowRunner,
+    FlowStateStore,
     HistoryStore,
     LibraryPaths,
     migrateLegacyLibrary,
@@ -33,6 +34,7 @@ export interface IAppContext {
     schemas: SchemaService
     runner: RunEngine
     flows: FlowRunner
+    flowState: FlowStateStore
 }
 
 let contextPromise: Promise<IAppContext> | undefined
@@ -71,7 +73,8 @@ async function createAppContext(): Promise<IAppContext> {
     const tokens = new TokenInfoStore(fs, paths)
     const schemas = new SchemaService(fs, paths, transport)
     const runner = new RunEngine({ workspaces, history, resolver, tokens, transport, secrets })
-    const flows = new FlowRunner(workspaces, runner)
+    const flowState = new FlowStateStore(fs, paths)
+    const flows = new FlowRunner(workspaces, runner, flowState)
 
     // Движок и раннер знают друг о друге: раннер выполняет шаги через движок,
     // а движок вызывает цепочки подготовки и восстановления.
@@ -95,5 +98,6 @@ async function createAppContext(): Promise<IAppContext> {
         schemas,
         runner,
         flows,
+        flowState,
     }
 }

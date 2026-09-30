@@ -237,6 +237,37 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                     )}
                 </div>
 
+                <div className="flow__grid">
+                    <label className="field__label">
+                        {t('Tags')}
+                        <div className="inspector__hint">{t('feature, set, stateChanging')}</div>
+                    </label>
+                    <input
+                        className="input"
+                        value={draft.tags.join(', ')}
+                        placeholder="smoke, billing"
+                        onChange={(event) =>
+                            setDraft((current) => ({ ...current, tags: parseTags(event.target.value) }))
+                        }
+                    />
+
+                    <label className="field__label">
+                        {t('Preconditions')}
+                        <div className="inspector__hint">{t('what the data must contain')}</div>
+                    </label>
+                    <input
+                        className="input"
+                        value={draft.preconditions}
+                        placeholder={t('a client with an active contract')}
+                        onChange={(event) =>
+                            setDraft((current) => ({
+                                ...current,
+                                preconditions: event.target.value,
+                            }))
+                        }
+                    />
+                </div>
+
                 <ConstantsEditor
                     key={props.tabId}
                     value={draft.variables}
@@ -309,6 +340,11 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
             </div>
         </div>
     )
+}
+
+/** Метки из строки через запятую: пустые отбрасываются, повторы убираются. */
+function parseTags(value: string): string[] {
+    return [...new Set(value.split(',').map((tag) => tag.trim()).filter((tag) => tag.length > 0))]
 }
 
 interface IConstantsEditorProps {

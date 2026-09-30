@@ -664,15 +664,29 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
     register({
         name: 'flow_list',
         title: 'Список флоу',
-        description: 'Сценарии из нескольких шагов, сохранённые в workspace.',
-        inputSchema: { workspaceId: z.string() },
+        description:
+            'Сценарии из нескольких шагов, сохранённые в workspace. Показывает метки, предусловия и дату последнего зелёного прогона; `tag` и `prefix` сужают список.',
+        inputSchema: {
+            workspaceId: z.string(),
+            tag: z.string().optional().describe('Только цепочки с этой меткой'),
+            prefix: z.string().optional().describe('Только цепочки, чей id начинается так'),
+        },
         run: async (args) => {
             const flows = await context.workspaces.listFlows(args.workspaceId)
+            const state = await context.flowState.read(args.workspaceId)
 
-            return flows.map((flow) => ({
+            return selectFlows(flows, args).map((flow) => ({
                 id: flow.id,
                 name: flow.name,
+                tags: flow.tags,
+                preconditions: flow.preconditions || undefined,
                 steps: flow.steps.map((step) => step.name),
+                // Свежесть проверки: когда цепочка последний раз проходила
+                // целиком. Отвечает на «что здесь ещё зелёное» без отдельного
+                // документа со списком smoke-тестов.
+                lastGreenAt: state[flow.id]?.lastGreenAt,
+                lastRunAt: state[flow.id]?.lastRunAt,
+                lastRunOk: state[flow.id]?.ok,
             }))
         },
         summarize: (result) => `${result.length} цепочек`,
@@ -709,16 +723,34 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 .describe(
                     'Константы цепочки: доступны шагам как {{имя}} и раскрываются один раз за прогон. Значения генераторов ({{$uuid}}) фиксируются на весь прогон. Запуск может передать свои значения — они важнее',
                 ),
+            tags: z
+                .array(z.string())
+                .optional()
+                .describe(
+                    'Метки: фича, признак изменения данных (например, stateChanging), набор для прогона. По ним запускается flow_run_many',
+                ),
+            preconditions: z
+                .string()
+                .optional()
+                .describe('Что должно быть в данных до прогона — текстом, для человека'),
             steps: z.array(FLOW_STEP_INPUT).min(1),
         },
         run: async (args) => {
+            // Перезапись не должна терять метки и предусловия, которых агент
+            // не передавал: он правит шаги, а реестр остаётся реестром.
+            const existing = await context.workspaces
+                .getFlow(args.workspaceId, args.flowId ?? toSlug(args.name))
+                .catch(() => undefined)
+
             const flow = FlowSchema.parse({
                 id: args.flowId ?? toSlug(args.name),
                 name: args.name,
                 description: args.description ?? '',
                 environmentId: args.environmentId,
                 endpointId: args.endpointId,
-                variables: args.variables ?? {},
+                variables: args.variables ?? existing?.variables ?? {},
+                tags: args.tags ?? existing?.tags ?? [],
+                preconditions: args.preconditions ?? existing?.preconditions ?? '',
                 steps: args.steps.map((step, index) => ({
                     ...step,
                     id: step.id ?? `step-${index + 1}`,
@@ -737,13 +769,9 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 )
             }
 
-            const existed = await context.workspaces
-                .getFlow(args.workspaceId, flow.id)
-                .then(() => true)
-                .catch(() => false)
             await context.workspaces.saveFlow(args.workspaceId, flow)
 
-            return { saved: flow.id, created: !existed, steps: flow.steps.length }
+            return { saved: flow.id, created: existing === undefined, steps: flow.steps.length }
         },
         summarize: (result) =>
             `${result.created ? 'создана' : 'перезаписана'} ${result.saved}: ${result.steps} шагов`,
@@ -811,6 +839,92 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
         summarize: (result) =>
             `${result.ok ? 'пройдена' : 'упала'}, шагов: ${result.steps.length}, ${result.durationMs} мс`,
     })
+
+    register({
+        name: 'flow_run_many',
+        title: 'Запустить набор флоу',
+        description:
+            'Прогоняет набор цепочек одной командой: по префиксу идентификатора (smoke-billing-*), по метке или по явному списку. Возвращает итоговую таблицу — регресс вместо N отдельных вызовов. Упавшая цепочка не отменяет остальные.',
+        inputSchema: {
+            workspaceId: z.string(),
+            prefix: z.string().optional().describe('Идентификаторы, начинающиеся так: smoke-billing-'),
+            tag: z.string().optional().describe('Метка цепочки, например smoke или billing'),
+            flowIds: z.array(z.string()).optional().describe('Явный список вместо отбора'),
+            environmentId: z.string().optional(),
+            variables: z
+                .record(z.string(), z.unknown())
+                .optional()
+                .describe('Значения для всех цепочек набора: доступны шагам как {{имя}}'),
+            parallel: z
+                .boolean()
+                .optional()
+                .describe('Запускать одновременно (до 4 цепочек); по умолчанию — по одной'),
+            confirm: z
+                .boolean()
+                .optional()
+                .describe(
+                    'Подтверждение мутаций в защищённом workspace (protection: confirm). Передавать только после явного согласия пользователя',
+                ),
+        },
+        run: async (args) => {
+            const flows = await context.workspaces.listFlows(args.workspaceId)
+            const selected = args.flowIds
+                ? args.flowIds.map((id) => ({ id }))
+                : selectFlows(flows, args)
+
+            if (selected.length === 0) {
+                throw new ResolvrError(
+                    ErrorCodeEnum.FLOW_NOT_FOUND,
+                    'Ни одна цепочка не подошла под отбор: проверьте prefix, tag или flowIds',
+                    { workspaceId: args.workspaceId, prefix: args.prefix, tag: args.tag },
+                )
+            }
+
+            const results = await context.flows.runMany(
+                args.workspaceId,
+                selected.map((flow) => flow.id),
+                {
+                    environmentId: args.environmentId,
+                    variables: args.variables,
+                    confirmed: args.confirm,
+                    parallel: args.parallel,
+                },
+            )
+
+            return {
+                total: results.length,
+                failed: results.filter((run) => !run.ok).length,
+                flows: results.map((run) => ({
+                    flowId: run.flowId,
+                    ok: run.ok,
+                    durationMs: run.durationMs,
+                    // У упавшей цепочки видно, где именно она встала: без этого
+                    // пришлось бы перезапускать её отдельно, чтобы узнать шаг.
+                    failedStep: run.steps.find((step) => !step.ok && !step.skipped)?.name,
+                    error: run.error,
+                })),
+            }
+        },
+        summarize: (result) =>
+            result.failed === 0
+                ? `${result.total} цепочек пройдено`
+                : `${result.failed} из ${result.total} упали: ${result.flows
+                      .filter((flow) => !flow.ok)
+                      .map((flow) => flow.flowId)
+                      .join(', ')}`,
+    })
+}
+
+/** Отбор цепочек по префиксу идентификатора и метке; без условий — все. */
+function selectFlows<T extends { id: string; tags: string[] }>(
+    flows: T[],
+    filter: { prefix?: string; tag?: string },
+): T[] {
+    return flows.filter(
+        (flow) =>
+            (filter.prefix === undefined || flow.id.startsWith(filter.prefix)) &&
+            (filter.tag === undefined || flow.tags.includes(filter.tag)),
+    )
 }
 
 function registerEnvironmentTools(register: IRegisterTool, context: INodeContext): void {

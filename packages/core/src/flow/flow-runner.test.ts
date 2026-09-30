@@ -10,6 +10,7 @@ import { WorkspaceStore } from '../storage/workspace-store.js'
 import { FakeTransport, MemorySecretStore } from '../testing/fakes.js'
 import { MemoryFileSystem } from '../testing/memory-file-system.js'
 import { evaluateAssert, FlowRunner, judgeStep } from './flow-runner.js'
+import { FlowStateStore } from './flow-state.js'
 
 async function createHarness(
     responder: (body: string) => string | { status: number; body: string },
@@ -35,7 +36,9 @@ async function createHarness(
         endpointUrl: 'https://api.example.com/graphql',
     })
 
-    return { workspaces, transport, flows: new FlowRunner(workspaces, engine) }
+    const state = new FlowStateStore(fs, paths)
+
+    return { workspaces, transport, state, flows: new FlowRunner(workspaces, engine, state) }
 }
 
 const loginFlow = FlowSchema.parse({
@@ -404,5 +407,83 @@ describe('переменные прогона', () => {
 
         expect(sentVariables(harness, 0).clientId).toBe('c-42')
         expect(sentVariables(harness, 1).clientId).toBe('c-42')
+    })
+})
+
+describe('набор цепочек', () => {
+    const passing = FlowSchema.parse({
+        id: 'smoke-billing-one',
+        name: 'Один',
+        tags: ['smoke'],
+        steps: [{ id: 's1', name: 'Шаг', query: 'query One { one }' }],
+    })
+    const failing = FlowSchema.parse({
+        id: 'smoke-billing-two',
+        name: 'Два',
+        tags: ['smoke'],
+        steps: [
+            {
+                id: 's1',
+                name: 'Шаг',
+                query: 'query Two { two }',
+                assert: [{ path: 'data.two', op: 'eq', value: 'нет' }],
+            },
+        ],
+    })
+
+    it('прогоняет весь набор, даже если цепочка упала', async () => {
+        const harness = await createHarness(() => '{"data":{"one":1,"two":2}}')
+        await harness.workspaces.saveFlow('api', passing)
+        await harness.workspaces.saveFlow('api', failing)
+
+        const results = await harness.flows.runMany('api', [
+            passing.id,
+            failing.id,
+            'нет-такой-цепочки',
+        ])
+
+        expect(results.map((run) => run.ok)).toEqual([true, false, false])
+        expect(results[2]?.error).toMatch(/нет-такой-цепочки/)
+    })
+
+    it('параллельный прогон даёт те же итоги в том же порядке', async () => {
+        const harness = await createHarness(() => '{"data":{"one":1,"two":2}}')
+        await harness.workspaces.saveFlow('api', passing)
+        await harness.workspaces.saveFlow('api', failing)
+
+        const results = await harness.flows.runMany('api', [passing.id, failing.id], {
+            parallel: true,
+        })
+
+        expect(results.map((run) => run.flowId)).toEqual([passing.id, failing.id])
+        expect(results.map((run) => run.ok)).toEqual([true, false])
+    })
+
+    it('запоминает дату зелёного прогона и не стирает её падением', async () => {
+        const harness = await createHarness((body) =>
+            body.includes('One') ? '{"data":{"one":1}}' : '{"data":{"two":2}}',
+        )
+        await harness.workspaces.saveFlow('api', passing)
+
+        await harness.flows.run('api', passing.id)
+        const green = await harness.state.get('api', passing.id)
+        expect(green?.lastGreenAt).toBeTruthy()
+
+        // Та же цепочка с проверкой, которая не пройдёт.
+        await harness.workspaces.saveFlow('api', {
+            ...passing,
+            steps: [
+                {
+                    ...passing.steps[0]!,
+                    assert: [{ path: 'data.one', op: 'eq' as const, value: 'нет' }],
+                },
+            ],
+        })
+        await harness.flows.run('api', passing.id)
+
+        const after = await harness.state.get('api', passing.id)
+        expect(after?.ok).toBe(false)
+        expect(after?.failedStep).toBe('Шаг')
+        expect(after?.lastGreenAt).toBe(green?.lastGreenAt)
     })
 })

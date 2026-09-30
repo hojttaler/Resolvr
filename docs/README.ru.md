@@ -275,6 +275,26 @@ DMG для раздачи (universal: Apple Silicon + Intel): `pnpm release` →
 Ответ шага несёт список `errors`, даже когда шаг зелёный: при `expect: "any"`
 ошибки GraphQL внутри ответа 200 иначе оставались невидимыми.
 
+### Метки, предусловия и свежесть прогона
+
+У цепочки есть метки (`tags`) и предусловия (`preconditions`) — что должно быть
+в данных до запуска. Реестр smoke-тестов так живёт рядом с самими цепочками, а не
+в отдельном документе, который с ними расходится. Итог последнего прогона
+(`.state/flow-runs.<workspace>.json`) не попадает в репозиторий: `flow_list`
+отдаёт `lastGreenAt` и `lastRunOk`, а в сайдбаре у прошедшей цепочки стоит ✓ с
+датой в подсказке.
+
+Набор запускается одной командой:
+
+```
+flow_run_many(workspaceId, prefix: "smoke-billing-", parallel: true)
+flow_run_many(workspaceId, tag: "smoke", variables: { clientId: "…" })
+```
+
+Отбор — по префиксу идентификатора, по метке или явным списком `flowIds`.
+Упавшая цепочка не отменяет остальные: в ответе таблица с `ok`, длительностью и
+шагом, на котором цепочка встала.
+
 ## Защита от случайной записи
 
 Настройки workspace → **Защита**: `Подтверждение каждой мутации` или
@@ -309,7 +329,7 @@ claude mcp add resolvr --scope user -- node <путь>/packages/mcp-server/dist/
 Инструменты: `plan`, `note`, `workspace_list`, `workspace_create`, `collection_list`,
 `collection_create`, `operation_get`, `operation_save`, `operation_delete`, `run`,
 `introspect`, `schema_get`, `schema_diff`, `flow_list`, `flow_run`, `env_list`,
-`env_set`, `history_list`.
+`flow_run_many`, `env_set`, `history_list`.
 
 ### Наблюдение за агентом
 

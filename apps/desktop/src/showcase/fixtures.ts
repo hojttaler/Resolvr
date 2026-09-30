@@ -136,6 +136,8 @@ export function seedShowcase(): void {
                 name: 'Sign in',
                 description: '',
                 variables: {},
+                tags: ['smoke'],
+                preconditions: '',
                 steps: [
                     { id: 's1', name: 'Request code', operationRef: 'account/SignIn', variables: {}, extract: { challengeId: 'data.signIn.challengeId' }, assert: [], expect: 'success', continueOnFailure: false },
                     { id: 's2', name: 'Confirm code', operationRef: 'account/SignIn', variables: {}, extract: { accessToken: 'data.signIn.accessToken' }, assert: [], expect: 'success', continueOnFailure: false },

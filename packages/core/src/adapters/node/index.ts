@@ -10,6 +10,7 @@ import { SwitchableSecretStore } from '../../secrets/switchable-secret-store.js'
 import { TokenInfoStore } from '../../secrets/token-info-store.js'
 import { RunEngine } from '../../run/run-engine.js'
 import { FlowRunner } from '../../flow/flow-runner.js'
+import { FlowStateStore } from '../../flow/flow-state.js'
 import { SchemaService } from '../../schema/schema-service.js'
 import { NodeFileSystem } from './node-file-system.js'
 import { NodeSecretStore } from './node-secret-store.js'
@@ -33,6 +34,7 @@ export interface INodeContext {
     schemas: SchemaService
     runner: RunEngine
     flows: FlowRunner
+    flowState: FlowStateStore
     /** Завершается, когда настройки прочитаны и бэкенд секретов выбран. */
     ready: Promise<void>
 }
@@ -64,7 +66,8 @@ export function createNodeContext(explicitRoot?: string): INodeContext {
     const tokens = new TokenInfoStore(fs, paths)
     const schemas = new SchemaService(fs, paths, transport)
     const runner = new RunEngine({ workspaces, history, resolver, tokens, transport, secrets })
-    const flows = new FlowRunner(workspaces, runner)
+    const flowState = new FlowStateStore(fs, paths)
+    const flows = new FlowRunner(workspaces, runner, flowState)
 
     // Движок и раннер знают друг о друге: раннер выполняет шаги через движок,
     // а движок вызывает цепочки подготовки и восстановления.
@@ -92,5 +95,6 @@ export function createNodeContext(explicitRoot?: string): INodeContext {
         schemas,
         runner,
         flows,
+        flowState,
     }
 }

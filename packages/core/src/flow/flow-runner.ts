@@ -1,4 +1,4 @@
-import { ResolvrError } from '../model/errors.js'
+import { ResolvrError, toErrorMessage } from '../model/errors.js'
 import type {
     IEnvironment,
     IFlow,
@@ -11,6 +11,7 @@ import { readPath, type IRunResult, type RunEngine } from '../run/run-engine.js'
 import { defaultContext } from '../secrets/generators.js'
 import { interpolateJson } from '../secrets/secret-resolver.js'
 import type { WorkspaceStore } from '../storage/workspace-store.js'
+import type { FlowStateStore } from './flow-state.js'
 
 export interface IAssertResult {
     assert: IFlowAssert
@@ -49,6 +50,8 @@ export interface IFlowRunResult {
     steps: IFlowStepResult[]
     /** Накопленный контекст: всё, что извлекли шаги. */
     context: Record<string, unknown>
+    /** Причина, по которой цепочка не запустилась: нет файла, нет операции. */
+    error?: string
 }
 
 export interface IFlowRunOptions {
@@ -72,6 +75,13 @@ export interface IFlowRunOptions {
     confirmed?: boolean
 }
 
+export interface IFlowRunManyOptions extends IFlowRunOptions {
+    /** Запускать цепочки одновременно; по умолчанию — по одной. */
+    parallel?: boolean
+    /** Сколько цепочек выполнять одновременно при `parallel`; по умолчанию 4. */
+    concurrency?: number
+}
+
 /**
  * Последовательное выполнение сценариев из нескольких операций.
  *
@@ -83,10 +93,12 @@ export interface IFlowRunOptions {
 export class FlowRunner {
     private readonly _workspaces: WorkspaceStore
     private readonly _runner: RunEngine
+    private readonly _state: FlowStateStore | undefined
 
-    constructor(workspaces: WorkspaceStore, runner: RunEngine) {
+    constructor(workspaces: WorkspaceStore, runner: RunEngine, state?: FlowStateStore) {
         this._workspaces = workspaces
         this._runner = runner
+        this._state = state
     }
 
     public async run(
@@ -137,13 +149,81 @@ export class FlowRunner {
             if (!stepResult.ok && !step.continueOnFailure) aborted = true
         }
 
-        return {
+        const result: IFlowRunResult = {
             flowId: flow.id,
             ok: steps.every((step) => step.ok || step.skipped) && !aborted,
             durationMs: Date.now() - startedAt,
             steps,
             context,
         }
+
+        // Итог прогона запоминается: «когда цепочка была зелёной» отвечает на
+        // вопрос о свежести проверки без отдельного документа со списком.
+        await this._state?.record(workspaceId, flow.id, {
+            ok: result.ok,
+            durationMs: result.durationMs,
+            failedStep: steps.find((step) => !step.ok && !step.skipped)?.name,
+        })
+
+        return result
+    }
+
+    /**
+     * Прогон набора цепочек одной командой.
+     *
+     * Регресс — это «прогнать всё по фиче», а не N отдельных запусков:
+     * последовательно по умолчанию, параллельно — когда сценарии независимы.
+     * Ошибка одной цепочки не отменяет остальные: набор нужен целиком.
+     */
+    public async runMany(
+        workspaceId: string,
+        flowIds: readonly string[],
+        options: IFlowRunManyOptions = {},
+    ): Promise<IFlowRunResult[]> {
+        const runOne = async (flowId: string): Promise<IFlowRunResult> => {
+            try {
+                return await this.run(workspaceId, flowId, options)
+            } catch (error) {
+                return {
+                    flowId,
+                    ok: false,
+                    durationMs: 0,
+                    steps: [],
+                    context: {},
+                    error: toErrorMessage(error),
+                }
+            }
+        }
+
+        if (!options.parallel) {
+            const results: IFlowRunResult[] = []
+            for (const flowId of flowIds) results.push(await runOne(flowId))
+
+            return results
+        }
+
+        // Параллельный прогон ограничен: набор в полсотни цепочек иначе
+        // открыл бы полсотни соединений разом и мерил бы уже не сценарии.
+        const limit = Math.max(1, Math.min(options.concurrency ?? 4, 16))
+        const results: IFlowRunResult[] = new Array<IFlowRunResult>(flowIds.length)
+        let next = 0
+
+        const worker = async (): Promise<void> => {
+            for (;;) {
+                const index = next
+                next += 1
+                const flowId = flowIds[index]
+                if (flowId === undefined) return
+
+                results[index] = await runOne(flowId)
+            }
+        }
+
+        await Promise.all(
+            Array.from({ length: Math.min(limit, flowIds.length) }, () => worker()),
+        )
+
+        return results
     }
 
     private async _runStep(

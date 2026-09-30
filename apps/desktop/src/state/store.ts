@@ -26,6 +26,7 @@ import {
     importBundle,
     type IAppLink,
     type IFlow,
+    type IFlowRunState,
     type IImportBundle,
     type IImportResult,
     type IFlowReport,
@@ -133,6 +134,8 @@ export interface IAppState {
     workspace?: IWorkspace
     tree: ICollectionNode[]
     flows: IFlow[]
+    /** Итоги прошлых прогонов цепочек: «когда это в последний раз было зелёным». */
+    flowRuns: Record<string, IFlowRunState>
     history: IHistoryEntry[]
 
     /**
@@ -354,6 +357,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     workspaces: [],
     tree: [],
     flows: [],
+    flowRuns: {},
     history: [],
     tabs: [],
     tabsByWorkspace: {},
@@ -487,7 +491,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const context = await getAppContext()
         const collections = await context.workspaces.listCollections(workspace.id)
 
-        const [tree, flows] = await Promise.all([
+        const [tree, flows, flowRuns] = await Promise.all([
             Promise.all(
                 collections.map(async (collection) => ({
                     collection,
@@ -495,9 +499,10 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 })),
             ),
             context.workspaces.listFlows(workspace.id),
+            context.flowState.read(workspace.id),
         ])
 
-        set({ tree, flows })
+        set({ tree, flows, flowRuns })
     },
 
     async selectWorkspace(workspaceId) {
@@ -798,6 +803,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             name: t('New flow'),
             description: '',
             variables: {},
+            tags: [],
+            preconditions: '',
             steps: [],
         }
 
@@ -1358,6 +1365,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             })
         }
 
+        set({ flowRuns: await context.flowState.read(workspace.id) })
         await get().loadHistory()
     },
 
@@ -1461,6 +1469,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
             const finalReport = get().reports[tabId]
             if (finalReport && isTauri()) await context.sessions.writeReport(tabId, finalReport)
+            set({ flowRuns: await context.flowState.read(workspace.id) })
             await get().loadHistory()
         }
     },
