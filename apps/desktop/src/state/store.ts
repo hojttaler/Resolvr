@@ -1071,18 +1071,26 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             return
         }
 
-        // Мутация на боевом окружении выполняется только после подтверждения.
+        // Мутация на боевом окружении или в защищённом workspace выполняется
+        // только после подтверждения.
         const environment = selectActiveEnvironment(state)
-        if (kind === 'mutation' && environment?.production && !options.confirmed) {
-            get().requestConfirm(
-                productionConfirm(
-                    environment.name,
-                    t('mutation {name}', { name: extractOperationName(content.query) ?? t('unnamed') }),
-                    () => get().runActiveTab({ ...options, confirmed: true }),
-                ),
-            )
+        const what = t('mutation {name}', {
+            name: extractOperationName(content.query) ?? t('unnamed'),
+        })
+        if (kind === 'mutation' && !options.confirmed) {
+            const request = environment?.production
+                ? productionConfirm(environment.name, what, () =>
+                      get().runActiveTab({ ...options, confirmed: true }),
+                  )
+                : protectionConfirm(workspace, what, () =>
+                      get().runActiveTab({ ...options, confirmed: true }),
+                  )
 
-            return
+            if (request) {
+                get().requestConfirm(request)
+
+                return
+            }
         }
 
         const context = await getAppContext()
@@ -1106,6 +1114,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 operationName: extractOperationName(content.query),
                 timeoutMs: state.settings.request.timeoutMs,
                 saveToEnvironment: findOperation(state.tree, tab.operationRef)?.saveToEnvironment ?? [],
+                confirmed: options.confirmed,
             })
 
             setRun(set, tab.id, { status: 'done', result, events: [] })
@@ -1299,20 +1308,28 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         // Цепочка почти всегда содержит мутации — на боевом окружении она
         // требует того же подтверждения, что и одиночная мутация.
-        if (environment?.production && !options.confirmed) {
+        if (!options.confirmed) {
             const flow = get().flows.find((item) => item.id === flowId)
-            get().requestConfirm(
-                productionConfirm(environment.name, t('flow “{name}”', { name: flow?.name ?? flowId }), () =>
-                    get().runFlow(flowId, { confirmed: true }),
-                ),
-            )
+            const what = t('flow “{name}”', { name: flow?.name ?? flowId })
+            const request = environment?.production
+                ? productionConfirm(environment.name, what, () =>
+                      get().runFlow(flowId, { confirmed: true }),
+                  )
+                : protectionConfirm(workspace, what, () => get().runFlow(flowId, { confirmed: true }))
 
-            return
+            if (request) {
+                get().requestConfirm(request)
+
+                return
+            }
         }
 
         const context = await getAppContext()
         try {
-            const run = await context.flows.run(workspace.id, flowId, { environmentId })
+            const run = await context.flows.run(workspace.id, flowId, {
+                environmentId,
+                confirmed: options.confirmed,
+            })
             set({ flowRun: run })
 
             // Токен, добытый цепочкой, сохраняется в окружение: иначе он жил бы
@@ -1351,14 +1368,19 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const environment = selectActiveEnvironment(get())
         const environmentId = environment?.id
 
-        if (environment?.production && !options.confirmed) {
-            get().requestConfirm(
-                productionConfirm(environment.name, t('run of all flows ({n})', { n: flows.length }), () =>
-                    get().runAllFlows({ confirmed: true }),
-                ),
-            )
+        if (!options.confirmed) {
+            const what = t('run of all flows ({n})', { n: flows.length })
+            const request = environment?.production
+                ? productionConfirm(environment.name, what, () =>
+                      get().runAllFlows({ confirmed: true }),
+                  )
+                : protectionConfirm(workspace, what, () => get().runAllFlows({ confirmed: true }))
 
-            return
+            if (request) {
+                get().requestConfirm(request)
+
+                return
+            }
         }
 
         // Отчёт — отдельная вкладка; повторный прогон переиспользует её.
@@ -1397,7 +1419,10 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             for (const [index, flow] of flows.entries()) {
                 let run: IFlowRunResult
                 try {
-                    run = await context.flows.run(workspace.id, flow.id, { environmentId })
+                    run = await context.flows.run(workspace.id, flow.id, {
+                        environmentId,
+                        confirmed: options.confirmed,
+                    })
                 } catch (error) {
                     run = {
                         flowId: flow.id,
@@ -2179,6 +2204,32 @@ function productionConfirm(
         actionLabel: t('Run on PROD'),
         danger: true,
         production: true,
+        run,
+    }
+}
+
+/**
+ * Подтверждение записи в защищённом workspace; `undefined` — защиты нет.
+ *
+ * Запрет `readOnly` подтверждением не снимается: запуск уйдёт в ядро и там
+ * будет отвергнут с внятной ошибкой — так один и тот же запрет действует и
+ * в приложении, и при запуске агентом.
+ */
+function protectionConfirm(
+    workspace: IWorkspace,
+    description: string,
+    run: () => Promise<void>,
+): IConfirmRequest | undefined {
+    if (workspace.protection !== 'confirm') return undefined
+
+    return {
+        title: t('Protected workspace'),
+        description: t('Workspace “{name}” is protected: {what} changes data. Run it?', {
+            name: workspace.name,
+            what: description,
+        }),
+        actionLabel: t('Run'),
+        danger: true,
         run,
     }
 }

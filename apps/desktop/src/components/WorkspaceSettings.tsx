@@ -1,4 +1,10 @@
-import { toSlug, type IEndpoint, type IEnvironment, type IWorkspace } from '@resolvr/core'
+import {
+    toSlug,
+    WorkspaceSchema,
+    type IEndpoint,
+    type IEnvironment,
+    type IWorkspace,
+} from '@resolvr/core'
 import { useEffect, useState } from 'react'
 
 import { useT } from '../i18n/index.js'
@@ -168,6 +174,38 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
             <div className="dialog dialog--wide" onMouseDown={(event) => event.stopPropagation()}>
                 <div className="dialog__body">
                     <div className="dialog__title">Workspace: {draft.name}</div>
+
+                    {/* Защита принадлежит workspace, а не окружению: она
+                        действует и при ручной работе, и при запуске агентом
+                        через MCP, каким бы окружением он ни пользовался. */}
+                    <div className="flow__grid">
+                        <label className="field__label">
+                            {t('Protection')}
+                            <div className="inspector__hint">
+                                {t('applies to the app and to the agent (MCP)')}
+                            </div>
+                        </label>
+                        <select
+                            className="select"
+                            value={draft.protection}
+                            onChange={(event) =>
+                                setDraft((current) =>
+                                    current
+                                        ? {
+                                              ...current,
+                                              protection: WorkspaceSchema.shape.protection.parse(
+                                                  event.target.value,
+                                              ),
+                                          }
+                                        : current,
+                                )
+                            }
+                        >
+                            <option value="none">{t('None — mutations run as usual')}</option>
+                            <option value="confirm">{t('Confirmation for every mutation')}</option>
+                            <option value="readOnly">{t('Read only — mutations are refused')}</option>
+                        </select>
+                    </div>
 
                     <div className="segmented">
                         <button

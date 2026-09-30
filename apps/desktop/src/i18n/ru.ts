@@ -216,6 +216,14 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
     'Delete flow and close the tab': 'Удалить цепочку и закрыть вкладку',
     'Save and run ({keys})': 'Сохранить и запустить ({keys})',
     'Flow name': 'Название цепочки',
+    'Protection': 'Защита',
+    'applies to the app and to the agent (MCP)': 'действует в приложении и для агента (MCP)',
+    'None — mutations run as usual': 'Нет — мутации выполняются как обычно',
+    'Confirmation for every mutation': 'Подтверждение каждой мутации',
+    'Read only — mutations are refused': 'Только чтение — мутации запрещены',
+    'Protected workspace': 'Защищённый workspace',
+    'Workspace “{name}” is protected: {what} changes data. Run it?':
+        'Workspace «{name}» защищён: {what} меняет данные. Выполнить?',
     'Steps run in order. A value from a step response — for example, a token from login — is extracted by path and substituted into the next steps as {{name}}. Such a flow can be assigned in the environment “Authorization”: the token will then refresh itself.':
         'Шаги выполняются по порядку. Значение из ответа шага — например, токен из логина — извлекается по пути и подставляется в следующие шаги как {{имя}}. Такую цепочку можно назначить в «Авторизации» окружения: тогда токен будет обновляться сам.',
     '+ Step': '+ Шаг',

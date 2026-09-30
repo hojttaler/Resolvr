@@ -63,6 +63,13 @@ export interface IFlowRunOptions {
     variables?: Record<string, unknown>
     /** Прежнее имя `variables`; оставлено для вызывающих из интерфейса. */
     initialContext?: Record<string, unknown>
+    /**
+     * Подтверждение мутаций в защищённом workspace: цепочка целиком.
+     *
+     * Спрашивать на каждом шаге бессмысленно — согласие даётся на прогон,
+     * а его шаги известны заранее.
+     */
+    confirmed?: boolean
 }
 
 /**
@@ -174,6 +181,7 @@ export class FlowRunner {
                 // внутри восстановления зациклило бы выполнение.
                 skipFlows: true,
                 producedVariables,
+                confirmed: options.confirmed,
                 // Значения, добытые предыдущими шагами, доступны в заголовках
                 // как `{{name}}` — тем же способом, что и в переменных.
                 flowContext: toStringContext(context),

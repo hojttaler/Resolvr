@@ -20,6 +20,7 @@ export enum ErrorCodeEnum {
     TRANSPORT_FAILED = 'TRANSPORT_FAILED',
     FLOW_STEP_FAILED = 'FLOW_STEP_FAILED',
     AUTH_FAILED = 'AUTH_FAILED',
+    WORKSPACE_PROTECTED = 'WORKSPACE_PROTECTED',
 }
 
 export class ResolvrError extends Error {

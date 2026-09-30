@@ -151,6 +151,15 @@ export const WorkspaceSchema = z.object({
     defaultEndpointId: z.string().optional(),
     defaultEnvironmentId: z.string().optional(),
     /**
+     * Защита от случайной записи: `confirm` требует подтверждения на каждую
+     * мутацию, `readOnly` запрещает их вовсе.
+     *
+     * Workspace с названием вроде «development» может смотреть на боевой API,
+     * и запрет, который живёт в самом workspace, действует одинаково при
+     * ручной работе в приложении и при запуске агентом через MCP.
+     */
+    protection: z.enum(['none', 'confirm', 'readOnly']).default('none'),
+    /**
      * Раскладка панелей — личное состояние, оно живёт в `.state/session.json`.
      * Поле оставлено для чтения файлов старых версий и при сохранении
      * отбрасывается: в общем репозитории команды оно давало бы конфликт на
@@ -463,6 +472,7 @@ export type IRecoveryRule = z.infer<typeof RecoveryRuleSchema>
 export type ILayoutPreset = z.infer<typeof LayoutPresetSchema>
 export type ILayoutState = z.infer<typeof LayoutStateSchema>
 export type IWorkspace = z.infer<typeof WorkspaceSchema>
+export type IWorkspaceProtection = IWorkspace['protection']
 export type ICollection = z.infer<typeof CollectionSchema>
 export type IOperationKind = z.infer<typeof OperationKindSchema>
 export type IOperationMeta = z.infer<typeof OperationMetaSchema>

@@ -251,3 +251,47 @@ describe('сохранение ответа в окружение', () => {
         expect(environment?.variables.token).toBeUndefined()
     })
 })
+
+describe('защита workspace', () => {
+    async function protectedHarness(protection: 'confirm' | 'readOnly'): Promise<IHarness> {
+        const harness = await createHarness()
+        const workspace = await harness.workspaces.getWorkspace('api')
+        await harness.workspaces.saveWorkspace({ ...workspace, protection })
+
+        return harness
+    }
+
+    it('в режиме confirm пропускает чтение и требует подтверждения на мутацию', async () => {
+        const harness = await protectedHarness('confirm')
+
+        await expect(
+            harness.engine.run({ workspaceId: 'api', query: 'query Ping { ok }' }),
+        ).resolves.toMatchObject({ ok: true })
+
+        await expect(
+            harness.engine.run({ workspaceId: 'api', query: 'mutation Pay { pay }' }),
+        ).rejects.toThrow(/подтверждения/)
+        expect(harness.transport.exchanges).toHaveLength(1)
+
+        await expect(
+            harness.engine.run({
+                workspaceId: 'api',
+                query: 'mutation Pay { pay }',
+                confirmed: true,
+            }),
+        ).resolves.toMatchObject({ ok: true })
+    })
+
+    it('в режиме readOnly отвергает мутацию и с подтверждением', async () => {
+        const harness = await protectedHarness('readOnly')
+
+        await expect(
+            harness.engine.run({
+                workspaceId: 'api',
+                query: 'mutation Pay { pay }',
+                confirmed: true,
+            }),
+        ).rejects.toThrow(/защищён от записи/)
+        expect(harness.transport.exchanges).toHaveLength(0)
+    })
+})

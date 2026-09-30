@@ -121,6 +121,14 @@ export interface IRunInput {
      * окружение не меняют — у цепочки для этого есть `extract`.
      */
     saveToEnvironment?: IEnvironmentCapture[]
+    /**
+     * Подтверждение мутации в защищённом workspace (`protection: 'confirm'`).
+     *
+     * Ставится только после явного согласия человека: в приложении — ответ на
+     * вопрос перед запуском, в MCP — параметр вызова, который агент передаёт,
+     * спросив пользователя. При `readOnly` подтверждение не помогает.
+     */
+    confirmed?: boolean
 }
 
 /** Переменная окружения, записанная по правилу операции после запуска. */
@@ -203,6 +211,37 @@ interface IPreparedRequest {
     kind: IOperationKind
     /** Имена заголовков, отброшенных из-за нераскрытых переменных. */
     unresolvedHeaders: string[]
+}
+
+/**
+ * Проверяет, разрешена ли операция защитой workspace.
+ *
+ * Запрет живёт в ядре, а не в вызывающем коде: тогда он действует и при
+ * ручном запуске из приложения, и при запуске агентом через MCP, и внутри
+ * шагов цепочки. Чтение не ограничивается никогда.
+ */
+export function guardProtection(
+    workspace: IWorkspace,
+    kind: IOperationKind,
+    confirmed: boolean,
+): void {
+    if (kind !== 'mutation' || workspace.protection === 'none') return
+
+    if (workspace.protection === 'readOnly') {
+        throw new ResolvrError(
+            ErrorCodeEnum.WORKSPACE_PROTECTED,
+            `Workspace «${workspace.name}» защищён от записи: мутации запрещены`,
+            { workspaceId: workspace.id, protection: workspace.protection },
+        )
+    }
+
+    if (!confirmed) {
+        throw new ResolvrError(
+            ErrorCodeEnum.WORKSPACE_PROTECTED,
+            `Workspace «${workspace.name}» требует подтверждения мутации: спросите пользователя и повторите вызов с confirm: true`,
+            { workspaceId: workspace.id, protection: workspace.protection },
+        )
+    }
 }
 
 /**
@@ -371,6 +410,7 @@ export class RunEngine {
     /** Один проход запроса без цепочек: подготовка, отправка, запись истории. */
     private async _execute(input: IRunInput): Promise<IExecuted> {
         const prepared = await this._prepare(input)
+        guardProtection(prepared.workspace, prepared.kind, input.confirmed === true)
 
         const response = await this._transport.request({
             url: prepared.endpoint.url,

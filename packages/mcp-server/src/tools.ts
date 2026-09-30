@@ -200,7 +200,7 @@ function registerWorkspaceTools(register: IRegisterTool, context: INodeContext):
         name: 'workspace_list',
         title: 'Список workspace',
         description:
-            'Возвращает все workspace библиотеки с их эндпоинтами и окружениями. С этого стоит начинать: идентификатор workspace нужен почти всем остальным инструментам.',
+            'Возвращает все workspace библиотеки с их эндпоинтами и окружениями. С этого стоит начинать: идентификатор workspace нужен почти всем остальным инструментам. Поле protection: readOnly — мутации запрещены, confirm — мутация выполняется только с confirm: true после согласия пользователя.',
         inputSchema: {},
         run: async () => {
             const workspaces = await context.workspaces.listWorkspaces()
@@ -208,6 +208,9 @@ function registerWorkspaceTools(register: IRegisterTool, context: INodeContext):
             return workspaces.map((workspace) => ({
                 id: workspace.id,
                 name: workspace.name,
+                // Защита показывается сразу: мутация в защищённом workspace
+                // отвергается, и знать об этом до вызова дешевле, чем после.
+                protection: workspace.protection,
                 endpoints: workspace.endpoints.map((endpoint) => ({
                     id: endpoint.id,
                     name: endpoint.name,
@@ -401,6 +404,12 @@ function registerRunTools(register: IRegisterTool, context: INodeContext): void 
                 .string()
                 .optional()
                 .describe('Путь в ответе: вернуть только эту часть, например `data.me.id`.'),
+            confirm: z
+                .boolean()
+                .optional()
+                .describe(
+                    'Подтверждение мутации в защищённом workspace (protection: confirm). Передавать только после явного согласия пользователя; при protection: readOnly не действует',
+                ),
         },
         run: async (args) => {
             const result = await context.runner.run({
@@ -411,6 +420,7 @@ function registerRunTools(register: IRegisterTool, context: INodeContext): void 
                 headers: args.headers,
                 endpointId: args.endpointId,
                 environmentId: args.environmentId,
+                confirmed: args.confirm,
             })
 
             const payload = {
@@ -768,11 +778,18 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 .describe(
                     'Значения для этого запуска: доступны шагам как {{имя}} и важнее констант цепочки. Так один сценарий проверяется на своих данных — например, {"clientId": "..."}',
                 ),
+            confirm: z
+                .boolean()
+                .optional()
+                .describe(
+                    'Подтверждение мутации в защищённом workspace (protection: confirm). Передавать только после явного согласия пользователя; при protection: readOnly не действует',
+                ),
         },
         run: async (args) => {
             const result = await context.flows.run(args.workspaceId, args.flowId, {
                 environmentId: args.environmentId,
                 variables: args.variables,
+                confirmed: args.confirm,
             })
 
             return {
