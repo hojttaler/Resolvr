@@ -61,6 +61,7 @@ export const showcaseWorkspace: IWorkspace = {
         },
     ],
     defaultEndpointId: 'default',
+    protection: 'none',
     defaultEnvironmentId: 'staging',
     layout: { preset: 'classic', sizes: {}, sidebarCollapsed: false, sidebarTab: 'collections' },
     createdAt: '2026-08-12T16:32:17.151Z',

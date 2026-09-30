@@ -17,6 +17,9 @@ import {
  * `fsync`, поэтому гарантия слабее серверной, но главный сценарий — «процесс
  * убит во время записи» — покрыт: `rename` не оставляет обрезанного файла.
  */
+// Счётчик отличает записи, попавшие в одну миллисекунду.
+let tempCounter = 0
+
 export class TauriFileSystem implements IFileSystem {
     /**
      * Директории, которые уже создавались в этой сессии: черновики и сессия
@@ -43,7 +46,8 @@ export class TauriFileSystem implements IFileSystem {
         // Права задаются при создании временного файла и переезжают вместе с
         // ним: у плагина нет `chmod`, а целевой файл не должен ни на миг
         // оказаться доступным другим пользователям.
-        const tempPath = `${path}.${Date.now()}.tmp`
+        tempCounter += 1
+        const tempPath = `${path}.${Date.now()}.${tempCounter}.tmp`
         await writeTextFile(tempPath, content, options?.privateAccess ? { mode: 0o600 } : undefined)
         await rename(tempPath, path)
     }

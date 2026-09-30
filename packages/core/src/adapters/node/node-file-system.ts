@@ -21,6 +21,8 @@ import type { IDirEntry, IFileSystem, IWriteOptions } from '../../ports/file-sys
  * `rename` в пределах одной ФС атомарен, а `fsync` гарантирует, что данные уже
  * на диске, а не только в кэше страниц.
  */
+let tempCounter = 0
+
 export class NodeFileSystem implements IFileSystem {
     public async readText(path: string): Promise<string | undefined> {
         try {
@@ -37,7 +39,10 @@ export class NodeFileSystem implements IFileSystem {
         options?: IWriteOptions,
     ): Promise<void> {
         await mkdir(dirname(path), { recursive: true })
-        const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`
+        // Счётчик, а не только время: две записи в одну миллисекунду брали
+        // одно имя, и `rename` второй падал — файл уже переехал.
+        tempCounter += 1
+        const tempPath = `${path}.${process.pid}.${Date.now()}.${tempCounter}.tmp`
 
         // Права выставляются на временном файле: после `rename` целевой файл
         // ни на мгновение не бывает доступен остальным пользователям.

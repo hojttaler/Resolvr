@@ -326,6 +326,7 @@ describe('заголовки и подготовка запроса', () => {
                     },
                 ],
                 defaultEndpointId: 'default',
+                protection: 'none',
                 defaultEnvironmentId: 'default',
                 layout: {
                     preset: 'classic',
@@ -367,6 +368,7 @@ describe('заголовки и подготовка запроса', () => {
                         auth: { type: 'none' },
                     },
                 ],
+                protection: 'none',
                 defaultEnvironmentId: 'default',
                 layout: {
                     preset: 'classic',
@@ -422,6 +424,7 @@ describe('состояние токена', () => {
                         tokenSubject: 'demo@example.com',
                     },
                 ],
+                protection: 'none',
                 defaultEnvironmentId: 'default',
                 layout: {
                     preset: 'classic',
@@ -470,6 +473,7 @@ describe('состояние токена', () => {
                         auth: { type: 'none' },
                     },
                 ],
+                protection: 'none',
                 defaultEnvironmentId: 'default',
                 layout: {
                     preset: 'classic',

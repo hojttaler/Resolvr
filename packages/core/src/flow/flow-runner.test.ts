@@ -446,6 +446,19 @@ describe('набор цепочек', () => {
         expect(results[2]?.error).toMatch(/нет-такой-цепочки/)
     })
 
+    it('параллельный прогон записывает итоги обеих цепочек', async () => {
+        const harness = await createHarness(() => '{"data":{"one":1,"two":2}}')
+        await harness.workspaces.saveFlow('api', passing)
+        await harness.workspaces.saveFlow('api', failing)
+
+        await harness.flows.runMany('api', [passing.id, failing.id], { parallel: true })
+
+        // Обе цепочки заканчиваются почти одновременно: запись «прочитать —
+        // дописать — сохранить» без очереди теряла одну из строк.
+        const state = await harness.state.read('api')
+        expect(Object.keys(state).sort()).toEqual([passing.id, failing.id].sort())
+    })
+
     it('параллельный прогон даёт те же итоги в том же порядке', async () => {
         const harness = await createHarness(() => '{"data":{"one":1,"two":2}}')
         await harness.workspaces.saveFlow('api', passing)

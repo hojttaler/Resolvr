@@ -14,6 +14,12 @@ import type { LibraryPaths } from '../storage/paths.js'
 export class FlowStateStore {
     private readonly _fs: IFileSystem
     private readonly _paths: LibraryPaths
+    /**
+     * Очередь записей: параллельный прогон набора заканчивает цепочки почти
+     * одновременно, и одновременное «прочитать карту — дописать свою строку —
+     * записать» теряло чужие строки.
+     */
+    private _queue: Promise<void> = Promise.resolve()
 
     constructor(fs: IFileSystem, paths: LibraryPaths) {
         this._fs = fs
@@ -45,6 +51,20 @@ export class FlowStateStore {
         flowId: string,
         run: { ok: boolean; durationMs: number; failedStep?: string },
         now: Date = new Date(),
+    ): Promise<void> {
+        const next = this._queue.then(() => this._record(workspaceId, flowId, run, now))
+        // Очередь не должна рваться на ошибке одной записи: следующий прогон
+        // запишется, а ошибку получает тот, кто её вызвал.
+        this._queue = next.catch(() => undefined)
+
+        return next
+    }
+
+    private async _record(
+        workspaceId: string,
+        flowId: string,
+        run: { ok: boolean; durationMs: number; failedStep?: string },
+        now: Date,
     ): Promise<void> {
         const flows = await this.read(workspaceId)
         const previous = flows[flowId]
