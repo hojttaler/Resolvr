@@ -693,6 +693,12 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
             description: z.string().optional(),
             environmentId: z.string().optional().describe('Окружение по умолчанию для всех шагов'),
             endpointId: z.string().optional(),
+            variables: z
+                .record(z.string(), z.unknown())
+                .optional()
+                .describe(
+                    'Константы цепочки: доступны шагам как {{имя}} и раскрываются один раз за прогон. Значения генераторов ({{$uuid}}) фиксируются на весь прогон. Запуск может передать свои значения — они важнее',
+                ),
             steps: z.array(FLOW_STEP_INPUT).min(1),
         },
         run: async (args) => {
@@ -702,6 +708,7 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 description: args.description ?? '',
                 environmentId: args.environmentId,
                 endpointId: args.endpointId,
+                variables: args.variables ?? {},
                 steps: args.steps.map((step, index) => ({
                     ...step,
                     id: step.id ?? `step-${index + 1}`,
@@ -750,15 +757,22 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
         name: 'flow_run',
         title: 'Запустить флоу',
         description:
-            'Выполняет сценарий по шагам, пробрасывая извлечённые значения дальше и проверяя утверждения. Возвращает результат каждого шага.',
+            'Выполняет сценарий по шагам, пробрасывая извлечённые значения дальше и проверяя утверждения. Возвращает результат каждого шага. `variables` задают данные конкретного запуска — один сценарий так гоняется на разных клиентах.',
         inputSchema: {
             workspaceId: z.string(),
             flowId: z.string(),
             environmentId: z.string().optional(),
+            variables: z
+                .record(z.string(), z.unknown())
+                .optional()
+                .describe(
+                    'Значения для этого запуска: доступны шагам как {{имя}} и важнее констант цепочки. Так один сценарий проверяется на своих данных — например, {"clientId": "..."}',
+                ),
         },
         run: async (args) => {
             const result = await context.flows.run(args.workspaceId, args.flowId, {
                 environmentId: args.environmentId,
+                variables: args.variables,
             })
 
             return {

@@ -41,6 +41,10 @@ const ASSERT_OPS: Array<{ value: IFlowAssert['op']; label: string; needsValue: b
     { value: 'contains', label: 'contains', needsValue: true },
     { value: 'gt', label: 'greater than', needsValue: true },
     { value: 'lt', label: 'less than', needsValue: true },
+    // Числовое сравнение отделено от `eq`: денежные поля приходят строкой
+    // («10.000000»), и строгое равенство с 10 на них не срабатывало.
+    { value: 'eqNum', label: 'equals (number)', needsValue: true },
+    { value: 'len', label: 'array length', needsValue: true },
 ]
 
 /**
@@ -233,6 +237,15 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                     )}
                 </div>
 
+                <ConstantsEditor
+                    key={props.tabId}
+                    value={draft.variables}
+                    onChange={(variables) =>
+                        setDraft((current) => ({ ...current, variables }))
+                    }
+                    onError={setError}
+                />
+
                 <div className="flow__steps">
                     {/* Пустой редактор ничего не объяснял: кнопка «+ Шаг»
                         не говорит, зачем цепочке шаги и что они дают. */}
@@ -293,6 +306,65 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                 )}
 
                 {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
+            </div>
+        </div>
+    )
+}
+
+interface IConstantsEditorProps {
+    value: Record<string, unknown>
+    onChange: (value: Record<string, unknown>) => void
+    onError: (message: string | undefined) => void
+}
+
+/**
+ * Константы цепочки — начальный контекст прогона.
+ *
+ * Значения раскрываются один раз при запуске, поэтому `{{$uuid}}` в константе
+ * даёт один идентификатор на всю цепочку, а не свой на каждый шаг. Запуск
+ * (в том числе из MCP) может передать свои значения — они важнее констант,
+ * и один и тот же сценарий так проверяется на разных данных.
+ */
+function ConstantsEditor(props: IConstantsEditorProps): React.JSX.Element {
+    const t = useT()
+    const schema = useAppStore((state) => state.schema)
+    const [text, setText] = useState(() => JSON.stringify(props.value, null, 2))
+    const [open, setOpen] = useState(() => Object.keys(props.value).length > 0)
+
+    if (!open) {
+        return (
+            <button type="button" className="btn btn--quiet" onClick={() => setOpen(true)}>
+                {t('+ Constants')}
+            </button>
+        )
+    }
+
+    return (
+        <div className="flow__constants">
+            <label className="field__label">
+                {t('Constants')}
+                <div className="inspector__hint">
+                    {t('the starting context of the run — available to steps as {{name}}')}
+                </div>
+            </label>
+            <div className="flow__editor">
+                <CodeEditor
+                    value={text}
+                    language="json"
+                    schema={schema}
+                    onChange={(value) => {
+                        setText(value)
+
+                        try {
+                            props.onChange(JSON.parse(value || '{}') as Record<string, unknown>)
+                            props.onError(undefined)
+                        } catch {
+                            // Незавершённый JSON во время набора — не ошибка
+                            // сохранения: текст остаётся, сообщение мягкое.
+                            props.onError(t('Constants are not valid JSON'))
+                        }
+                    }}
+                />
             </div>
         </div>
     )

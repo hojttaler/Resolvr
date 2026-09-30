@@ -251,6 +251,14 @@ export const FlowSchema = z.object({
     description: z.string().default(''),
     environmentId: z.string().optional(),
     endpointId: z.string().optional(),
+    /**
+     * Константы цепочки: начальный контекст, доступный шагам как `{{имя}}`.
+     *
+     * Значения раскрываются один раз при запуске, поэтому
+     * `{ orderKey: '{{$uuid}}' }` даёт один идентификатор на весь прогон.
+     * Запуск может передать свои значения — они важнее.
+     */
+    variables: z.record(z.string(), z.unknown()).default({}),
     steps: z.array(FlowStepSchema).default([]),
 })
 

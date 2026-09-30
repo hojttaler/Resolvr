@@ -354,3 +354,55 @@ describe('числовые проверки и длина', () => {
         expect(check(undefined, 0)).toBe(false)
     })
 })
+
+describe('переменные прогона', () => {
+    const clientFlow = FlowSchema.parse({
+        id: 'client',
+        name: 'Client',
+        variables: { clientId: 'c-default', orderKey: '{{$uuid}}' },
+        steps: [
+            {
+                id: 'first',
+                name: 'Первый',
+                query: 'query One($clientId: ID!, $key: String!) { one }',
+                variables: { clientId: '{{clientId}}', key: '{{orderKey}}' },
+            },
+            {
+                id: 'second',
+                name: 'Второй',
+                query: 'query Two($clientId: ID!, $key: String!) { two }',
+                variables: { clientId: '{{clientId}}', key: '{{orderKey}}' },
+            },
+        ],
+    })
+
+    function sentVariables(harness: { transport: FakeTransport }, index: number) {
+        return (
+            JSON.parse(harness.transport.exchanges[index]?.request.body ?? '{}') as {
+                variables: Record<string, unknown>
+            }
+        ).variables
+    }
+
+    it('подставляет константы цепочки и раскрывает генератор один раз на прогон', async () => {
+        const harness = await createHarness(() => '{"data":{"one":1}}')
+
+        const result = await harness.flows.runFlow('api', clientFlow)
+
+        expect(result.ok).toBe(true)
+        expect(sentVariables(harness, 0).clientId).toBe('c-default')
+
+        const key = sentVariables(harness, 0).key
+        expect(key).toMatch(/^[0-9a-f-]{36}$/)
+        expect(sentVariables(harness, 1).key).toBe(key)
+    })
+
+    it('значения запуска важнее констант цепочки', async () => {
+        const harness = await createHarness(() => '{"data":{"one":1}}')
+
+        await harness.flows.runFlow('api', clientFlow, { variables: { clientId: 'c-42' } })
+
+        expect(sentVariables(harness, 0).clientId).toBe('c-42')
+        expect(sentVariables(harness, 1).clientId).toBe('c-42')
+    })
+})

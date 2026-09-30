@@ -390,6 +390,12 @@ textarea {
     gap: var(--pad-xs);
 }
 
+.flow__constants {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pad-xs);
+}
+
 .flow-page__body > .btn {
     align-self: flex-start;
 }

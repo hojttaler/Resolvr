@@ -797,6 +797,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             id: '',
             name: t('New flow'),
             description: '',
+            variables: {},
             steps: [],
         }
 

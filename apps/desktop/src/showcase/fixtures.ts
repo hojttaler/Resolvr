@@ -135,6 +135,7 @@ export function seedShowcase(): void {
                 id: 'sign-in',
                 name: 'Sign in',
                 description: '',
+                variables: {},
                 steps: [
                     { id: 's1', name: 'Request code', operationRef: 'account/SignIn', variables: {}, extract: { challengeId: 'data.signIn.challengeId' }, assert: [], expect: 'success', continueOnFailure: false },
                     { id: 's2', name: 'Confirm code', operationRef: 'account/SignIn', variables: {}, extract: { accessToken: 'data.signIn.accessToken' }, assert: [], expect: 'success', continueOnFailure: false },

@@ -8,6 +8,7 @@ import type {
 } from '../model/schemas.js'
 import { isSecretRef } from '../ports/secret-store.js'
 import { readPath, type IRunResult, type RunEngine } from '../run/run-engine.js'
+import { defaultContext } from '../secrets/generators.js'
 import { interpolateJson } from '../secrets/secret-resolver.js'
 import type { WorkspaceStore } from '../storage/workspace-store.js'
 
@@ -53,7 +54,14 @@ export interface IFlowRunResult {
 export interface IFlowRunOptions {
     environmentId?: string
     endpointId?: string
-    /** Стартовые переменные контекста — например, заданные вручную в UI. */
+    /**
+     * Значения для этого запуска: перекрывают константы цепочки.
+     *
+     * Один сценарий так запускается на разных данных — на своём клиенте у
+     * каждого агента и на наборе клиентов в регрессе, без правки файла.
+     */
+    variables?: Record<string, unknown>
+    /** Прежнее имя `variables`; оставлено для вызывающих из интерфейса. */
     initialContext?: Record<string, unknown>
 }
 
@@ -90,7 +98,14 @@ export class FlowRunner {
         options: IFlowRunOptions = {},
     ): Promise<IFlowRunResult> {
         const startedAt = Date.now()
-        const context: Record<string, unknown> = { ...(options.initialContext ?? {}) }
+        // Константы цепочки раскрываются один раз: `{{$uuid}}` в них даёт
+        // одно значение на весь прогон, а не новое в каждом шаге.
+        const constants = interpolateJson(flow.variables, {}, defaultContext())
+        const context: Record<string, unknown> = {
+            ...constants,
+            ...(options.initialContext ?? {}),
+            ...(options.variables ?? {}),
+        }
         const steps: IFlowStepResult[] = []
 
         // Цепочка, назначенная в «Авторизации» окружения, добывает токен —

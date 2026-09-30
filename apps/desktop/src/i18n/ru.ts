@@ -219,6 +219,11 @@ export const ru: Record<string, string | readonly [string, string, string]> = {
     'Steps run in order. A value from a step response — for example, a token from login — is extracted by path and substituted into the next steps as {{name}}. Such a flow can be assigned in the environment “Authorization”: the token will then refresh itself.':
         'Шаги выполняются по порядку. Значение из ответа шага — например, токен из логина — извлекается по пути и подставляется в следующие шаги как {{имя}}. Такую цепочку можно назначить в «Авторизации» окружения: тогда токен будет обновляться сам.',
     '+ Step': '+ Шаг',
+    '+ Constants': '+ Константы',
+    'Constants': 'Константы',
+    'the starting context of the run — available to steps as {{name}}':
+        'начальный контекст прогона — доступен шагам как {{имя}}',
+    'Constants are not valid JSON': 'Константы — некорректный JSON',
     'Flow result': 'Итог цепочки',
     'Values extracted by steps — they were substituted further as {{name}}':
         'Значения, извлечённые шагами — они же подставлялись дальше как {{имя}}',

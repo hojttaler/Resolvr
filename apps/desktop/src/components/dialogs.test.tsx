@@ -71,7 +71,7 @@ describe('диалоги', () => {
         // с пустым id и роняла экран.
         useAppStore.setState({
             flowDrafts: {
-                't-new': { id: '', name: 'Новая цепочка', description: '', steps: [] },
+                't-new': { id: '', name: 'Новая цепочка', description: '', variables: {}, steps: [] },
             },
         })
         render(<FlowPage tabId="t-new" />)
@@ -337,7 +337,7 @@ describe('заголовки и подготовка запроса', () => {
                 updatedAt: '2026-08-17T00:00:00.000Z',
             },
             flows: [
-                { id: 'auth', name: 'Авторизация', description: '', steps: [] },
+                { id: 'auth', name: 'Авторизация', description: '', variables: {}, steps: [] },
             ],
         })
 
@@ -377,7 +377,7 @@ describe('заголовки и подготовка запроса', () => {
                 createdAt: '2026-08-17T00:00:00.000Z',
                 updatedAt: '2026-08-17T00:00:00.000Z',
             },
-            flows: [{ id: 'auth', name: 'Авторизация', description: '', steps: [] }],
+            flows: [{ id: 'auth', name: 'Авторизация', description: '', variables: {}, steps: [] }],
         })
 
         render(<WorkspaceSettings onClose={() => undefined} />)
