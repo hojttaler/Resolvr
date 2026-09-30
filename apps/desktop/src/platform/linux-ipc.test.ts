@@ -8,7 +8,7 @@ async function load(agent: string) {
     vi.resetModules()
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(agent)
     const original = vi.fn(() => Promise.resolve(new Response('ok')))
-    window.fetch = original as unknown as typeof window.fetch
+    window.fetch = original
 
     await import('./linux-ipc.js')
 

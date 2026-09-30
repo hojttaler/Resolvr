@@ -235,6 +235,21 @@ export function listTypes(schema: GraphQLSchema, needle = ''): ITypeListEntry[] 
         .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/**
+ * Поля типа списком.
+ *
+ * Отдельная функция ради сужения: у объединения объектного, интерфейсного и
+ * input-типа `getFields()` выводится как `any`, а по одному роду — точно.
+ */
+function fieldsOf(
+    type: GraphQLNamedType,
+): Array<GraphQLField<unknown, unknown> | GraphQLInputField> {
+    if (isObjectType(type) || isInterfaceType(type)) return Object.values(type.getFields())
+    if (isInputObjectType(type)) return Object.values(type.getFields())
+
+    return []
+}
+
 /** Совпадение поля по имени в любом типе — для поиска в сайдбаре. */
 export interface IFieldHit {
     typeName: string
@@ -252,7 +267,7 @@ export function searchFields(schema: GraphQLSchema, needle: string, limit = 50):
         if (type.name.startsWith('__')) continue
         if (!(isObjectType(type) || isInterfaceType(type) || isInputObjectType(type))) continue
 
-        for (const field of Object.values(type.getFields())) {
+        for (const field of fieldsOf(type)) {
             if (!field.name.toLowerCase().includes(lower)) continue
 
             hits.push({

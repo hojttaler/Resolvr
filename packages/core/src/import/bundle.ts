@@ -79,11 +79,13 @@ export const FOLDER_SEPARATOR = ' › '
  * заменяются на разделитель папок, управляющие символы убираются.
  */
 export function safeOperationName(name: string): string {
-    return name
-        .replace(/[\\/]+/g, FOLDER_SEPARATOR)
-        .replace(/[\u0000-\u001f]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim() || 'Untitled'
+    const withoutControls = [...name.replace(/[\\/]+/g, FOLDER_SEPARATOR)]
+        // Управляющие символы убираются по коду, а не регулярным выражением:
+        // имя становится именем файла, и `\n` в нём ломает раскладку на диске.
+        .filter((character) => character.codePointAt(0)! > 0x1f)
+        .join('')
+
+    return withoutControls.replace(/\s+/g, ' ').trim() || 'Untitled'
 }
 
 /** Уникальное имя в пределах списка: «Users», «Users 2», «Users 3». */
