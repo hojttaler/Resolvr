@@ -21,6 +21,7 @@ export enum ErrorCodeEnum {
     FLOW_STEP_FAILED = 'FLOW_STEP_FAILED',
     AUTH_FAILED = 'AUTH_FAILED',
     WORKSPACE_PROTECTED = 'WORKSPACE_PROTECTED',
+    VERSION_CONFLICT = 'VERSION_CONFLICT',
 }
 
 export class ResolvrError extends Error {

@@ -311,13 +311,20 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
     register({
         name: 'operation_get',
         title: 'Прочитать операцию',
-        description: 'Возвращает текст запроса, переменные и заголовки сохранённой операции.',
+        description:
+            'Возвращает текст запроса, переменные и заголовки сохранённой операции вместе с version — её следует передать в operation_save как expectedVersion, чтобы не затереть чужую правку.',
         inputSchema: {
             workspaceId: z.string(),
             ref: z.string().describe('Ссылка вида "collection/operation"'),
         },
-        run: async (args) =>
-            context.workspaces.getOperation(args.workspaceId, parseOperationRef(args.ref)),
+        run: async (args) => {
+            const ref = parseOperationRef(args.ref)
+            const operation = await context.workspaces.getOperation(args.workspaceId, ref)
+
+            // Версия отдаётся вместе с содержимым: с ней правка, начатая от
+            // этого чтения, не затрёт чужую, сделанную тем временем.
+            return { ...operation, version: await context.workspaces.operationVersion(args.workspaceId, ref) }
+        },
         summarize: (result) => `${result.kind} ${result.name}`,
     })
 
@@ -336,6 +343,12 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
             headers: z.record(z.string(), z.string()).optional(),
             endpointId: z.string().optional(),
             environmentId: z.string().optional(),
+            expectedVersion: z
+                .string()
+                .optional()
+                .describe(
+                    'Версия из чтения (version): запись отменяется, если файл успели изменить. Передавайте её всегда, когда правите прочитанное — параллельные агенты пишут в одну коллекцию',
+                ),
         },
         run: async (args) => {
             // Перезапись не должна терять то, что агент не передавал:
@@ -358,6 +371,7 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
                 environmentId: args.environmentId,
                 prerequisiteFlow: existing?.prerequisiteFlow,
                 saveToEnvironment: existing?.saveToEnvironment,
+                expectedVersion: args.expectedVersion,
             })
 
             return {
@@ -696,9 +710,12 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
         name: 'flow_get',
         title: 'Прочитать флоу',
         description:
-            'Возвращает цепочку целиком: шаги, переменные, extract и assert. Нужен, чтобы дополнить существующую цепочку через flow_save, не потеряв её шаги.',
+            'Возвращает цепочку целиком: шаги, переменные, extract и assert, а также version — её следует передать в flow_save как expectedVersion, чтобы не затереть чужую правку.',
         inputSchema: { workspaceId: z.string(), flowId: z.string() },
-        run: async (args) => context.workspaces.getFlow(args.workspaceId, args.flowId),
+        run: async (args) => ({
+            ...(await context.workspaces.getFlow(args.workspaceId, args.flowId)),
+            version: await context.workspaces.flowVersion(args.workspaceId, args.flowId),
+        }),
         summarize: (result) => `${result.name}: ${result.steps.length} шагов`,
     })
 
@@ -734,6 +751,12 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 .optional()
                 .describe('Что должно быть в данных до прогона — текстом, для человека'),
             steps: z.array(FLOW_STEP_INPUT).min(1),
+            expectedVersion: z
+                .string()
+                .optional()
+                .describe(
+                    'Версия из чтения (version): запись отменяется, если файл успели изменить. Передавайте её всегда, когда правите прочитанное — параллельные агенты пишут в одну коллекцию',
+                ),
         },
         run: async (args) => {
             // Перезапись не должна терять метки и предусловия, которых агент
@@ -769,7 +792,9 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 )
             }
 
-            await context.workspaces.saveFlow(args.workspaceId, flow)
+            await context.workspaces.saveFlow(args.workspaceId, flow, {
+                expectedVersion: args.expectedVersion,
+            })
 
             return { saved: flow.id, created: existing === undefined, steps: flow.steps.length }
         },

@@ -7,6 +7,7 @@ export * from './ports/secret-store.js'
 export * from './ports/transport.js'
 
 export * from './storage/paths.js'
+export * from './storage/version.js'
 export * from './storage/json.js'
 export * from './storage/workspace-store.js'
 export * from './storage/session-store.js'

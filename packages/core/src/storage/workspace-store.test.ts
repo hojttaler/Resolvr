@@ -322,3 +322,61 @@ describe('порядок операций', () => {
         await expect(store.reorderOperations('api', 'users', ['B'])).rejects.toThrow(/не совпадает/)
     })
 })
+
+describe('проверка версии при записи', () => {
+    it('отклоняет сохранение операции, изменённой после чтения', async () => {
+        const { store } = createStore()
+        await store.createWorkspace({ name: 'API' })
+        await store.createCollection('api', 'Users')
+        await store.saveOperation('api', {
+            collectionId: 'users',
+            name: 'Me',
+            query: 'query Me { me { id } }',
+        })
+
+        const ref = { collectionId: 'users', name: 'Me' }
+        const version = await store.operationVersion('api', ref)
+
+        // Другой агент успел записать своё.
+        await store.saveOperation('api', { ...ref, query: 'query Me { me { id name } }' })
+
+        await expect(
+            store.saveOperation('api', {
+                ...ref,
+                query: 'query Me { me { email } }',
+                expectedVersion: version,
+            }),
+        ).rejects.toThrow(/изменился с момента чтения/)
+
+        // Запись с актуальной версией проходит.
+        await store.saveOperation('api', {
+            ...ref,
+            query: 'query Me { me { email } }',
+            expectedVersion: await store.operationVersion('api', ref),
+        })
+        expect((await store.getOperation('api', ref)).query).toContain('email')
+    })
+
+    it('различает отсутствующую и пустую цепочку', async () => {
+        const { store } = createStore()
+        await store.createWorkspace({ name: 'API' })
+
+        const absent = await store.flowVersion('api', 'smoke')
+        const flow = {
+            id: 'smoke',
+            name: 'Smoke',
+            description: '',
+            variables: {},
+            tags: [],
+            preconditions: '',
+            steps: [],
+        }
+
+        // Создание «поверх пустого места» тоже защищено: две цепочки с одним
+        // идентификатором иначе молча превращались бы в одну.
+        await store.saveFlow('api', flow, { expectedVersion: absent })
+        await expect(store.saveFlow('api', flow, { expectedVersion: absent })).rejects.toThrow(
+            /изменился с момента чтения/,
+        )
+    })
+})

@@ -331,6 +331,14 @@ claude mcp add resolvr --scope user -- node <путь>/packages/mcp-server/dist/
 `introspect`, `schema_get`, `schema_diff`, `flow_list`, `flow_run`, `env_list`,
 `flow_run_many`, `env_set`, `history_list`.
 
+### Параллельная работа
+
+`operation_get` и `flow_get` возвращают `version` — отпечаток содержимого файла.
+Передав его обратно в `operation_save`/`flow_save` как `expectedVersion`, агент
+получает отказ вместо молчаливой перезаписи, если файл успели изменить: при
+работе нескольких агентов над одной коллекцией иначе побеждал бы тот, кто
+сохранил последним. Без `expectedVersion` запись выполняется как прежде.
+
 ### Наблюдение за агентом
 
 `⌘⇧A` (или значок списка в шапке) открывает журнал действий: слева хронология —

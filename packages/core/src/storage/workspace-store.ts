@@ -19,6 +19,7 @@ import {
 import type { IFileSystem } from '../ports/file-system.js'
 import { readJsonFile, readRequiredJsonFile, writeJsonFile } from './json.js'
 import { toSlug, type LibraryPaths } from './paths.js'
+import { ensureVersion, versionOfFiles } from './version.js'
 
 const OPERATION_QUERY_SUFFIX = '.graphql'
 const FLOW_SUFFIX = '.flow.json'
@@ -50,6 +51,11 @@ export interface ISaveOperationInput {
     prerequisiteFlow?: string
     /** Значения ответа, сохраняемые в окружение после успешного запуска. */
     saveToEnvironment?: IEnvironmentCapture[]
+    /**
+     * Версия, прочитанная перед правкой: запись отменяется, если файл успели
+     * изменить. Нужна, когда над одной коллекцией работают несколько агентов.
+     */
+    expectedVersion?: string
 }
 
 export interface IMoveOperationOptions {
@@ -316,11 +322,32 @@ export class WorkspaceStore {
         return operation
     }
 
+    /**
+     * Версия операции — отпечаток обоих её файлов: текст запроса и метаданные
+     * меняются по отдельности, а операция для вызывающего одна.
+     */
+    public async operationVersion(workspaceId: string, ref: IOperationRef): Promise<string> {
+        return versionOfFiles(this._fs, [
+            this._paths.operationQueryFile(workspaceId, ref.collectionId, ref.name),
+            this._paths.operationMetaFile(workspaceId, ref.collectionId, ref.name),
+        ])
+    }
+
+    public async flowVersion(workspaceId: string, flowId: string): Promise<string> {
+        return versionOfFiles(this._fs, [this._paths.flowFile(workspaceId, flowId)])
+    }
+
     public async saveOperation(
         workspaceId: string,
         input: ISaveOperationInput,
     ): Promise<IOperation> {
         const { collectionId, name } = input
+
+        ensureVersion(
+            input.expectedVersion,
+            await this.operationVersion(workspaceId, { collectionId, name }),
+            { workspaceId, collectionId, name },
+        )
 
         if (!(await this._fs.exists(this._paths.collectionFile(workspaceId, collectionId)))) {
             throw new ResolvrError(
@@ -506,7 +533,16 @@ export class WorkspaceStore {
         )
     }
 
-    public async saveFlow(workspaceId: string, flow: IFlow): Promise<void> {
+    public async saveFlow(
+        workspaceId: string,
+        flow: IFlow,
+        options: { expectedVersion?: string } = {},
+    ): Promise<void> {
+        ensureVersion(options.expectedVersion, await this.flowVersion(workspaceId, flow.id), {
+            workspaceId,
+            flowId: flow.id,
+        })
+
         await this._fs.ensureDir(this._paths.flowsDir(workspaceId))
         await writeJsonFile(this._fs, this._paths.flowFile(workspaceId, flow.id), flow)
     }
