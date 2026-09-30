@@ -1,7 +1,9 @@
 import type { IEnvironment, IWorkspace } from '../model/schemas.js'
 import { parseSecretRef, type ISecretStore } from '../ports/secret-store.js'
+import { defaultContext, evaluateGenerator, isGeneratorName, type IGeneratorContext } from './generators.js'
 
-const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g
+// `$` и `:` — для генераторов вида `{{$randomInt:1:10}}`.
+const PLACEHOLDER_PATTERN = /\{\{\s*([$a-zA-Z0-9_.:-]+)\s*\}\}/g
 export const SECRET_MASK = '••••••••'
 
 /** Результат раскрытия окружения: значения переменных и множество секретных из них. */
@@ -77,12 +79,23 @@ export class SecretResolver {
     }
 }
 
-/** Подставляет `{{var}}` в строку; неизвестный плейсхолдер остаётся как есть. */
-export function interpolate(template: string, variables: Record<string, string>): string {
+/**
+ * Подставляет `{{var}}` в строку; неизвестный плейсхолдер остаётся как есть.
+ *
+ * Имена, начинающиеся с `$`, — генераторы (`{{$uuid}}`); переменная с таким
+ * же именем всё равно имеет приоритет, иначе значение, заданное вручную,
+ * нельзя было бы подставить.
+ */
+export function interpolate(
+    template: string,
+    variables: Record<string, string>,
+    generators: IGeneratorContext = defaultContext(),
+): string {
     return template.replace(PLACEHOLDER_PATTERN, (match, name: string) => {
         const value = variables[name]
+        if (value !== undefined) return value
 
-        return value === undefined ? match : value
+        return (isGeneratorName(name) ? evaluateGenerator(name, generators) : undefined) ?? match
     })
 }
 
@@ -90,10 +103,11 @@ export function interpolate(template: string, variables: Record<string, string>)
 export function interpolateHeaders(
     headers: Record<string, string>,
     variables: Record<string, string>,
+    generators: IGeneratorContext = defaultContext(),
 ): Record<string, string> {
     const result: Record<string, string> = {}
     for (const [key, value] of Object.entries(headers)) {
-        result[key] = interpolate(value, variables)
+        result[key] = interpolate(value, variables, generators)
     }
 
     return result
@@ -107,15 +121,19 @@ export function interpolateHeaders(
  * ложный отрицательный ответ.
  */
 export function hasUnresolvedPlaceholders(value: string): boolean {
-    return /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/.test(value)
+    return /\{\{\s*[$a-zA-Z0-9_.:-]+\s*\}\}/.test(value)
 }
 
 /** Рекурсивно подставляет переменные в строковые значения JSON-структуры. */
-export function interpolateJson<T>(value: T, variables: Record<string, string>): T {
-    if (typeof value === 'string') return interpolate(value, variables) as T
+export function interpolateJson<T>(
+    value: T,
+    variables: Record<string, string>,
+    generators: IGeneratorContext = defaultContext(),
+): T {
+    if (typeof value === 'string') return interpolate(value, variables, generators) as T
     if (Array.isArray(value)) {
         const items: unknown[] = (value as unknown[]).map((item) =>
-            interpolateJson(item, variables),
+            interpolateJson(item, variables, generators),
         )
 
         return items as T
@@ -123,7 +141,7 @@ export function interpolateJson<T>(value: T, variables: Record<string, string>):
     if (value !== null && typeof value === 'object') {
         const result: Record<string, unknown> = {}
         for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-            result[key] = interpolateJson(item, variables)
+            result[key] = interpolateJson(item, variables, generators)
         }
 
         return result as T

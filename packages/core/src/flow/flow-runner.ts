@@ -30,6 +30,14 @@ export interface IFlowStepResult {
     /** Значения, извлечённые этим шагом и переданные дальше. */
     extracted: Record<string, unknown>
     error?: string
+    /**
+     * Сообщения GraphQL-ошибок ответа.
+     *
+     * Заполняются всегда, даже когда шаг зелёный: с `expect: 'any'` ответ 200
+     * с `errors` считается ожидаемым, и без этого списка ошибки внутри него
+     * оставались невидимыми в отчёте.
+     */
+    errors?: string[]
     result?: IRunResult
 }
 
@@ -174,6 +182,8 @@ export class FlowRunner {
             const assertsPassed = asserts.every((item) => item.passed)
             const outcome = judgeStep(step.expect, result, assertsPassed)
 
+            const errors = describeGraphqlErrors(result.errors)
+
             return {
                 stepId: step.id,
                 name: step.name,
@@ -185,6 +195,7 @@ export class FlowRunner {
                 extracted,
                 result,
                 error: outcome.error,
+                errors: errors.length > 0 ? errors : undefined,
             }
         } catch (error) {
             return {
@@ -244,6 +255,72 @@ export function judgeStep(
 }
 
 /** Проверяет одно утверждение против результата шага. */
+/**
+ * Равенство чисел, записанных как угодно: `10`, `"10"`, `"10.000000"`.
+ *
+ * Сравнение идёт по канонической десятичной записи, а не через `Number`:
+ * суммы приходят строками произвольной точности, и приведение к double
+ * теряло бы младшие разряды на больших значениях.
+ */
+export function equalNumbers(actual: unknown, expected: unknown): boolean {
+    const left = canonicalDecimal(actual)
+    const right = canonicalDecimal(expected)
+
+    return left !== undefined && right !== undefined && left === right
+}
+
+function canonicalDecimal(value: unknown): string | undefined {
+    if (typeof value !== 'number' && typeof value !== 'string') return undefined
+
+    const text = typeof value === 'number' ? String(value) : value.trim()
+    const match = /^(-?)(\d+)(?:\.(\d*))?$/.exec(text)
+    if (!match) return undefined
+
+    const [, sign, whole, fraction = ''] = match
+    const trimmedWhole = whole!.replace(/^0+(?=\d)/, '')
+    const trimmedFraction = fraction.replace(/0+$/, '')
+    const body = trimmedFraction.length > 0 ? `${trimmedWhole}.${trimmedFraction}` : trimmedWhole
+
+    // Ноль всегда без знака: `-0` и `0` — одно и то же число.
+    return body === '0' ? '0' : `${sign}${body}`
+}
+
+/** Длина массива, строки или числа элементов объекта. */
+function lengthOf(value: unknown): number | undefined {
+    if (Array.isArray(value) || typeof value === 'string') return value.length
+    if (value !== null && typeof value === 'object') return Object.keys(value).length
+
+    return undefined
+}
+
+/**
+ * Краткие тексты GraphQL-ошибок: сообщение, путь и код расширения.
+ *
+ * Полные объекты ошибок остаются в `result`; здесь — строки для отчёта,
+ * которые можно показать человеку и вернуть агенту, не отдавая всё тело.
+ */
+export function describeGraphqlErrors(errors: unknown[] | undefined): string[] {
+    if (!errors) return []
+
+    return errors.map((error) => {
+        if (typeof error === 'string') return error
+        if (error === null || typeof error !== 'object') return JSON.stringify(error) ?? 'ошибка'
+
+        const item = error as {
+            message?: unknown
+            path?: unknown
+            extensions?: { code?: unknown }
+        }
+        const message = typeof item.message === 'string' ? item.message : JSON.stringify(error)
+        const path = Array.isArray(item.path) ? item.path.join('.') : undefined
+        const code = typeof item.extensions?.code === 'string' ? item.extensions.code : undefined
+
+        return [message, path && `путь: ${path}`, code && `код: ${code}`]
+            .filter((part): part is string => Boolean(part))
+            .join(' · ')
+    })
+}
+
 export function evaluateAssert(assertion: IFlowAssert, payload: unknown): IAssertResult {
     const actual = readPath(payload, assertion.path)
     const expected = assertion.value
@@ -270,6 +347,12 @@ export function evaluateAssert(assertion: IFlowAssert, payload: unknown): IAsser
             break
         case 'lt':
             passed = typeof actual === 'number' && typeof expected === 'number' && actual < expected
+            break
+        case 'eqNum':
+            passed = equalNumbers(actual, expected)
+            break
+        case 'len':
+            passed = lengthOf(actual) === Number(expected)
             break
         default:
             passed = false

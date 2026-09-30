@@ -327,3 +327,30 @@ describe('ожидаемый результат шага', () => {
         expect(judgeStep('success', failed, true).ok).toBe(false)
     })
 })
+
+describe('числовые проверки и длина', () => {
+    it('eqNum сравнивает числа независимо от записи', () => {
+        const check = (actual: unknown, value: unknown) =>
+            evaluateAssert({ path: 'v', op: 'eqNum', value }, { v: actual }).passed
+
+        expect(check('10.000000', 10)).toBe(true)
+        expect(check(10, '10.00')).toBe(true)
+        expect(check('0.10', 0.1)).toBe(true)
+        expect(check('-0', 0)).toBe(true)
+        expect(check('100000000000000000001', '100000000000000000001')).toBe(true)
+        expect(check('10.0001', 10)).toBe(false)
+        expect(check('abc', 10)).toBe(false)
+        expect(check(null, 10)).toBe(false)
+    })
+
+    it('len проверяет длину массива, строки и объекта', () => {
+        const check = (actual: unknown, value: unknown) =>
+            evaluateAssert({ path: 'v', op: 'len', value }, { v: actual }).passed
+
+        expect(check([1, 2, 3], 3)).toBe(true)
+        expect(check('abcd', 4)).toBe(true)
+        expect(check({ a: 1, b: 2 }, 2)).toBe(true)
+        expect(check([1], 2)).toBe(false)
+        expect(check(undefined, 0)).toBe(false)
+    })
+})

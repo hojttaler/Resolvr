@@ -13,6 +13,7 @@ export * from './storage/session-store.js'
 export * from './storage/history-store.js'
 
 export * from './secrets/secret-resolver.js'
+export * from './secrets/generators.js'
 export * from './secrets/file-secret-store.js'
 export * from './secrets/switchable-secret-store.js'
 

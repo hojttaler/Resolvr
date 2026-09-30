@@ -770,6 +770,9 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                     skipped: step.skipped,
                     status: step.status,
                     error: step.error,
+                    // Ошибки ответа показываются и у зелёного шага: с
+                    // `expect: any` ответ 200 с `errors` считается успешным.
+                    errors: step.errors,
                     asserts: step.asserts.map((assertion) => assertion.message),
                 })),
             }

@@ -209,7 +209,12 @@ export const OperationMetaSchema = z.object({
 export const FlowAssertSchema = z.object({
     /** Путь в результате шага: `status`, `data.user.id`, `errors`. */
     path: z.string().min(1),
-    op: z.enum(['eq', 'ne', 'exists', 'notExists', 'contains', 'gt', 'lt']),
+    /**
+     * `eqNum` сравнивает числа по значению: сервер возвращает суммы строками
+     * («10.000000»), и строгое сравнение с `10` ложно падало.
+     * `len` проверяет длину массива или строки.
+     */
+    op: z.enum(['eq', 'ne', 'exists', 'notExists', 'contains', 'gt', 'lt', 'eqNum', 'len']),
     value: z.unknown().optional(),
 })
 
