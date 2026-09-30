@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.3.0 — 2026-09-30
+
+- Flows: run-time variables and flow constants. A flow carries a `variables` block — the
+  starting context, available to steps as `{{name}}` — and a run may pass its own values
+  (`flow_run(..., variables: { clientId: … })`, the editor field), which take precedence.
+  One scenario now checks different clients without a lookup step.
+- Templates: value generators `{{$uuid}}`, `{{$timestamp}}`, `{{$unix}}`, `{{$isoDate}}`,
+  `{{$date}}`, `{{$randomInt}}` (`{{$randomInt:1:100}}`), `{{$randomString}}` and
+  `{{$randomEmail}}`. A generator in a flow constant is expanded once per run, so an
+  idempotency key stays the same across steps; in a step variable it is fresh each step.
+- Workspaces: protection against accidental writes. `Confirmation for every mutation` asks
+  before a mutation or a flow run, `Read only` refuses mutations outright. The check lives
+  in the run engine, so it holds for manual runs and for agents alike; reads are never
+  restricted. MCP shows the mode in `workspace_list` and takes `confirm` on `run`,
+  `flow_run` and `flow_run_many`.
+- Flows: a whole set in one command. MCP `flow_run_many` runs flows selected by id prefix
+  (`smoke-billing-`), by tag or by an explicit list, sequentially or in parallel, and
+  returns a table with the outcome, duration and the step a flow stopped at. A failing
+  flow does not cancel the rest.
+- Flows: tags, preconditions and the date of the last green run. The smoke-test registry
+  lives next to the flows themselves; run outcomes are kept outside the repository, so a
+  run never produces a diff. `flow_list` reports `lastGreenAt`, and the sidebar marks a
+  flow that passed with a ✓ and the date.
+- Flows: numeric checks. `eqNum` compares numbers regardless of notation, so `"10.000000"`
+  equals `10` — money-like fields arrive as strings and strict `eq` used to fail on them.
+  `len` checks the length of an array, a string or the number of object fields.
+- Flows: a step result now carries the response `errors` even when the step is green — with
+  **Any response** errors inside an HTTP 200 body used to stay invisible.
+- MCP: protection against lost updates. `operation_get` and `flow_get` return a `version`;
+  passing it back as `expectedVersion` turns a silent overwrite into a refusal when several
+  agents edit one collection.
+
 ## 0.2.9 — 2026-09-24
 
 - Linux: fixed the crash with heap corruption (`malloc(): unaligned tcache/fastbin chunk
