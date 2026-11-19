@@ -418,9 +418,46 @@ export type ISecretStorage = z.infer<typeof SecretStorageSchema>
 export const LanguageSchema = z.enum(['system', 'en', 'ru'])
 export type ILanguage = z.infer<typeof LanguageSchema>
 
+const ThemeBaseSchema = z.enum(['light', 'dark', 'graphite'])
+const ThemePreferenceSchema = z.union([
+    z.literal('system'),
+    ThemeBaseSchema,
+    z.custom<`local:${string}`>(
+        (value) =>
+            typeof value === 'string' &&
+            value.startsWith('local:') &&
+            SlugSchema.safeParse(value.slice('local:'.length)).success,
+    ),
+])
+
+/** Цветовые токены, которые разрешено переопределять из локального JSON. */
+export const THEME_COLOR_NAMES = [
+    'window-base', 'text-primary', 'text-secondary', 'text-tertiary',
+    'accent', 'accent-contrast', 'accent-muted', 'brand-from', 'brand-to',
+    'surface-panel', 'surface-editor', 'surface-sidebar', 'surface-raised', 'surface-overlay',
+    'surface-sunken', 'surface-hover', 'surface-active', 'surface-header', 'chrome-highlight',
+    'separator', 'pane-divider', 'separator-strong', 'control-bg', 'control-border',
+    'control-highlight', 'overlay-border', 'dialog-scrim', 'highlight',
+    'success', 'success-indicator', 'warning', 'danger',
+    'syntax-keyword', 'syntax-field', 'syntax-string', 'syntax-number', 'syntax-variable',
+    'syntax-json-key', 'syntax-comment', 'syntax-punctuation',
+] as const
+
+/** Локальная тема наследует базовые цвета и меняет только указанные токены. */
+export const LocalThemeSchema = z.strictObject({
+    name: z.string().trim().min(1).max(80),
+    base: ThemeBaseSchema.default('dark'),
+    colors: z.partialRecord(
+        z.enum(THEME_COLOR_NAMES),
+        z.string().regex(/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i),
+    ),
+})
+
+export type ILocalTheme = z.infer<typeof LocalThemeSchema> & { id: `local:${string}` }
+
 export const SettingsSchema = z.object({
     version: z.literal(1).default(1),
-    theme: z.enum(['system', 'light', 'dark']).default('system'),
+    theme: ThemePreferenceSchema.default('system'),
     /** Язык интерфейса; `system` — по языку системы, иначе английский. */
     language: LanguageSchema.default('system'),
     lastWorkspaceId: z.string().optional(),
@@ -434,8 +471,9 @@ export const SettingsSchema = z.object({
              * первом запуске. Действует только на macOS.
              */
             opacity: z.number().int().min(0).max(100).default(100),
+            workspaceTransparency: z.boolean().default(false),
         })
-        .default({ material: 'hud', opacity: 100 }),
+        .default({ material: 'hud', opacity: 100, workspaceTransparency: false }),
     editor: z
         .object({
             fontSize: z.number().int().min(9).max(24).default(13),

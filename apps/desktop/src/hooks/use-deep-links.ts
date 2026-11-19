@@ -17,7 +17,11 @@ export function useDeepLinks(ready: boolean): void {
     useEffect(() => {
         if (!ready || !isTauri()) return
 
+        let disposed = false
+
         function handle(urls: string[]): void {
+            if (disposed) return
+
             for (const raw of urls) {
                 const link = parseAppLink(raw)
                 if (link) void useAppStore.getState().openLink(link)
@@ -26,12 +30,16 @@ export function useDeepLinks(ready: boolean): void {
 
         let unlisten: (() => void) | undefined
         void onOpenUrl(handle).then((stop) => {
-            unlisten = stop
+            if (disposed) stop()
+            else unlisten = stop
         })
         void getCurrent().then((urls) => {
             if (urls) handle(urls)
         })
 
-        return () => unlisten?.()
+        return () => {
+            disposed = true
+            unlisten?.()
+        }
     }, [ready])
 }

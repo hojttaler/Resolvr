@@ -197,7 +197,7 @@ interface IRowProps {
  */
 function VirtualRows({ rows, rowProps }: { rows: IJsonRow[]; rowProps: IRowProps }): React.JSX.Element {
     const containerRef = useRef<HTMLDivElement>(null)
-    const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
+    const [scrollElement, setScrollElement] = useState<HTMLElement | null>()
     const [scrollMargin, setScrollMargin] = useState(0)
 
     // Смещение дерева внутри прокручиваемой панели: над ним лежат плашки и
@@ -226,16 +226,20 @@ function VirtualRows({ rows, rowProps }: { rows: IJsonRow[]; rowProps: IRowProps
         return () => observer.disconnect()
     }, [])
 
+    const getItemKey = useCallback((index: number) => rows[index]?.key ?? index, [rows])
     const virtualizer = useVirtualizer({
         count: rows.length,
-        getScrollElement: () => scrollElement,
+        getScrollElement: () => scrollElement ?? null,
         estimateSize: () => ESTIMATED_ROW_HEIGHT,
         overscan: 20,
         scrollMargin,
-        getItemKey: (index) => rows[index]?.key ?? index,
+        getItemKey,
     })
 
     const items = virtualizer.getVirtualItems()
+
+    // До замера DOM список не должен монтировать все строки в первом кадре.
+    if (scrollElement === undefined) return <div ref={containerRef} />
 
     // Без прокручиваемого предка (дерево в диалоге без overflow) виртуализация
     // невозможна — рисуем обычным потоком, чтобы ничего не пропало.

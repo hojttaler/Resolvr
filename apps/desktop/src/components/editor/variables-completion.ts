@@ -1,5 +1,5 @@
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete'
-import { syntaxTree } from '@codemirror/language'
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
 import type { EditorState } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import { buildInputSkeleton } from '@resolvr/core'
@@ -12,6 +12,8 @@ import {
     isNonNullType,
     isScalarType,
     parse,
+    valueFromASTUntyped,
+    type GraphQLInputField,
     type GraphQLInputType,
     type GraphQLSchema,
     type OperationDefinitionNode,
@@ -64,9 +66,7 @@ export function createVariablesCompletion(
                     ? variables.map((variable) => createKeyOption(variable.name, variable.typeName))
                     : collectFieldOptions(schema, variables, location.path)
 
-            return options.length > 0
-                ? { from: word.from, options, validFor: /^"?[\w$]*$/ }
-                : null
+            return options.length > 0 ? { from: word.from, options, validFor: /^"?[\w$]*$/ } : null
         }
 
         const options = collectValueOptions(schema, variables, location.path)
@@ -120,7 +120,9 @@ function collectValueOptions(
     }
 
     if (isListType(unwrapNonNull(type))) {
-        return [{ label: '[]', detail: type.toString(), type: 'text', apply: createValueApply('[]') }]
+        return [
+            { label: '[]', detail: type.toString(), type: 'text', apply: createValueApply('[]') },
+        ]
     }
 
     if (isInputObjectType(named)) {
@@ -257,7 +259,9 @@ function resolveTypeAtPath(
 ): GraphQLInputType | undefined {
     if (!schema || path.length === 0) return undefined
 
-    const rootVariable = variables.find((variable) => variable.name === path[0])
+    const matching = variables.filter((variable) => variable.name === path[0])
+    const rootVariable = matching[0]
+    if (matching.some((variable) => variable.typeName !== rootVariable?.typeName)) return undefined
     if (!rootVariable) return undefined
 
     let current = toInputType(schema, rootVariable.typeName)
@@ -349,4 +353,131 @@ function resolveCursorLocation(state: EditorState, position: number): ICursorLoc
     }
 
     return { mode, path }
+}
+
+interface IInputObjectFields {
+    typeName: string
+    from: number
+    to: number
+    firstProperty?: number
+    lastPropertyEnd?: number
+    fields: GraphQLInputField[]
+    single: boolean
+}
+
+/** Находит ближайший input-объект под указателем и его отсутствующие поля. */
+export function findInputObjectFields(
+    state: EditorState,
+    position: number,
+    query: string,
+    schema: GraphQLSchema,
+): IInputObjectFields | undefined {
+    const tree = ensureSyntaxTree(state, state.doc.length, 25) ?? syntaxTree(state)
+    let object = tree.resolveInner(position, 1)
+
+    while (object.name !== 'Object') {
+        if (object.name === 'Property') {
+            const value = object.getChild('Object')
+            // Клик по имени объекта относится к нему же, даже когда значение свёрнуто.
+            if (value && position <= value.from) {
+                object = value
+                break
+            }
+        }
+        if (!object.parent) return undefined
+        object = object.parent
+    }
+
+    const path: string[] = []
+    try {
+        for (let node = object.parent; node; node = node.parent) {
+            if (node.name !== 'Property') continue
+            const key = node.getChild('PropertyName')
+            if (!key) return undefined
+            const name: unknown = JSON.parse(state.doc.sliceString(key.from, key.to))
+            if (typeof name !== 'string') return undefined
+            path.unshift(name)
+        }
+
+        const type = resolveTypeAtPath(schema, collectQueryVariables(query), path)
+        if (!type || !isInputObjectType(type)) return undefined
+
+        // Проверяется выбранный объект: черновик в другой ветке не мешает вставке.
+        const value: unknown = JSON.parse(state.doc.sliceString(object.from, object.to))
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+
+        const properties = object.getChildren('Property')
+        if (type.isOneOf && properties.length > 0) return undefined
+        const fields = Object.values(type.getFields()).filter(
+            (field) => !Object.hasOwn(value, field.name),
+        )
+        if (!fields.length) return undefined
+
+        return {
+            typeName: type.name,
+            from: object.from,
+            to: object.to,
+            firstProperty: properties[0]?.from,
+            lastPropertyEnd: properties.at(-1)?.to,
+            fields,
+            single: type.isOneOf,
+        }
+    } catch {
+        return undefined
+    }
+}
+
+/** Вставляет отмеченные свойства одним изменением JSON. */
+export function insertInputFields(
+    state: EditorState,
+    object: IInputObjectFields,
+    names: ReadonlySet<string>,
+    indentSize: number,
+): { changes: { from: number; insert: string }; selection: { anchor: number; head: number } } {
+    const opening = state.doc.lineAt(object.from)
+    const closing = state.doc.lineAt(object.to - 1)
+    const indentUnit = ' '.repeat(indentSize)
+    const multiline = opening.number !== closing.number
+    const closingIndent = /^\s*/.exec(closing.text)?.[0] ?? ''
+    const first =
+        object.firstProperty === undefined ? undefined : state.doc.lineAt(object.firstProperty)
+    const indent =
+        first && first.number !== opening.number
+            ? (/^\s*/.exec(first.text)?.[0] ?? '')
+            : closingIndent + indentUnit
+    const fields = object.fields.filter((field) => names.has(field.name))
+    const properties = (object.single ? fields.slice(0, 1) : fields).map((field) => {
+        const defaultValue = field.default?.literal
+            ? valueFromASTUntyped(field.default.literal)
+            : field.default
+              ? field.default.value
+              : field.defaultValue
+        const value = defaultValue !== undefined ? defaultValue : buildInputSkeleton(field.type, 3)
+        const serialized = JSON.stringify(value, null, multiline ? indentUnit : undefined)
+        const prepared = multiline ? serialized.replaceAll('\n', `\n${indent}`) : serialized
+
+        return { key: `${JSON.stringify(field.name)}: `, prepared }
+    })
+    const previous = object.lastPropertyEnd
+    const from = previous ?? (multiline ? closing.from : object.from + 1)
+    const prefix = multiline
+        ? previous === undefined
+            ? indent
+            : `,\n${indent}`
+        : previous === undefined
+          ? ''
+          : ', '
+    const suffix = multiline && previous === undefined ? '\n' : ''
+    const firstInserted = properties[0]
+    if (!firstInserted) return { changes: { from, insert: '' }, selection: { anchor: from, head: from } }
+    const separator = multiline ? `,\n${indent}` : ', '
+    const anchor = from + prefix.length + firstInserted.key.length
+
+    return {
+        changes: {
+            from,
+            insert: prefix + properties.map(({ key, prepared }) => key + prepared).join(separator) + suffix,
+        },
+        selection: { anchor, head: anchor + firstInserted.prepared.length },
+    }
 }

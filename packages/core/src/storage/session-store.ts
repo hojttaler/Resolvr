@@ -173,19 +173,20 @@ export class Debouncer {
 
         if (this._timer !== undefined) clearTimeout(this._timer)
         this._timer = setTimeout(() => {
+            this._timer = undefined
+            // Ошибка остаётся видна обработчику необработанных исключений
+            // приложения, но не блокирует последующие записи.
             void this._run()
         }, this._delayMs)
     }
 
     /** Немедленно выполняет отложенную задачу и дожидается завершения текущей. */
     public async flush(): Promise<void> {
-        if (this._timer !== undefined) {
-            clearTimeout(this._timer)
+        do {
+            if (this._timer !== undefined) clearTimeout(this._timer)
             this._timer = undefined
-        }
-
-        await this._run()
-        await this._inFlight
+            await this._run()
+        } while (this._pending !== undefined)
     }
 
     public cancel(): void {
@@ -195,13 +196,23 @@ export class Debouncer {
     }
 
     private async _run(): Promise<void> {
+        // Параллельные переименования временных файлов могут завершиться
+        // в обратном порядке и заменить свежий черновик предыдущей версией.
+        while (this._inFlight) {
+            // Собственная ошибка возвращается тому, кто запустил запись.
+            await this._inFlight.catch(() => undefined)
+        }
+        if (this._timer !== undefined) return
+
         const task = this._pending
         this._pending = undefined
-        this._timer = undefined
         if (!task) return
 
-        this._inFlight = task()
-        await this._inFlight
-        this._inFlight = undefined
+        this._inFlight = Promise.resolve().then(task)
+        try {
+            await this._inFlight
+        } finally {
+            this._inFlight = undefined
+        }
     }
 }

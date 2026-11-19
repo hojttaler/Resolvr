@@ -1,5 +1,4 @@
 import {
-    buildOperation,
     formatOperationRef,
     historyTitle,
     listTypes,
@@ -12,28 +11,28 @@ import {
     type ITypeListEntry,
 } from '@resolvr/core'
 import { isObjectType, type GraphQLField, type GraphQLSchema } from 'graphql'
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 
+import { useSchemaRequest } from '../hooks/use-schema-request.js'
 import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { kbd } from '../lib/keys.js'
 import { useAppStore } from '../state/store.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
+import { SchemaExplorer } from './SchemaExplorer.js'
 
 type ISidebarTab = 'collections' | 'schema' | 'history' | 'flows'
 
 const TABS: Array<{ id: ISidebarTab; label: string; hint: string }> = [
     { id: 'collections', label: 'Collections', hint: 'Saved requests' },
     { id: 'schema', label: 'Schema', hint: 'Types and fields of the endpoint' },
-    { id: 'history', label: 'History', hint: 'Recent runs list' },
     { id: 'flows', label: 'Flows', hint: 'Scenarios and smoke tests' },
+    { id: 'history', label: 'History', hint: 'Recent runs list' },
 ]
 
 /**
  * Вертикальная полоса разделов слева.
  *
- * Иконки вместо вкладок в шапке панели: при узком сайдбаре подписи
- * перекрывались, а полоса занимает 40 px и не зависит от ширины панели.
  * Клик по активному разделу сворачивает панель, по любому другому —
  * открывает его.
  */
@@ -42,23 +41,27 @@ export function ActivityRail(): React.JSX.Element {
     const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed)
     const setSidebarTab = useAppStore((state) => state.setSidebarTab)
     const toggleSidebar = useAppStore((state) => state.toggleSidebar)
+    const setDialog = useAppStore((state) => state.setDialog)
+    const expanded = useAppStore((state) => Boolean(state.layoutSizes[`${state.layoutPreset}-root-restore`]))
     const t = useT()
 
     return (
         <nav className="rail" aria-label={t('Sections')}>
             {TABS.map((tab) => {
-                const active = sidebarTab === tab.id && !sidebarCollapsed
+                const active = sidebarTab === tab.id && !sidebarCollapsed && !expanded
+                const label = tab.id === 'collections' ? 'Requests' : tab.label
 
                 return (
                     <button
                         key={tab.id}
                         type="button"
                         className={`rail__item${active ? ' rail__item--active' : ''}`}
-                        title={`${t(tab.label)} — ${t(tab.hint)}`}
-                        aria-label={t(tab.label)}
+                        title={`${t(label)} — ${t(tab.hint)}`}
+                        aria-label={t(label)}
                         aria-pressed={active}
                         onClick={() => {
-                            if (sidebarTab === tab.id) {
+                            if (expanded) useAppStore.getState().toggleResponseExpanded()
+                            if (active) {
                                 toggleSidebar()
 
                                 return
@@ -68,24 +71,31 @@ export function ActivityRail(): React.JSX.Element {
                         }}
                     >
                         <RailIcon tab={tab.id} />
+                        <span className="rail__label">{t(label)}</span>
                     </button>
                 )
             })}
+            <button
+                type="button"
+                className="rail__item"
+                title={t('Agent activity')}
+                aria-label={t('Agent activity')}
+                onClick={() => setDialog('activity')}
+            >
+                <RailIcon tab="activity" />
+                <span className="rail__label">{t('Activity')}</span>
+            </button>
         </nav>
     )
 }
 
-function RailIcon({ tab }: { tab: ISidebarTab }): React.JSX.Element {
+function RailIcon({ tab }: { tab: ISidebarTab | 'activity' }): React.JSX.Element {
     const common = { width: 17, height: 17, viewBox: '0 0 16 16', fill: 'none' as const }
     const stroke = { stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
 
     switch (tab) {
         case 'collections':
-            return (
-                <svg {...common} aria-hidden="true">
-                    <path d="M2.5 4.5a1 1 0 011-1h3l1.2 1.5h4.8a1 1 0 011 1v6a1 1 0 01-1 1h-9a1 1 0 01-1-1v-7.5z" {...stroke} />
-                </svg>
-            )
+            return <svg {...common} aria-hidden="true"><path d="M4 2.5l9 5.5-9 5.5z" {...stroke} /></svg>
         case 'schema':
             return (
                 <svg {...common} aria-hidden="true">
@@ -102,11 +112,15 @@ function RailIcon({ tab }: { tab: ISidebarTab }): React.JSX.Element {
                     <path d="M8 5v3.2l2.2 1.3" {...stroke} />
                 </svg>
             )
+        case 'activity':
+            return <svg {...common} aria-hidden="true"><path d="M1.5 8h2.8l2-4.8 2.8 9.5L11 8h3.5" {...stroke} /></svg>
         case 'flows':
             return (
                 <svg {...common} aria-hidden="true">
-                    <path d="M3 4.5h2.5M3 8h2.5M3 11.5h2.5" {...stroke} />
-                    <path d="M8 4.5h5M8 8h5M8 11.5h5" {...stroke} />
+                    <circle cx="4" cy="4" r="1.6" {...stroke} />
+                    <circle cx="12" cy="4" r="1.6" {...stroke} />
+                    <circle cx="4" cy="12" r="1.6" {...stroke} />
+                    <path d="M5.7 4h4.6M4 5.7v4.6" {...stroke} />
                 </svg>
             )
     }
@@ -117,6 +131,7 @@ export function Sidebar(): React.JSX.Element {
     const sidebarTab = useAppStore((state) => state.sidebarTab)
     const setDialog = useAppStore((state) => state.setDialog)
     const toggleSidebar = useAppStore((state) => state.toggleSidebar)
+    const openFlowTab = useAppStore((state) => state.openFlowTab)
     const createCollection = useAppStore((state) => state.createCollection)
     const tree = useAppStore((state) => state.tree)
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
@@ -136,7 +151,7 @@ export function Sidebar(): React.JSX.Element {
 
     return (
         <div className="panel sidebar">
-            <div className="panel__header">
+            <div className="panel__header sidebar__header">
                 <span className="panel__title">{t(current?.label ?? '')}</span>
 
                 <span className="panel__spacer" />
@@ -176,6 +191,16 @@ export function Sidebar(): React.JSX.Element {
                     >
                         +
                     </button>
+                )}
+
+                {sidebarTab === 'flows' && (
+                    <button
+                        type="button"
+                        className="btn btn--icon"
+                        onClick={() => void openFlowTab()}
+                        aria-label={t('Create flow')}
+                        title={t('Create flow')}
+                    >+</button>
                 )}
 
                 <button
@@ -411,7 +436,7 @@ function CollectionsPanel(): React.JSX.Element {
                     return (
                         <div key={node.collection.id}>
                             <div
-                                className={`tree__row${
+                                className={`tree__row tree__row--collection${
                                     dropTarget === node.collection.id ? ' tree__row--drop' : ''
                                 }`}
                                 onClick={() =>
@@ -451,6 +476,9 @@ function CollectionsPanel(): React.JSX.Element {
                                 >
                                     ▶
                                 </span>
+                                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                    <path d="M2.5 6a1.5 1.5 0 0 1 1.5-1.5h4l2 2h6A1.5 1.5 0 0 1 17.5 8v6A1.5 1.5 0 0 1 16 15.5H4A1.5 1.5 0 0 1 2.5 14Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                                </svg>
                                 {isRenaming ? (
                                     <RenameInput
                                         value={renaming.value}
@@ -591,22 +619,28 @@ function SchemaPanel(): React.JSX.Element {
     const schema = useAppStore((state) => state.schema)
     const schemaError = useAppStore((state) => state.schemaError)
     const refreshSchema = useAppStore((state) => state.refreshSchema)
-    const replaceActiveQuery = useAppStore((state) => state.replaceActiveQuery)
-    const openTab = useAppStore((state) => state.openTab)
     const openSchemaTab = useAppStore((state) => state.openSchemaTab)
     const tabs = useAppStore((state) => state.tabs)
     const activeTabId = useAppStore((state) => state.activeTabId)
-    const autofillDepth = useAppStore((state) => state.settings.editor.autofillDepth)
     const [search, setSearch] = useState('')
+    const [mode, setMode] = useState<'explorer' | 'types'>('explorer')
+    const [openedField, setOpenedField] = useState<string>()
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+    const request = useSchemaRequest(schema)
     const t = useT()
 
-    const needle = search.trim().toLowerCase()
-    const rootFields = useMemo(() => collectRootFields(schema, search), [schema, search])
-    const types = useMemo(() => (schema ? listTypes(schema, search) : []), [schema, search])
+    const deferredSearch = useDeferredValue(search)
+    const needle = deferredSearch.trim().toLowerCase()
+    const rootFields = useMemo(() => mode === 'types' ? collectRootFields(schema, deferredSearch) : [], [schema, deferredSearch, mode])
+    const rootNames = useMemo(() => new Set(rootFields.map((group) => group.typeName)), [rootFields])
+    const allTypes = useMemo(() => schema && mode === 'types' ? listTypes(schema) : [], [schema, mode])
+    const types = useMemo(() => needle ? allTypes.filter((type) => type.name.toLowerCase().includes(needle)) : allTypes, [allTypes, needle])
     const fieldHits = useMemo(
-        () => (schema && needle.length > 1 ? searchFields(schema, needle, 30) : []),
-        [schema, needle],
+        () =>
+            schema && mode === 'types' && needle.length > 1
+                ? searchFields(schema, needle, 30).filter((hit) => !rootNames.has(hit.typeName))
+                : [],
+        [schema, needle, mode, rootNames],
     )
     const currentType = tabs.find((tab) => tab.id === activeTabId && tab.kind === 'schema')?.schemaType
 
@@ -627,14 +661,6 @@ function SchemaPanel(): React.JSX.Element {
         )
     }
 
-    async function insertOperation(kind: IOperationKind, fieldName: string): Promise<void> {
-        if (!schema) return
-        if (!activeTabId) await openTab()
-
-        const built = buildOperation(schema, { kind, fieldName, depth: autofillDepth })
-        replaceActiveQuery(built.query, built.variables)
-    }
-
     // Типы сгруппированы по роду: объектов больше всего, и без групп список
     // из тысячи имён не читается.
     const groups: Array<{ kind: ITypeKind; label: string; entries: ITypeListEntry[] }> = [
@@ -645,7 +671,6 @@ function SchemaPanel(): React.JSX.Element {
         { kind: 'union', label: t('Unions'), entries: [] },
         { kind: 'scalar', label: t('Scalars'), entries: [] },
     ]
-    const rootNames = new Set(rootFields.map((group) => group.typeName))
     for (const entry of types) {
         if (rootNames.has(entry.name)) continue
         groups.find((group) => group.kind === entry.kind)?.entries.push(entry)
@@ -653,16 +678,37 @@ function SchemaPanel(): React.JSX.Element {
 
     return (
         <div>
-            <div style={{ padding: '8px 12px' }}>
+            <div className="schema-sidebar__controls">
+                <div className="segmented">
+                    <button type="button" className={`segmented__item${mode === 'explorer' ? ' segmented__item--active' : ''}`}
+                        aria-pressed={mode === 'explorer'} onClick={() => setMode('explorer')}>{t('Explorer')}</button>
+                    <button type="button" className={`segmented__item${mode === 'types' ? ' segmented__item--active' : ''}`}
+                        aria-pressed={mode === 'types'} onClick={() => setMode('types')}>{t('Types')}</button>
+                </div>
+                <button type="button" className="btn btn--quiet btn--icon"
+                    aria-label={t('Refresh schema')} title={t('Refresh schema')}
+                    onClick={() => void refreshSchema()}>↻</button>
+            </div>
+            {schemaError && <p className="schema-explorer__notice" role="status">{schemaError}</p>}
+            <div className="schema-sidebar__controls">
                 <input
                     className="input"
-                    placeholder={t('Search type or field…')}
+                    placeholder={t(mode === 'explorer' ? 'Filter root fields…' : 'Search type or field…')}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                 />
             </div>
 
-            <div className="tree">
+            {mode === 'explorer' && (
+                <SchemaExplorer
+                    schema={schema}
+                    request={request}
+                    search={deferredSearch}
+                    openedField={openedField}
+                    onOpenType={openSchemaTab}
+                />
+            )}
+            {mode === 'types' && <div className="tree">
                 {rootFields.map((group) => (
                     <div key={group.kind}>
                         <div
@@ -679,21 +725,23 @@ function SchemaPanel(): React.JSX.Element {
 
                         {(needle.length > 0 || openGroups[group.kind] !== false) &&
                             group.fields.slice(0, needle.length > 0 ? 100 : 40).map((field) => (
-                                <div
+                                <button
                                     key={`${group.kind}.${field.name}`}
-                                    className="tree__row tree__row--nested"
-                                    onClick={() => void insertOperation(group.kind, field.name)}
+                                    type="button"
+                                    className="tree__row tree__row--nested schema-type-field"
+                                    onClick={() => {
+                                        void request.insert({ kind: group.kind, field: field.name })
+                                        setOpenedField(field.name)
+                                        setSearch('')
+                                        setMode('explorer')
+                                    }}
                                     title={`${field.name}: ${field.type.toString()}${
                                         field.description ? `\n\n${field.description}` : ''
-                                    }\n${t('Click — insert query; right-click — open in schema browser')}`}
-                                    onContextMenu={(event) => {
-                                        event.preventDefault()
-                                        openSchemaTab(group.typeName)
-                                    }}
+                                    }`}
                                 >
                                     <span className="tree__label mono">{field.name}</span>
                                     <span className="badge">{field.type.toString()}</span>
-                                </div>
+                                </button>
                             ))}
                         {needle.length === 0 && group.fields.length > 40 && (
                             <div
@@ -770,7 +818,7 @@ function SchemaPanel(): React.JSX.Element {
                             </div>
                         )
                     })}
-            </div>
+            </div>}
         </div>
     )
 }
@@ -785,11 +833,12 @@ function HistoryPanel(): React.JSX.Element {
     }
 
     return (
-        <div className="tree">
+        <div className="tree history-list">
             {history.map((entry) => (
-                <div
+                <button
                     key={entry.id}
-                    className="tree__row"
+                    type="button"
+                    className="tree__row history-list__entry"
                     onClick={() => void openHistoryEntry(entry)}
                     title={`${new Date(entry.ts).toLocaleString()}\n${entry.responsePreview}${
                         entry.responseBody === undefined ? `\n${t('Response not stored (too large)')}` : ''
@@ -798,9 +847,12 @@ function HistoryPanel(): React.JSX.Element {
                     <span className={`badge ${entry.ok ? 'badge--ok' : 'badge--fail'}`}>
                         {entry.status}
                     </span>
-                    <span className="tree__label">{historyTitle(entry) ?? t('unnamed')}</span>
+                    <span className="history-list__request">
+                        <span className="tree__label">{historyTitle(entry) ?? t('unnamed')}</span>
+                        <span className="inspector__hint">{new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </span>
                     <span className="badge">{t('{n} ms', { n: Math.round(entry.durationMs) })}</span>
-                </div>
+                </button>
             ))}
         </div>
     )
@@ -821,16 +873,34 @@ function FlowsPanel(): React.JSX.Element {
     const openFlowTab = useAppStore((state) => state.openFlowTab)
     const runAllFlows = useAppStore((state) => state.runAllFlows)
     const reportRunning = useAppStore((state) => state.reportRunning)
-    const tabs = useAppStore((state) => state.tabs)
-    const activeTabId = useAppStore((state) => state.activeTabId)
+    const tab = useAppStore((state) => state.tabs.find((item) => item.id === state.activeTabId))
+    const draftName = useAppStore((state) =>
+        tab?.kind === 'flow' && !tab.flowId ? state.flowDrafts[tab.id]?.name : undefined,
+    )
+    const [search, setSearch] = useState('')
     const t = useT()
 
-    const activeFlowId = tabs.find((tab) => tab.id === activeTabId && tab.kind === 'flow')?.flowId
+    const activeFlowId = tab?.kind === 'flow' ? tab.flowId : undefined
+    const needle = search.trim().toLowerCase()
+    const visible = flows.filter((flow) => flow.name.toLowerCase().includes(needle))
 
     return (
         <div>
+            <input
+                className="input sidebar__search"
+                placeholder={t('Find a flow…')}
+                aria-label={t('Find a flow…')}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+            />
             <div className="tree">
-                {flows.length === 0 && (
+                {draftName !== undefined && (
+                    <div className="tree__row tree__row--active">
+                        <span className="tree__label">{draftName || t('New flow')}</span>
+                    </div>
+                )}
+                {flows.length > 0 && visible.length === 0 && <div className="empty">{t('No matching flows')}</div>}
+                {flows.length === 0 && draftName === undefined && (
                     <div className="empty">
                         {t('No flows yet.')}
                         <br />
@@ -840,7 +910,7 @@ function FlowsPanel(): React.JSX.Element {
                     </div>
                 )}
 
-                {flows.map((flow) => (
+                {visible.map((flow) => (
                     <div key={flow.id}>
                         <div
                             className={`tree__row${flow.id === activeFlowId ? ' tree__row--active' : ''}`}
@@ -903,9 +973,6 @@ function FlowsPanel(): React.JSX.Element {
             </div>
 
             <div className="row" style={{ padding: '0 12px 12px' }}>
-                <button type="button" className="btn" onClick={() => void openFlowTab()}>
-                    {t('+ Create flow')}
-                </button>
                 {flows.length > 0 && (
                     <button
                         type="button"

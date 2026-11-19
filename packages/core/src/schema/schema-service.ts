@@ -1,7 +1,6 @@
 import {
     buildClientSchema,
     buildSchema,
-    getIntrospectionQuery,
     printSchema,
     type GraphQLSchema,
     type IntrospectionQuery,
@@ -10,7 +9,7 @@ import {
 import { ErrorCodeEnum, ResolvrError } from '../model/errors.js'
 import { SchemaCacheSchema, type IEndpoint, type ISchemaCache } from '../model/schemas.js'
 import type { IFileSystem } from '../ports/file-system.js'
-import type { ITransport } from '../ports/transport.js'
+import type { RunEngine } from '../run/run-engine.js'
 import { readJsonFile, writeJsonFile } from '../storage/json.js'
 import type { LibraryPaths } from '../storage/paths.js'
 
@@ -25,39 +24,64 @@ import type { LibraryPaths } from '../storage/paths.js'
 export class SchemaService {
     private readonly _fs: IFileSystem
     private readonly _paths: LibraryPaths
-    private readonly _transport: ITransport
+    private readonly _runner: Pick<RunEngine, 'runIntrospection'>
     private readonly _memoryCache = new Map<string, { hash: string; schema: GraphQLSchema }>()
 
-    constructor(fs: IFileSystem, paths: LibraryPaths, transport: ITransport) {
+    constructor(fs: IFileSystem, paths: LibraryPaths, runner: Pick<RunEngine, 'runIntrospection'>) {
         this._fs = fs
         this._paths = paths
-        this._transport = transport
+        this._runner = runner
     }
 
     /** Запрашивает схему у эндпоинта и обновляет кэш, сохраняя прошлый снимок. */
-    public async introspect(workspaceId: string, endpoint: IEndpoint): Promise<ISchemaCache> {
-        const response = await this._transport.request({
-            url: endpoint.url,
-            method: 'POST',
-            headers: {
-                'content-type': 'application/json',
-                accept: 'application/json',
-                ...endpoint.headers,
-            },
-            body: JSON.stringify({ query: getIntrospectionQuery({ descriptions: true }) }),
-            acceptInvalidCerts: endpoint.acceptInvalidCerts,
+    public async introspect(
+        workspaceId: string,
+        endpoint: IEndpoint,
+        options: { environmentId?: string; timeoutMs?: number } = {},
+    ): Promise<ISchemaCache> {
+        const response = await this._runner.runIntrospection({
+            workspaceId,
+            endpointId: endpoint.id,
+            environmentId: options.environmentId,
+            timeoutMs: options.timeoutMs,
         })
 
         if (response.status < 200 || response.status >= 300) {
             throw new ResolvrError(
                 ErrorCodeEnum.SCHEMA_UNAVAILABLE,
-                `Интроспекция вернула HTTP ${response.status} (${endpoint.url})`,
+                `Интроспекция вернула HTTP ${response.status}`,
                 { endpointId: endpoint.id, status: response.status },
             )
         }
 
-        const payload = this._parseIntrospection(response.body, endpoint)
-        const sdl = printSchema(buildClientSchema(payload))
+        if (response.invalidBody) {
+            throw new ResolvrError(
+                ErrorCodeEnum.SCHEMA_UNAVAILABLE,
+                'Ответ интроспекции не удалось разобрать как объект JSON',
+                { endpointId: endpoint.id },
+            )
+        }
+        if (response.error !== undefined) {
+            throw new ResolvrError(
+                ErrorCodeEnum.SCHEMA_UNAVAILABLE,
+                `Интроспекция отклонена сервером: ${response.error}`,
+                { endpointId: endpoint.id },
+            )
+        }
+        if (
+            response.data === null ||
+            typeof response.data !== 'object' ||
+            !('__schema' in response.data)
+        ) {
+            throw new ResolvrError(
+                ErrorCodeEnum.SCHEMA_UNAVAILABLE,
+                'Ответ интроспекции не содержит __schema',
+                { endpointId: endpoint.id },
+            )
+        }
+
+        const schema = buildClientSchema(response.data as IntrospectionQuery)
+        const sdl = printSchema(schema)
 
         const current = await this._readCache(workspaceId, endpoint.id)
         if (current && current.sdl !== sdl) {
@@ -75,12 +99,8 @@ export class SchemaService {
             sdl,
         })
 
-        await writeJsonFile(
-            this._fs,
-            this._paths.schemaCacheFile(workspaceId, endpoint.id),
-            cache,
-        )
-        this._memoryCache.delete(cacheKey(workspaceId, endpoint.id))
+        await writeJsonFile(this._fs, this._paths.schemaCacheFile(workspaceId, endpoint.id), cache)
+        this._memoryCache.set(cacheKey(workspaceId, endpoint.id), { hash: cache.hash, schema })
 
         return cache
     }
@@ -155,37 +175,6 @@ export class SchemaService {
             this._paths.schemaCacheFile(workspaceId, endpointId),
             SchemaCacheSchema,
         )
-    }
-
-    private _parseIntrospection(body: string, endpoint: IEndpoint): IntrospectionQuery {
-        let parsed: { data?: IntrospectionQuery; errors?: { message?: string }[] }
-        try {
-            parsed = JSON.parse(body) as typeof parsed
-        } catch {
-            throw new ResolvrError(
-                ErrorCodeEnum.SCHEMA_UNAVAILABLE,
-                `Эндпоинт ${endpoint.url} вернул не-JSON ответ на интроспекцию`,
-                { endpointId: endpoint.id },
-            )
-        }
-
-        if (parsed.errors?.length) {
-            throw new ResolvrError(
-                ErrorCodeEnum.SCHEMA_UNAVAILABLE,
-                `Интроспекция отклонена сервером: ${parsed.errors[0]?.message ?? 'без сообщения'}`,
-                { endpointId: endpoint.id, errorCount: parsed.errors.length },
-            )
-        }
-
-        if (!parsed.data?.__schema) {
-            throw new ResolvrError(
-                ErrorCodeEnum.SCHEMA_UNAVAILABLE,
-                `Ответ интроспекции не содержит __schema (${endpoint.url})`,
-                { endpointId: endpoint.id },
-            )
-        }
-
-        return parsed.data
     }
 }
 

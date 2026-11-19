@@ -1,3 +1,5 @@
+import { getIntrospectionQuery } from 'graphql'
+
 import { ErrorCodeEnum, ResolvrError } from '../model/errors.js'
 import {
     HISTORY_BODY_LIMIT,
@@ -304,6 +306,49 @@ export class RunEngine {
     }
 
     public async run(input: IRunInput): Promise<IRunResult> {
+        const { executed, flowRuns } = await this._runWithAuthorization(input)
+        const captured = await this._captureToEnvironment(input, executed)
+        const result = { ...executed.result, ...captured }
+
+        return flowRuns.length > 0 ? { ...result, flowRuns } : result
+    }
+
+    /** Выполняет только запрос схемы, используя авторизацию и восстановление окружения. */
+    public async runIntrospection(input: Pick<IRunInput, 'workspaceId' | 'endpointId' | 'environmentId' | 'timeoutMs'>): Promise<{
+        status: number
+        data?: unknown
+        invalidBody?: boolean
+        error?: string
+    }> {
+        const { executed } = await this._runWithAuthorization({
+            ...input,
+            query: getIntrospectionQuery({ descriptions: true }),
+            operationName: 'IntrospectionQuery',
+            skipHistory: true,
+        })
+
+        const { status } = executed.response
+        try {
+            // Подстановка маски в исходном JSON может повредить имена полей схемы.
+            // Ошибки сервера по-прежнему читаются только из замаскированного ответа.
+            const payload: unknown = JSON.parse(executed.response.body)
+            if (payload === null || typeof payload !== 'object') return { status, invalidBody: true }
+
+            const errors = 'errors' in payload ? payload.errors : undefined
+            if (Array.isArray(errors) && errors.length > 0) {
+                const first = executed.result.errors?.[0]
+                const message = first && typeof first === 'object' && 'message' in first ? first.message : undefined
+
+                return { status, error: typeof message === 'string' ? message : 'без сообщения' }
+            }
+
+            return { status, data: 'data' in payload ? payload.data : undefined }
+        } catch {
+            return { status, invalidBody: true }
+        }
+    }
+
+    private async _runWithAuthorization(input: IRunInput): Promise<{ executed: IExecuted; flowRuns: IFlowRunSummary[] }> {
         const flowRuns: IFlowRunSummary[] = []
         let flowContext = { ...(input.flowContext ?? {}) }
 
@@ -334,10 +379,7 @@ export class RunEngine {
             executed = await this._execute({ ...input, flowContext })
         }
 
-        const captured = await this._captureToEnvironment(input, executed)
-        const result = { ...executed.result, ...captured }
-
-        return flowRuns.length > 0 ? { ...result, flowRuns } : result
+        return { executed, flowRuns }
     }
 
     /**

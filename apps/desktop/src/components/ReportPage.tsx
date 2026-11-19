@@ -31,7 +31,7 @@ export function ReportPage(props: { tabId: string }): React.JSX.Element {
     const state = running ? 'running' : summary.failed > 0 ? 'fail' : 'ok'
 
     return (
-        <div className="panel">
+        <div className="panel report-page">
             <div className="panel__header">
                 <span className="panel__title">{t('Flows run')}</span>
                 <span
@@ -77,7 +77,11 @@ export function ReportPage(props: { tabId: string }): React.JSX.Element {
                 <div className="report__summary">
                     <Stat label={plural(summary.total, 'flow|flows')} value={summary.total} />
                     <Stat label={t('passed')} value={summary.passed} tone="ok" />
-                    <Stat label={t('failed')} value={summary.failed} tone={summary.failed > 0 ? 'fail' : undefined} />
+                    <Stat
+                        label={t('failed')}
+                        value={summary.failed}
+                        tone={summary.failed > 0 ? 'fail' : undefined}
+                    />
                     <Stat label={t('ms')} value={Math.round(summary.durationMs)} />
                     <span className="inspector__hint">
                         {new Date(report.startedAt).toLocaleString()}
@@ -113,30 +117,33 @@ function ReportEntry(props: { entry: IFlowReportEntry; onOpen: () => void }): Re
 
     return (
         <div className={`report__entry${entry.run && !entry.run.ok ? ' report__entry--fail' : ''}`}>
-            <div className="report__head" onClick={() => setOpen(!expanded)}>
-                <span className={`json-chevron${expanded ? ' json-chevron--open' : ''}`}>▶</span>
-                <span
-                    className={`badge ${
-                        !entry.run ? '' : entry.run.ok ? 'badge--ok' : 'badge--fail'
-                    }`}
-                >
-                    {!entry.run ? '⏳' : entry.run.ok ? '✓' : '✕'}
-                </span>
-                <span className="report__name">{entry.flowName}</span>
-                {entry.run && (
-                    <span className="inspector__hint">
-                        {tn(entry.run.steps.length, 'step|steps')} · {t('{n} ms', { n: Math.round(entry.run.durationMs) })}
-                    </span>
-                )}
-                <span className="panel__spacer" />
+            <div className="report__head">
                 <button
                     type="button"
-                    className="btn btn--quiet"
-                    onClick={(event) => {
-                        event.stopPropagation()
-                        props.onOpen()
-                    }}
+                    className="report__disclosure"
+                    disabled={!entry.run}
+                    aria-expanded={expanded}
+                    onClick={() => setOpen(!expanded)}
                 >
+                    <span className={`json-chevron${expanded ? ' json-chevron--open' : ''}`}>
+                        ▶
+                    </span>
+                    <span
+                        className={`badge ${
+                            !entry.run ? '' : entry.run.ok ? 'badge--ok' : 'badge--fail'
+                        }`}
+                    >
+                        {!entry.run ? '⏳' : entry.run.ok ? '✓' : '✕'}
+                    </span>
+                    <span className="report__name">{entry.flowName}</span>
+                    {entry.run && (
+                        <span className="inspector__hint">
+                            {tn(entry.run.steps.length, 'step|steps')} ·{' '}
+                            {t('{n} ms', { n: Math.round(entry.run.durationMs) })}
+                        </span>
+                    )}
+                </button>
+                <button type="button" className="btn btn--quiet" onClick={props.onOpen}>
                     {t('Open')}
                 </button>
             </div>
@@ -165,12 +172,16 @@ function ReportStep({ step }: { step: IFlowStepResult }): React.JSX.Element {
     return (
         <div className="report__step">
             <div className="row">
-                <span className={`badge ${step.skipped ? '' : step.ok ? 'badge--ok' : 'badge--fail'}`}>
+                <span
+                    className={`badge ${step.skipped ? '' : step.ok ? 'badge--ok' : 'badge--fail'}`}
+                >
                     {step.skipped ? '—' : step.ok ? '✓' : '✕'}
                 </span>
                 <span>{step.name}</span>
                 {step.status !== undefined && <span className="badge">HTTP {step.status}</span>}
-                <span className="inspector__hint">{t('{n} ms', { n: Math.round(step.durationMs) })}</span>
+                <span className="inspector__hint">
+                    {t('{n} ms', { n: Math.round(step.durationMs) })}
+                </span>
                 <span className="panel__spacer" />
                 {step.result && (
                     <button
@@ -183,7 +194,11 @@ function ReportStep({ step }: { step: IFlowStepResult }): React.JSX.Element {
                 )}
             </div>
 
-            {step.error && <div className="problem"><span>{step.error}</span></div>}
+            {step.error && (
+                <div className="problem">
+                    <span>{step.error}</span>
+                </div>
+            )}
             {failedAsserts.map((assert, index) => (
                 <div key={index} className="problem">
                     <span className="mono problem__path">{assert.assert.path}</span>

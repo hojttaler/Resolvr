@@ -34,13 +34,8 @@ export function autoArguments(options: IAutoArgumentsOptions): Extension {
         const schema = options.getSchema()
         if (!schema) return
 
-        let insertedAt: number | undefined
-        update.changes.iterChanges((_fromA, _toA, _fromB, toB, inserted) => {
-            if (inserted.length > 0) insertedAt = toB
-        })
-        if (insertedAt === undefined) return
-
-        const position = insertedAt
+        // Подсказка из схемы держит курсор за именем поля перед переносом строки.
+        const position = update.state.selection.main.head
         const view = update.view
 
         // Правка документа из обработчика обновления недопустима: транзакция

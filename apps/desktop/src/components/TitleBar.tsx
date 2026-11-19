@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { detectOperationKind } from '@resolvr/core'
-import { useEffect, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 
 import { useT } from '../i18n/index.js'
 import { kbd } from '../lib/keys.js'
@@ -19,8 +19,8 @@ export function TitleBar(): React.JSX.Element {
     const workspace = useAppStore((state) => state.workspace)
     const workspaces = useAppStore((state) => state.workspaces)
     const selectWorkspace = useAppStore((state) => state.selectWorkspace)
-    const tabs = useAppStore((state) => state.tabs)
-    const activeTabId = useAppStore((state) => state.activeTabId)
+    const hasActiveTab = useAppStore((state) => Boolean(state.activeTabId))
+    const focusMode = useAppStore((state) => state.layoutPreset === 'focus')
     const setActiveEnvironment = useAppStore((state) => state.setActiveEnvironment)
     const setActiveEndpoint = useAppStore((state) => state.setActiveEndpoint)
     const activeEnvironment = useAppStore(selectActiveEnvironment)
@@ -28,8 +28,6 @@ export function TitleBar(): React.JSX.Element {
     const setPaletteOpen = useAppStore((state) => state.setPaletteOpen)
     const setDialog = useAppStore((state) => state.setDialog)
     const t = useT()
-
-    const activeTab = tabs.find((tab) => tab.id === activeTabId)
 
     return (
         <div className="titlebar">
@@ -45,7 +43,7 @@ export function TitleBar(): React.JSX.Element {
             >
                 <span className="brand" title="Resolvr">
                     <span className="brand__mark">
-                        <LogoMark size={15} />
+                        <LogoMark size={22} />
                     </span>
                     Resolvr
                 </span>
@@ -68,7 +66,7 @@ export function TitleBar(): React.JSX.Element {
                     </select>
                 </span>
 
-                {activeTab && workspace && workspace.endpoints.length > 1 && (
+                {hasActiveTab && workspace && workspace.endpoints.length > 1 && (
                     <select
                         className="select"
                         value={activeEndpoint?.id ?? ''}
@@ -84,7 +82,7 @@ export function TitleBar(): React.JSX.Element {
                     </select>
                 )}
 
-                {activeTab && workspace && (
+                {hasActiveTab && workspace && (
                     <span className="select-with-badge select-with-dot">
                         <span
                             className={`env-dot${activeEnvironment?.production ? ' env-dot--prod' : ''}`}
@@ -117,8 +115,6 @@ export function TitleBar(): React.JSX.Element {
                     </span>
                 )}
 
-                <span className="panel__spacer" />
-
                 {activeEndpoint && (
                     <span className="endpoint-pill" title={activeEndpoint.url}>
                         <LinkIcon />
@@ -126,19 +122,21 @@ export function TitleBar(): React.JSX.Element {
                         <LastRunStatus />
                     </span>
                 )}
+                {!activeEndpoint && <span className="panel__spacer" />}
             </div>
 
             <TokenStatus />
 
             <button
                 type="button"
-                className="btn btn--quiet"
+                className="btn titlebar__palette"
                 onClick={() => setPaletteOpen(true)}
                 title={t('Command palette ({keys})', { keys: kbd('K') })}
             >
                 {kbd('K')}
             </button>
 
+            {focusMode && (
             <button
                 type="button"
                 className="btn btn--quiet btn--icon"
@@ -148,6 +146,7 @@ export function TitleBar(): React.JSX.Element {
             >
                 <AgentIcon />
             </button>
+            )}
 
             <button
                 type="button"
@@ -357,7 +356,6 @@ function GearIcon(): React.JSX.Element {
 export function TabStrip(): React.JSX.Element {
     const tabs = useAppStore((state) => state.tabs)
     const activeTabId = useAppStore((state) => state.activeTabId)
-    const contents = useAppStore((state) => state.contents)
     const activateTab = useAppStore((state) => state.activateTab)
     const closeTab = useAppStore((state) => state.closeTab)
     const closeOtherTabs = useAppStore((state) => state.closeOtherTabs)
@@ -400,14 +398,6 @@ export function TabStrip(): React.JSX.Element {
     return (
         <div className="tabstrip">
             {tabs.map((tab) => {
-                const kind =
-                    tab.kind === 'flow'
-                        ? 'flow'
-                        : tab.kind === 'report'
-                          ? 'report'
-                          : tab.kind === 'schema'
-                            ? 'schema'
-                            : cachedOperationKind(contents[tab.id]?.query ?? '')
 
                 return (
                     <div
@@ -421,37 +411,32 @@ export function TabStrip(): React.JSX.Element {
 
                                 return
                             }
-                            if (event.button === 0) activateTab(tab.id)
                         }}
+                        onClick={() => activateTab(tab.id)}
                         onContextMenu={(event) => openMenu(event, tab.id)}
                         title={
                             tab.operationRef ??
                             (tab.kind === 'flow' ? t('Flow') : tab.kind === 'schema' ? t('Schema') : t('Draft'))
                         }
                     >
-                        <span className={`tab__kind tab__kind--${kind}`}>
-                            {kind === 'query'
-                                ? 'Q'
-                                : kind === 'mutation'
-                                  ? 'M'
-                                  : kind === 'subscription'
-                                    ? 'S'
-                                    : kind === 'flow'
-                                      ? 'F'
-                                      : kind === 'schema'
-                                        ? 'T'
-                                        : 'R'}
-                        </span>
-                        <span className="tab__label">{tab.title}</span>
+                        <TabKind id={tab.id} kind={tab.kind} />
+                        <button
+                            type="button"
+                            className="tab__label"
+                            aria-current={tab.id === activeTabId ? 'true' : undefined}
+                        >
+                            {tab.title}
+                        </button>
                         {tab.dirty ? (
                             <span className="tab__dot" title={t('Unsaved changes')} />
                         ) : null}
                         <button
                             type="button"
                             className="tab__close"
-                            onMouseDown={(event) => {
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
                                 event.stopPropagation()
-                                if (event.button === 0) void closeTab(tab.id)
+                                void closeTab(tab.id)
                             }}
                             title={t('Close tab ({keys})', { keys: kbd('W') })}
                             aria-label={t('Close')}
@@ -521,28 +506,20 @@ export function UpdateBanner(): React.JSX.Element | null {
     )
 }
 
-/**
- * Род операции по тексту с кэшем.
- *
- * Полоса вкладок перерисовывается на каждое нажатие клавиши, и разбирать
- * GraphQL всех открытых вкладок заново каждый раз незачем: текст меняется
- * только у одной.
- */
-const kindCache = new Map<string, ReturnType<typeof detectOperationKind>>()
-const KIND_CACHE_LIMIT = 300
+function TabKind(props: { id: string; kind: string | undefined }): React.JSX.Element {
+    const query = useAppStore((state) => state.contents[props.id]?.query ?? '')
+    const deferredQuery = useDeferredValue(query)
+    const kind = useMemo(() => {
+        if (props.kind === 'flow' || props.kind === 'schema' || props.kind === 'report') {
+            return props.kind
+        }
 
-function cachedOperationKind(query: string): ReturnType<typeof detectOperationKind> {
-    const cached = kindCache.get(query)
-    if (cached) return cached
+        return detectOperationKind(deferredQuery)
+    }, [props.kind, deferredQuery])
 
-    const kind = detectOperationKind(query)
-    if (kindCache.size >= KIND_CACHE_LIMIT) {
-        const oldest = kindCache.keys().next().value
-        if (oldest !== undefined) kindCache.delete(oldest)
-    }
-    kindCache.set(query, kind)
+    const letters = { query: 'Q', mutation: 'M', subscription: 'S', flow: 'F', schema: 'T', report: 'R' }
 
-    return kind
+    return <span className={`tab__kind tab__kind--${kind}`} aria-hidden="true">{letters[kind]}</span>
 }
 
 /** Крестик закрытия: SVG вместо символа «×», который в системном шрифте сидит ниже центра. */

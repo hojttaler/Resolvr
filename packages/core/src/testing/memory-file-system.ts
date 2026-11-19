@@ -71,7 +71,7 @@ export class MemoryFileSystem implements IFileSystem {
             names.set(slash < 0 ? rest : rest.slice(0, slash), true)
         }
 
-        return [...names].map(([name, isDirectory]) => ({ name, isDirectory }))
+        return [...names].map(([name, isDirectory]) => ({ name, isDirectory, isFile: !isDirectory }))
     }
 
     public async remove(path: string): Promise<void> {

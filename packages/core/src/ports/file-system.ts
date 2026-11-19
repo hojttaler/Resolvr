@@ -46,4 +46,5 @@ export interface IWriteOptions {
 export interface IDirEntry {
     name: string
     isDirectory: boolean
+    isFile: boolean
 }

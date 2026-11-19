@@ -1,5 +1,5 @@
 import { isTauri } from '@tauri-apps/api/core'
-import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager'
 
 import { logError } from '../platform/logger.js'
 
@@ -22,5 +22,16 @@ export async function copyText(text: string): Promise<boolean> {
         logError('Не удалось скопировать в буфер обмена', error)
 
         return false
+    }
+}
+
+/** Читает текст по явной команде вставки. */
+export async function readClipboardText(): Promise<string | undefined> {
+    try {
+        return isTauri() ? await readText() : await navigator.clipboard.readText()
+    } catch (error) {
+        logError('Не удалось прочитать буфер обмена', error)
+
+        return undefined
     }
 }

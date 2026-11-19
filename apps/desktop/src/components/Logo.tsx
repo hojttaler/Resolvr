@@ -1,32 +1,14 @@
-/**
- * Знак Resolvr: узлы, сходящиеся в одну точку — упрощённая версия иконки
- * приложения для шапки. Рисуется SVG с брендовым градиентом, чтобы не
- * зависеть от растровых размеров и одинаково выглядеть в обеих темах.
- */
+/** Контурный знак Resolvr для поверхностей обеих тем. */
 export function LogoMark({ size = 14 }: { size?: number }): React.JSX.Element {
     return (
         <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <defs>
-                <linearGradient id="resolvr-brand" x1="0" y1="0" x2="24" y2="24">
-                    <stop offset="0" stopColor="#6366f1" />
-                    <stop offset="1" stopColor="#2ee6c5" />
-                </linearGradient>
-            </defs>
-            <g stroke="url(#resolvr-brand)" strokeWidth="1.6" strokeLinecap="round">
-                <path d="M3 12h18" />
-                <path d="M9 12L4.5 6.5M9 12L4.5 17.5" />
-                <path d="M15 12L10.5 6.5M15 12L10.5 17.5" />
-            </g>
-            <g fill="url(#resolvr-brand)">
-                <circle cx="3" cy="12" r="1.6" />
-                <circle cx="9" cy="12" r="1.6" />
-                <circle cx="15" cy="12" r="1.6" />
-                <circle cx="21" cy="12" r="1.8" />
-                <circle cx="4.5" cy="6.5" r="1.4" />
-                <circle cx="4.5" cy="17.5" r="1.4" />
-                <circle cx="10.5" cy="6.5" r="1.4" />
-                <circle cx="10.5" cy="17.5" r="1.4" />
-            </g>
+            <path
+                d="M12 1.75 21.5 7v10L12 22.25 2.5 17V7L12 1.75Zm0 0-6.25 9.5L12 22.25l6.25-11L12 1.75ZM2.5 7l3.25 4.25L2.5 17l9.5 5.25 9.5-5.25-3.25-5.75L21.5 7m-15.75 4.25h12.5"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+            />
         </svg>
     )
 }

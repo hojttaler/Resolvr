@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { ISchemaChange } from '@resolvr/core'
 
 import { selectActiveEnvironment, useAppStore } from '../state/store.js'
@@ -19,31 +20,39 @@ export function Inspector(): React.JSX.Element {
 
     const activeEnvironment = useAppStore(selectActiveEnvironment)
     const t = useT()
+    const typeCount = useMemo(
+        () =>
+            schema
+                ? Object.keys(schema.getTypeMap()).filter((name) => !name.startsWith('__')).length
+                : 0,
+        [schema],
+    )
 
     return (
-        <div className="panel">
+        <div className="panel inspector">
             <div className="panel__header">
                 <span className="panel__title">{t('Inspector')}</span>
                 <span className="panel__spacer" />
-                <button type="button" className="btn btn--quiet" onClick={() => void refreshSchema()}>
+                <button
+                    type="button"
+                    className="btn btn--quiet"
+                    onClick={() => void refreshSchema()}
+                >
                     {t('Refresh schema')}
                 </button>
             </div>
 
-            <div className="panel__content" style={{ padding: 'var(--pad-md)' }}>
+            <div className="panel__content inspector__body">
                 <div className="inspector__section">
                     <div className="inspector__label">{t('Schema')}</div>
                     <div className="inspector__value">
-                        {schema
-                            ? tn(
-                                  Object.keys(schema.getTypeMap()).filter((name) => !name.startsWith('__')).length,
-                                  'type|types',
-                              )
-                            : t('not loaded')}
+                        {schema ? tn(typeCount, 'type|types') : t('not loaded')}
                     </div>
                     {schemaFetchedAt && (
                         <div className="inspector__hint">
-                            {t('updated {date}', { date: new Date(schemaFetchedAt).toLocaleString() })}
+                            {t('updated {date}', {
+                                date: new Date(schemaFetchedAt).toLocaleString(),
+                            })}
                         </div>
                     )}
                 </div>
@@ -80,9 +89,7 @@ export function Inspector(): React.JSX.Element {
 
                 <div className="inspector__section">
                     <div className="inspector__label">{t('Environment')}</div>
-                    <div className="inspector__value">
-                        {activeEnvironment?.name ?? '—'}
-                    </div>
+                    <div className="inspector__value">{activeEnvironment?.name ?? '—'}</div>
                     <div className="inspector__hint">
                         {t('Secrets never land in workspace files or history.')}
                     </div>

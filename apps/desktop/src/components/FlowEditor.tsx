@@ -7,12 +7,12 @@ import {
     type IFlowStepExpect,
     type IFlowStepResult,
 } from '@resolvr/core'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { isModKey, kbd } from '../lib/keys.js'
-import { useAppStore } from '../state/store.js'
+import { findOperation, parseVariables, useAppStore } from '../state/store.js'
 import { CodeEditor } from './editor/CodeEditor.js'
 import { JsonViewer } from './JsonViewer.js'
 import { KeyValueEditor } from './KeyValueEditor.js'
@@ -74,12 +74,18 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
 
     const [error, setError] = useState<string | undefined>()
     const [busy, setBusy] = useState(false)
+    const running = useRef(false)
+    const [stepId, setStepId] = useState<string>()
+    const [tagsText, setTagsText] = useState<string>()
+    const [jsonDrafts, setJsonDrafts] = useState<Record<string, { text: string; valid: boolean }>>(
+        {},
+    )
     const t = useT()
 
     // ⌘↩ запускает цепочку так же, как запрос в обычной вкладке.
     useEffect(() => {
         function onKeyDown(event: KeyboardEvent): void {
-            if (event.key === 'Enter' && isModKey(event)) {
+            if (!event.defaultPrevented && event.key === 'Enter' && isModKey(event)) {
                 event.preventDefault()
                 void saveAndRun()
             }
@@ -107,12 +113,13 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
     }
 
     function addStep(): void {
+        const id = `step-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
         setDraft((current) => ({
             ...current,
             steps: [
                 ...current.steps,
                 {
-                    id: `step-${current.steps.length + 1}-${Math.random().toString(36).slice(2, 6)}`,
+                    id,
                     name: t('Step {n}', { n: current.steps.length + 1 }),
                     variables: {},
                     extract: {},
@@ -122,6 +129,21 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                 },
             ],
         }))
+        setStepId(id)
+    }
+
+    function updateJson(
+        id: string,
+        text: string,
+        onValid: (value: Record<string, unknown>) => void,
+    ): void {
+        const value = parseVariables(text)
+        setJsonDrafts((current) => ({
+            ...current,
+            [id]: { text, valid: !(value instanceof Error) },
+        }))
+        setError(undefined)
+        if (!(value instanceof Error)) onValid(value)
     }
 
     function moveStep(index: number, direction: -1 | 1): void {
@@ -144,6 +166,19 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
             return false
         }
 
+        if (jsonDrafts['']?.valid === false) {
+            setError(t('Constants are not valid JSON'))
+
+            return false
+        }
+        const invalidStep = draft?.steps.find((step) => jsonDrafts[step.id]?.valid === false)
+        if (invalidStep) {
+            setStepId(invalidStep.id)
+            setError(t('Step “{name}”: variables are not valid JSON', { name: invalidStep.name }))
+
+            return false
+        }
+
         const problem = await saveFlowTab(props.tabId)
         setError(problem)
 
@@ -151,26 +186,42 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
     }
 
     async function saveAndRun(): Promise<void> {
-        if (!(await persist())) return
-
-        const saved = useAppStore.getState().flowDrafts[props.tabId]
-        if (!saved || saved.id.length === 0) return
-
+        if (running.current) return
+        running.current = true
         setBusy(true)
         try {
-            await runFlow(saved.id)
+            if (!(await persist())) return
+            const saved = useAppStore.getState().flowDrafts[props.tabId]
+            if (saved?.id) await runFlow(saved.id)
         } finally {
+            running.current = false
             setBusy(false)
         }
     }
 
     const run = flowRun?.flowId === draft.id ? flowRun : undefined
     const fileName = (draft.id.length > 0 ? draft.id : toSlug(draft.name)) || 'flow'
+    const selected = draft.steps.find((step) => step.id === stepId) ?? draft.steps[0]
+    const index = draft.steps.findIndex((step) => step.id === selected?.id)
+    const stepResult = run?.steps.find((item) => item.stepId === selected?.id)
 
     return (
         <div className="panel flow-page">
-            <div className="panel__header">
-                <span className="panel__title">{t('Flow')}</span>
+            <div className="panel__header flow-page__header">
+                <input
+                    className="input flow-page__title"
+                    value={draft.name}
+                    placeholder={t('Flow name')}
+                    aria-label={t('Flow name')}
+                    title={
+                        workspace
+                            ? `workspaces/${workspace.id}/flows/${fileName}.flow.json`
+                            : undefined
+                    }
+                    onChange={(event) =>
+                        setDraft((current) => ({ ...current, name: event.target.value }))
+                    }
+                />
                 {run && (
                     <span className={`badge ${run.ok ? 'badge--ok' : 'badge--fail'}`}>
                         {run.ok ? t('passed') : t('failed')} · {t('{n} ms', { n: run.durationMs })}
@@ -184,9 +235,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                     <button
                         type="button"
                         className="btn btn--quiet"
-                        onClick={() =>
-                            void copyText(linkTo({ flowId: draft.id }) ?? '')
-                        }
+                        onClick={() => void copyText(linkTo({ flowId: draft.id }) ?? '')}
                         title={t('Copy resolvr:// link to this flow')}
                     >
                         {t('Link')}
@@ -205,7 +254,12 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                     </button>
                 )}
 
-                <button type="button" className="btn" onClick={() => void persist()}>
+                <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => void persist()}
+                >
                     {t('Save')}
                 </button>
                 <button
@@ -215,128 +269,142 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                     onClick={() => void saveAndRun()}
                     title={t('Save and run ({keys})', { keys: kbd('Enter') })}
                 >
+                    {!busy && <span aria-hidden="true">▶</span>}
                     {busy ? t('Running…') : t('Run')}
                     {!busy && <kbd className="btn__key">{kbd('Enter')}</kbd>}
                 </button>
             </div>
 
-            <div className="panel__content flow-page__body">
-                <div className="flow-page__name">
-                    <input
-                        className="input flow-page__title"
-                        value={draft.name}
-                        placeholder={t('Flow name')}
-                        onChange={(event) =>
-                            setDraft((current) => ({ ...current, name: event.target.value }))
-                        }
-                    />
-                    {workspace && (
-                        <span className="inspector__hint mono">
-                            workspaces/{workspace.id}/flows/{fileName}.flow.json
-                        </span>
-                    )}
+            {error && (
+                <div className="flow__error" role="alert">
+                    {error}
                 </div>
-
-                <div className="flow__grid">
-                    <label className="field__label">
-                        {t('Tags')}
-                        <div className="inspector__hint">{t('feature, set, stateChanging')}</div>
-                    </label>
-                    <input
-                        className="input"
-                        value={draft.tags.join(', ')}
-                        placeholder="smoke, billing"
-                        onChange={(event) =>
-                            setDraft((current) => ({ ...current, tags: parseTags(event.target.value) }))
-                        }
-                    />
-
-                    <label className="field__label">
-                        {t('Preconditions')}
-                        <div className="inspector__hint">{t('what the data must contain')}</div>
-                    </label>
-                    <input
-                        className="input"
-                        value={draft.preconditions}
-                        placeholder={t('a client with an active contract')}
-                        onChange={(event) =>
-                            setDraft((current) => ({
-                                ...current,
-                                preconditions: event.target.value,
-                            }))
-                        }
-                    />
-                </div>
-
-                <ConstantsEditor
-                    key={props.tabId}
-                    value={draft.variables}
-                    onChange={(variables) =>
-                        setDraft((current) => ({ ...current, variables }))
-                    }
-                    onError={setError}
-                />
-
-                <div className="flow__steps">
-                    {/* Пустой редактор ничего не объяснял: кнопка «+ Шаг»
-                        не говорит, зачем цепочке шаги и что они дают. */}
-                    {draft.steps.length === 0 && (
-                        <div className="inspector__hint">
-                            {t(
-                                'Steps run in order. A value from a step response — for example, a token from login — is extracted by path and substituted into the next steps as {{name}}. Such a flow can be assigned in the environment “Authorization”: the token will then refresh itself.',
-                            )}
-                        </div>
-                    )}
-
-                    {draft.steps.map((step, index) => (
-                        <StepEditor
-                            key={step.id}
-                            step={step}
-                            index={index}
-                            total={draft.steps.length}
-                            result={run?.steps.find((item) => item.stepId === step.id)}
-                            collections={tree}
-                            onPatch={(patch) => patchStep(index, patch)}
-                            onMove={(direction) => moveStep(index, direction)}
-                            onRemove={() =>
+            )}
+            <div className="flow-page__body">
+                <div className="flow-page__steps">
+                    <div className="flow__grid flow__metadata">
+                        <label className="field__label" htmlFor="flow-tags">
+                            {t('Tags')}
+                        </label>
+                        <input
+                            id="flow-tags"
+                            className="input"
+                            value={tagsText ?? draft.tags.join(', ')}
+                            placeholder="smoke, billing"
+                            onBlur={() => setTagsText(undefined)}
+                            onChange={(event) => {
+                                const text = event.target.value
+                                setTagsText(text)
+                                setDraft((current) => ({ ...current, tags: parseTags(text) }))
+                            }}
+                        />
+                        <label className="field__label" htmlFor="flow-preconditions">
+                            {t('Preconditions')}
+                        </label>
+                        <input
+                            id="flow-preconditions"
+                            className="input"
+                            value={draft.preconditions}
+                            placeholder={t('a client with an active contract')}
+                            onChange={(event) =>
                                 setDraft((current) => ({
                                     ...current,
-                                    steps: current.steps.filter(
-                                        (_, position) => position !== index,
-                                    ),
+                                    preconditions: event.target.value,
                                 }))
                             }
-                            onError={setError}
                         />
-                    ))}
-                </div>
+                    </div>
 
-                <button type="button" className="btn" onClick={addStep}>
-                    {t('+ Step')}
-                </button>
+                    <ConstantsEditor
+                        value={jsonDrafts['']?.text ?? JSON.stringify(draft.variables, null, 2)}
+                        invalid={jsonDrafts['']?.valid === false}
+                        onChange={(text) =>
+                            updateJson('', text, (variables) =>
+                                setDraft((current) => ({ ...current, variables })),
+                            )
+                        }
+                    />
 
-                {run && Object.keys(run.context).length > 0 && (
-                    <div className="flow__summary">
-                        <div className="settings__caption">{t('Flow result')}</div>
-                        <div className="inspector__hint">
-                            {t('Values extracted by steps — they were substituted further as {{name}}')}
+                    <h2 className="flow-page__heading">{t('Steps')}</h2>
+                    <ol className="flow-page__step-list">
+                        {draft.steps.map((step, position) => (
+                            <li key={step.id}>
+                                <span className="flow-page__step-index" aria-hidden="true">
+                                    {position + 1}
+                                </span>
+                                <button
+                                    type="button"
+                                    className="flow-page__step"
+                                    aria-pressed={step.id === selected?.id}
+                                    onClick={() => setStepId(step.id)}
+                                >
+                                    <strong>
+                                        {step.name || t('Step {n}', { n: position + 1 })}
+                                    </strong>
+                                    <span className="inspector__hint">
+                                        {step.operationRef ?? t('Custom query')}
+                                    </span>
+                                </button>
+                            </li>
+                        ))}
+                    </ol>
+
+                    <button type="button" className="btn btn--quiet" onClick={addStep}>
+                        {t('+ Add step')}
+                    </button>
+
+                    {run && Object.keys(run.context).length > 0 && (
+                        <div className="flow__summary">
+                            <div className="settings__caption">{t('Flow result')}</div>
+                            <div className="inspector__hint">
+                                {t(
+                                    'Values extracted by steps — they were substituted further as {{name}}',
+                                )}
+                            </div>
+                            <JsonViewer value={run.context} defaultExpandDepth={3} />
+                            <button
+                                type="button"
+                                className="btn btn--quiet"
+                                onClick={() => void copyText(JSON.stringify(run.context, null, 2))}
+                            >
+                                {t('Copy result')}
+                            </button>
                         </div>
-                        <JsonViewer value={run.context} defaultExpandDepth={3} />
-                        <button
-                            type="button"
-                            className="btn btn--quiet"
-                            onClick={() =>
-                                void copyText(
-                                    JSON.stringify(run.context, null, 2),
+                    )}
+                </div>
+                <div className="flow-page__detail">
+                    {selected ? (
+                        <StepEditor
+                            key={selected.id}
+                            step={selected}
+                            index={index}
+                            total={draft.steps.length}
+                            result={stepResult}
+                            collections={tree}
+                            variablesText={
+                                jsonDrafts[selected.id]?.text ??
+                                JSON.stringify(selected.variables, null, 2)
+                            }
+                            invalidVariables={jsonDrafts[selected.id]?.valid === false}
+                            onVariablesChange={(text) =>
+                                updateJson(selected.id, text, (variables) =>
+                                    patchStep(index, { variables }),
                                 )
                             }
-                        >
-                            {t('Copy result')}
-                        </button>
-                    </div>
-                )}
-
-                {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
+                            onPatch={(patch) => patchStep(index, patch)}
+                            onMove={(direction) => moveStep(index, direction)}
+                            onRemove={() => {
+                                setStepId(draft.steps[index + 1]?.id ?? draft.steps[index - 1]?.id)
+                                setDraft((current) => ({
+                                    ...current,
+                                    steps: current.steps.filter((step) => step.id !== selected.id),
+                                }))
+                            }}
+                        />
+                    ) : (
+                        <p className="empty">{t('Add at least one step')}</p>
+                    )}
+                </div>
             </div>
         </div>
     )
@@ -344,65 +412,39 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
 
 /** Метки из строки через запятую: пустые отбрасываются, повторы убираются. */
 function parseTags(value: string): string[] {
-    return [...new Set(value.split(',').map((tag) => tag.trim()).filter((tag) => tag.length > 0))]
+    return [
+        ...new Set(
+            value
+                .split(',')
+                .map((tag) => tag.trim())
+                .filter((tag) => tag.length > 0),
+        ),
+    ]
 }
 
 interface IConstantsEditorProps {
-    value: Record<string, unknown>
-    onChange: (value: Record<string, unknown>) => void
-    onError: (message: string | undefined) => void
+    value: string
+    invalid: boolean
+    onChange: (value: string) => void
 }
 
-/**
- * Константы цепочки — начальный контекст прогона.
- *
- * Значения раскрываются один раз при запуске, поэтому `{{$uuid}}` в константе
- * даёт один идентификатор на всю цепочку, а не свой на каждый шаг. Запуск
- * (в том числе из MCP) может передать свои значения — они важнее констант,
- * и один и тот же сценарий так проверяется на разных данных.
- */
+/** Начальный контекст прогона, доступный всем шагам. */
 function ConstantsEditor(props: IConstantsEditorProps): React.JSX.Element {
     const t = useT()
-    const schema = useAppStore((state) => state.schema)
-    const [text, setText] = useState(() => JSON.stringify(props.value, null, 2))
-    const [open, setOpen] = useState(() => Object.keys(props.value).length > 0)
-
-    if (!open) {
-        return (
-            <button type="button" className="btn btn--quiet" onClick={() => setOpen(true)}>
-                {t('+ Constants')}
-            </button>
-        )
-    }
 
     return (
-        <div className="flow__constants">
-            <label className="field__label">
-                {t('Constants')}
-                <div className="inspector__hint">
-                    {t('the starting context of the run — available to steps as {{name}}')}
-                </div>
-            </label>
-            <div className="flow__editor">
-                <CodeEditor
-                    value={text}
-                    language="json"
-                    schema={schema}
-                    onChange={(value) => {
-                        setText(value)
-
-                        try {
-                            props.onChange(JSON.parse(value || '{}') as Record<string, unknown>)
-                            props.onError(undefined)
-                        } catch {
-                            // Незавершённый JSON во время набора — не ошибка
-                            // сохранения: текст остаётся, сообщение мягкое.
-                            props.onError(t('Constants are not valid JSON'))
-                        }
-                    }}
-                />
+        <details className="flow__constants">
+            <summary>{t('Constants')}</summary>
+            <div className="inspector__hint">
+                {t('the starting context of the run — available to steps as {{name}}')}
             </div>
-        </div>
+            <div className="flow__editor">
+                <CodeEditor value={props.value} language="json" onChange={props.onChange} />
+            </div>
+            {props.invalid && (
+                <div className="flow__error">{t('Constants are not valid JSON')}</div>
+            )}
+        </details>
     )
 }
 
@@ -411,14 +453,13 @@ interface IStepEditorProps {
     index: number
     total: number
     result: IFlowStepResult | undefined
-    collections: Array<{
-        collection: { id: string; name: string }
-        operations: Array<{ name: string }>
-    }>
+    collections: Parameters<typeof findOperation>[0]
+    variablesText: string
+    invalidVariables: boolean
+    onVariablesChange: (text: string) => void
     onPatch: (patch: Partial<IFlowStep>) => void
     onMove: (direction: -1 | 1) => void
     onRemove: () => void
-    onError: (message: string | undefined) => void
 }
 
 function StepEditor(props: IStepEditorProps): React.JSX.Element {
@@ -427,38 +468,20 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
     const schema = useAppStore((state) => state.schema)
     const [showResponse, setShowResponse] = useState(true)
 
-    // Текст переменных живёт отдельно от разобранного объекта: иначе каждый
-    // незавершённый символ ломал бы разбор и стирал набранное.
-    const [variablesText, setVariablesText] = useState(() =>
-        JSON.stringify(step.variables, null, 2),
+    const stepQuery = step.query ?? findOperation(props.collections, step.operationRef)?.query ?? ''
+    const payload = useMemo(
+        () =>
+            result?.result
+                ? {
+                      status: result.result.status,
+                      ok: result.result.ok,
+                      data: result.result.data,
+                      errors: result.result.errors ?? null,
+                  }
+                : undefined,
+        [result],
     )
-
-    // Для подсказок по переменным нужен текст операции: у шага со ссылкой он
-    // берётся из сохранённой операции, иначе — из встроенного запроса.
-    const operations = useAppStore((state) => state.tree)
-    const stepQuery =
-        step.query ??
-        (step.operationRef
-            ? operations
-                  .flatMap((node) =>
-                      node.operations.map((operation) => ({
-                          ref: `${node.collection.id}/${operation.name}`,
-                          query: operation.query,
-                      })),
-                  )
-                  .find((item) => item.ref === step.operationRef)?.query
-            : undefined) ??
-        ''
-
-    /** Ответ шага в том же виде, в каком к нему обращаются пути извлечения. */
-    const payload = result?.result
-        ? {
-              status: result.result.status,
-              ok: result.result.ok,
-              data: result.result.data,
-              errors: result.result.errors ?? null,
-          }
-        : undefined
+    const suggestions = useMemo(() => (payload ? collectPaths(payload) : undefined), [payload])
 
     function addExtract(path: string): void {
         const name = suggestName(path)
@@ -474,7 +497,8 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
             <div className="flow__step-head">
                 <span className="flow__step-number">{props.index + 1}</span>
                 <input
-                    className="input"
+                    className="input flow-page__step-title"
+                    aria-label={t('Step name')}
                     value={step.name}
                     onChange={(event) => props.onPatch({ name: event.target.value })}
                 />
@@ -554,7 +578,13 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                                 value={step.query ?? ''}
                                 language="graphql"
                                 schema={schema}
+                                variablesSource={props.variablesText}
                                 onChange={(value) => props.onPatch({ query: value })}
+                                onVariablesAdded={(added) => {
+                                    const previous = parseVariables(props.variablesText)
+                                    if (previous instanceof Error) return
+                                    props.onVariablesChange(JSON.stringify({ ...previous, ...added }, null, 2))
+                                }}
                             />
                         </div>
                     </>
@@ -563,26 +593,19 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                 <label className="field__label">{t('Variables')}</label>
                 <div className="flow__editor">
                     <CodeEditor
-                        value={variablesText}
+                        value={props.variablesText}
                         language="json"
                         schema={schema}
                         completionQuery={stepQuery}
-                        onChange={(value) => {
-                            setVariablesText(value)
-
-                            try {
-                                props.onPatch({
-                                    variables: JSON.parse(value || '{}') as Record<string, unknown>,
-                                })
-                                props.onError(undefined)
-                            } catch {
-                                // Незавершённый JSON — обычное состояние во время
-                                // набора: текст сохраняем, ошибку показываем мягко.
-                                props.onError(t('Step “{name}”: variables are not valid JSON', { name: step.name }))
-                            }
-                        }}
+                        onChange={props.onVariablesChange}
                     />
                 </div>
+
+                {props.invalidVariables && (
+                    <div className="flow__error">
+                        {t('Step “{name}”: variables are not valid JSON', { name: step.name })}
+                    </div>
+                )}
 
                 <label className="field__label">
                     {t('Extract')}
@@ -595,7 +618,7 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     valuePlaceholder="data.login.accessToken"
                     separator="←"
                     addLabel={t('+ Extraction')}
-                    valueSuggestions={payload ? collectPaths(payload) : undefined}
+                    valueSuggestions={suggestions}
                 />
 
                 <label className="field__label">{t('Expected result')}</label>
@@ -614,7 +637,10 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                         ))}
                     </select>
                     <span className="inspector__hint">
-                        {t(EXPECT_OPTIONS.find((option) => option.value === step.expect)?.hint ?? '')}
+                        {t(
+                            EXPECT_OPTIONS.find((option) => option.value === step.expect)?.hint ??
+                                '',
+                        )}
                     </span>
                 </div>
 
@@ -622,7 +648,7 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                 <AssertEditor
                     asserts={step.assert}
                     results={result?.asserts}
-                    suggestions={payload ? collectPaths(payload) : undefined}
+                    suggestions={suggestions}
                     onChange={(next) => props.onPatch({ assert: next })}
                 />
             </div>
@@ -642,7 +668,9 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     {showResponse && (
                         <>
                             <div className="inspector__hint">
-                                {t('The ↧ button next to a field adds its path to “Extract”, Alt-click — to “Checks”')}
+                                {t(
+                                    'The ↧ button next to a field adds its path to “Extract”, Alt-click — to “Checks”',
+                                )}
                             </div>
                             <div className="flow__response-body">
                                 <JsonViewer
@@ -679,7 +707,7 @@ function AssertEditor(props: IAssertEditorProps): React.JSX.Element {
         )
     }
 
-    const listId = 'assert-paths'
+    const listId = useId()
 
     return (
         <div className="flow__rows">
@@ -700,9 +728,9 @@ function AssertEditor(props: IAssertEditorProps): React.JSX.Element {
                         <div className="row">
                             <input
                                 className="input mono"
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
+                                autoCorrect="off"
+                                autoCapitalize="off"
+                                spellCheck={false}
                                 placeholder="data.me.id"
                                 list={props.suggestions ? listId : undefined}
                                 value={assertion.path}
@@ -725,9 +753,9 @@ function AssertEditor(props: IAssertEditorProps): React.JSX.Element {
                             {operator?.needsValue && (
                                 <input
                                     className="input mono"
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck={false}
                                     placeholder={t('"u1" or 200')}
                                     defaultValue={
                                         assertion.value === undefined
@@ -790,22 +818,25 @@ const MAX_SUGGESTIONS = 200
 
 /** Все пути внутри ответа — подсказки для полей извлечения и проверок. */
 export function collectPaths(value: unknown, prefix = '', depth = 6): string[] {
-    if (depth <= 0 || value === null || typeof value !== 'object') return []
-
     const result: string[] = []
-    const entries: Array<[string, unknown]> = Array.isArray(value)
-        ? value.map((item, index) => [String(index), item])
-        : Object.entries(value as Record<string, unknown>)
 
-    for (const [key, item] of entries) {
-        const path = prefix.length > 0 ? `${prefix}.${key}` : key
-        result.push(path)
+    function visit(node: unknown, parent: string, remaining: number): void {
+        if (node === null || typeof node !== 'object' || remaining <= 0) return
+        const object = node as Record<string, unknown>
 
-        if (result.length >= MAX_SUGGESTIONS) break
-        result.push(...collectPaths(item, path, depth - 1))
+        // Прерываем обход на общем лимите, в том числе внутри больших массивов.
+        for (const key in object) {
+            if (result.length >= MAX_SUGGESTIONS) break
+            if (!Object.hasOwn(object, key)) continue
+            const path = parent ? `${parent}.${key}` : key
+            result.push(path)
+            visit(object[key], path, remaining - 1)
+        }
     }
 
-    return result.slice(0, MAX_SUGGESTIONS)
+    visit(value, prefix, depth)
+
+    return result
 }
 
 /** Имя переменной по пути: последний осмысленный сегмент. */

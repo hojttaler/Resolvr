@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { TextFieldContextMenu } from './components/TextFieldContextMenu.js'
 import { AgentActivity } from './components/AgentActivity.js'
+import { LogoMark } from './components/Logo.js'
 import { ImportDialog } from './components/ImportDialog.js'
 import { CommandPalette } from './components/CommandPalette.js'
 import {
@@ -10,12 +12,12 @@ import {
 } from './components/Dialogs.js'
 import { SettingsDialog } from './components/SettingsDialog.js'
 import { WorkspaceSettings } from './components/WorkspaceSettings.js'
-import { TabStrip, TitleBar, UpdateBanner } from './components/TitleBar.js'
+import { TitleBar, UpdateBanner } from './components/TitleBar.js'
 import { WorkspaceLayout } from './components/WorkspaceLayout.js'
 import { useAppEvents, useShowWindowWhenReady } from './hooks/use-app-events.js'
 import { useDeepLinks } from './hooks/use-deep-links.js'
 import { tn, useT } from './i18n/index.js'
-import { isModKey, kbd } from './lib/keys.js'
+import { isModKey } from './lib/keys.js'
 import { selectAllInFocus } from './lib/select-all.js'
 import { useAppStore } from './state/store.js'
 
@@ -23,7 +25,6 @@ export function App(): React.JSX.Element {
     const ready = useAppStore((state) => state.ready)
     const initError = useAppStore((state) => state.initError)
     const workspaces = useAppStore((state) => state.workspaces)
-    const tabs = useAppStore((state) => state.tabs)
     const initialize = useAppStore((state) => state.initialize)
     const dialog = useAppStore((state) => state.dialog)
     const setDialog = useAppStore((state) => state.setDialog)
@@ -162,25 +163,15 @@ export function App(): React.JSX.Element {
     return (
         <div className="app">
             <TitleBar />
+            <TextFieldContextMenu />
             <UpdateBanner />
 
             {workspaces.length === 0 ? (
                 <Onboarding onCreate={() => setDialog('workspace')} />
             ) : (
                 <>
-                    <TabStrip />
                     <div className="app__body">
-                        {tabs.length === 0 ? (
-                            <div className="empty">
-                                {t('No open tabs.')}
-                                <br />
-                                {t('Press {keys} or pick an operation in the collections.', {
-                                    keys: kbd('T'),
-                                })}
-                            </div>
-                        ) : (
-                            <WorkspaceLayout />
-                        )}
+                        <WorkspaceLayout />
                     </div>
                     <StatusBar />
                 </>
@@ -204,15 +195,17 @@ function Onboarding({ onCreate }: { onCreate: () => void }): React.JSX.Element {
     const openDemoWorkspace = useAppStore((state) => state.openDemoWorkspace)
     const setDialog = useAppStore((state) => state.setDialog)
     const [busy, setBusy] = useState(false)
+    const [error, setError] = useState<string>()
     const t = useT()
 
     return (
-        <div className="app__body" style={{ alignItems: 'center', justifyContent: 'center' }}>
-            <div className="empty onboarding">
-                <div className="onboarding__title">{t('Welcome to Resolvr')}</div>
-                {t(
+        <div className="app__body onboarding-surface">
+            <main className="onboarding">
+                <div className="onboarding__mark"><LogoMark size={32} /></div>
+                <h1 className="onboarding__title">{t('Welcome to Resolvr')}</h1>
+                <p>{t(
                     'Create a workspace: a name and the GraphQL endpoint URL. The schema is fetched by introspection.',
-                )}
+                )}</p>
                 <div className="row onboarding__actions">
                     <button type="button" className="btn btn--primary" onClick={onCreate}>
                         {t('Create workspace')}
@@ -223,7 +216,10 @@ function Onboarding({ onCreate }: { onCreate: () => void }): React.JSX.Element {
                         disabled={busy}
                         onClick={() => {
                             setBusy(true)
-                            void openDemoWorkspace().finally(() => setBusy(false))
+                            setError(undefined)
+                            void openDemoWorkspace()
+                                .catch((problem) => setError(problem instanceof Error ? problem.message : String(problem)))
+                                .finally(() => setBusy(false))
                         }}
                         title={t('A public countries API: a collection, an environment variable and a smoke flow')}
                     >
@@ -233,7 +229,8 @@ function Onboarding({ onCreate }: { onCreate: () => void }): React.JSX.Element {
                         {t('Import from Postman or Insomnia…')}
                     </button>
                 </div>
-            </div>
+                {error && <p className="form-error" role="alert">{error}</p>}
+            </main>
         </div>
     )
 }

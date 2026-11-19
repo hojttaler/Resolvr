@@ -1,73 +1,79 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEffect } from 'react'
 
 import { getAppContext } from '../platform/context.js'
+import { logError } from '../platform/logger.js'
 import { useAppStore } from '../state/store.js'
 
-/** Идентификаторы пунктов меню, приходящие из Rust. */
-type IMenuAction = string
-
-/**
- * Подписки на события окружения: меню, закрытие окна и изменения файлов.
- *
- * Логика команд живёт здесь, а не в Rust: только интерфейс знает, какая вкладка
- * активна и что в ней открыто.
- */
-export function useAppEvents(onMenuAction: (action: IMenuAction) => void): void {
+/** Подписки на нативное меню, закрытие окна и изменения файлов библиотеки. */
+export function useAppEvents(onMenuAction: (action: string) => void): void {
     useEffect(() => {
+        if (!isTauri()) return
+
         const window = getCurrentWindow()
         const unlisteners: Array<() => void> = []
+        let disposed = false
 
-        void window.listen<string>('menu-action', (event) => onMenuAction(event.payload))
-            .then((unlisten) => unlisteners.push(unlisten))
+        function register(listener: Promise<() => void>): void {
+            void listener
+                .then((unlisten) => {
+                    if (disposed) unlisten()
+                    else unlisteners.push(unlisten)
+                })
+                .catch((error) => logError('Ошибка подписки на событие приложения', error))
+        }
 
-        // Перед закрытием окна дожидаемся записи всех отложенных черновиков:
-        // это последняя точка, где несохранённый текст ещё можно сохранить.
-        void window
-            .listen('before-quit', () => {
+        register(window.listen<string>('menu-action', (event) => onMenuAction(event.payload)))
+        register(
+            window.listen('before-quit', () => {
                 void useAppStore
                     .getState()
                     .flushAll()
+                    .catch((error) => logError('Не удалось сохранить сессию', error))
                     .finally(() => {
                         void window.destroy()
                     })
-            })
-            .then((unlisten) => unlisteners.push(unlisten))
+            }),
+        )
+        register(
+            window.listen<{ paths: string[] }>('library-changed', (event) => {
+                const store = useAppStore.getState()
+                const paths = event.payload.paths.map((path) => path.replaceAll('\\', '/').split('/'))
 
-        // Изменения на диске, сделанные агентом через MCP, подхватываются
-        // в открытом приложении без перезапуска.
-        void window
-            .listen<{ paths: string[] }>('library-changed', (event) => {
-                const paths = event.payload.paths
-
-                // Журнал агента и дерево коллекций обновляются раздельно: правка
-                // одной коллекции не должна перечитывать весь журнал, и наоборот.
-                if (paths.some((path) => path.startsWith('.activity'))) {
-                    void useAppStore.getState().loadActivity()
+                if (store.dialog === 'activity' && paths.some(([root]) => root === '.activity')) {
+                    void store.loadActivity().catch((error) => logError('Не удалось обновить журнал', error))
                 }
 
-                if (paths.some((path) => !path.startsWith('.activity'))) {
-                    void useAppStore.getState().reloadTree()
+                const workspaceId = store.workspace?.id
+                if (
+                    workspaceId &&
+                    paths.some(([root, workspace, area]) =>
+                        root === 'workspaces' &&
+                        workspace === workspaceId &&
+                        (area === 'collections' || area === 'flows' || area === undefined),
+                    )
+                ) {
+                    void store.reloadTree().catch((error) => logError('Не удалось обновить коллекции', error))
                 }
-            })
-            .then((unlisten) => unlisteners.push(unlisten))
-
-        void getAppContext().then((context) =>
-            invoke('watch_library', { root: context.paths.root }).catch(() => {
-                // Наблюдение необязательно: без него UI просто не обновляется
-                // автоматически, всё остальное продолжает работать.
             }),
         )
 
+        void getAppContext()
+            .then(async (context) => {
+                if (!disposed) await invoke('watch_library', { root: context.paths.root })
+            })
+            .catch((error) => logError('Не удалось включить наблюдение за библиотекой', error))
+
         return () => {
+            disposed = true
             for (const unlisten of unlisteners) unlisten()
             void invoke('unwatch_library').catch(() => undefined)
         }
     }, [onMenuAction])
 }
 
-/** Показывает окно после того, как интерфейс отрисовал сохранённый лейаут. */
+/** Показывает окно после отрисовки сохранённой раскладки. */
 export function useShowWindowWhenReady(ready: boolean): void {
     useEffect(() => {
         if (!ready) return

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Group, Panel, Separator, type GroupImperativeHandle } from 'react-resizable-panels'
 
 import { toErrorMessage, type IEnvironmentCapture } from '@resolvr/core'
@@ -13,15 +13,15 @@ import {
     selectActiveEnvironment,
     useAppStore,
 } from '../state/store.js'
-import { CodeEditor } from './editor/CodeEditor.js'
+import { CodeEditor, type ICodeEditorHandle } from './editor/CodeEditor.js'
 import { findUnknownPlaceholders, type IEnvVariablesContext } from './editor/env-completion.js'
 import { buildVariablesSkeleton } from './editor/variables-completion.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { KeyValueEditor } from './KeyValueEditor.js'
 
 /* Высота строки редактора и шапки панели — для подгонки под содержимое. */
-const LINE_HEIGHT = 19
-const HEADER_HEIGHT = 48
+const LINE_HEIGHT = 20
+const HEADER_HEIGHT = 44
 const MIN_FIT_HEIGHT = 200
 const MIN_QUERY_SHARE = 28
 const MAX_QUERY_SHARE = 78
@@ -34,6 +34,9 @@ export function RequestPane(): React.JSX.Element {
         state.activeTabId ? state.contents[state.activeTabId] : undefined,
     )
     const schema = useAppStore((state) => state.schema)
+    const schemaCompletion = useAppStore((state) =>
+        state.schemaCompletion?.tabId === state.activeTabId ? state.schemaCompletion : undefined,
+    )
     const runs = useAppStore((state) => state.runs)
     const updateQuery = useAppStore((state) => state.updateQuery)
     const updateVariables = useAppStore((state) => state.updateVariables)
@@ -51,6 +54,7 @@ export function RequestPane(): React.JSX.Element {
     const activeTabAsCurl = useAppStore((state) => state.activeTabAsCurl)
     const linkTo = useAppStore((state) => state.linkTo)
     const [menu, setMenu] = useState<IContextMenuState | undefined>()
+    const queryEditor = useRef<ICodeEditorHandle>(null)
     const environment = useAppStore(selectActiveEnvironment)
     const t = useT()
 
@@ -107,14 +111,6 @@ export function RequestPane(): React.JSX.Element {
         groupHandle.current?.setLayout({ query: percent, params: 100 - percent })
     }, [query])
 
-    // Вручную выставленный размер важнее подгонки: пользователь настроил его
-    // осознанно, и переопределять этот выбор при каждом переключении нельзя.
-    useEffect(() => {
-        // Зависимость намеренно одна: подгонка нужна при смене вкладки, а не
-        // на каждый набранный символ запроса.
-        if (!savedLayout) fitToContent()
-    }, [activeTabId])
-
     if (!activeTabId || !tab || !content) {
         return <div className="empty">{t('Open a tab — {keys}', { keys: kbd('T') })}</div>
     }
@@ -128,16 +124,26 @@ export function RequestPane(): React.JSX.Element {
             className="layout-group"
             elementRef={groupElement}
             groupRef={groupHandle}
-            defaultLayout={savedLayout ?? { query: 65, params: 35 }}
+            defaultLayout={savedLayout ?? { query: 67, params: 33 }}
             onLayoutChanged={(layout, meta) => {
                 if (meta.isUserInteraction) setLayoutSizes('request-pane', layout)
             }}
         >
             <Panel id="query" minSize="25">
-                <div className="panel">
+                <div className="panel request-query">
                     <div className="panel__header">
                         <span className="panel__title">{t('Query')}</span>
                         <span className="panel__spacer" />
+
+                        <button
+                            type="button"
+                            className="btn btn--quiet"
+                            disabled={!schema}
+                            title={schema ? undefined : t('Schema not loaded')}
+                            onClick={() => queryEditor.current?.selectFields()}
+                        >
+                            {t('Select fields…')}
+                        </button>
 
                         <button
                             type="button"
@@ -273,9 +279,12 @@ export function RequestPane(): React.JSX.Element {
                     <div className="panel__content">
                         <CodeEditor
                             key={`${activeTabId}-query`}
+                            ref={queryEditor}
                             value={content.query}
+                            variablesSource={content.variables}
                             language="graphql"
                             schema={schema}
+                            schemaCompletion={schemaCompletion}
                             onChange={(value) => updateQuery(activeTabId, value)}
                             onRun={() => void runActiveTab()}
                             onVariablesAdded={(added) => {
@@ -283,10 +292,8 @@ export function RequestPane(): React.JSX.Element {
                                 // сразу получают значения-заготовки: иначе запрос
                                 // отправился бы с отсутствующими обязательными полями.
                                 const parsed = parseVariables(content.variables)
-                                const merged = {
-                                    ...(parsed instanceof Error ? {} : parsed),
-                                    ...added,
-                                }
+                                if (parsed instanceof Error) return
+                                const merged = { ...parsed, ...added }
 
                                 updateVariables(
                                     activeTabId,
@@ -306,7 +313,7 @@ export function RequestPane(): React.JSX.Element {
             />
 
             <Panel id="params" minSize="12">
-                <div className="panel">
+                <div className="panel request-params">
                     <div className="panel__header">
                         <div className="segmented">
                             <button

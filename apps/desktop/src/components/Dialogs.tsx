@@ -1,5 +1,6 @@
 import { toSlug } from '@resolvr/core'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { DialogSurface } from './DialogSurface.js'
 
 import { getAppContext } from '../platform/context.js'
 import { useAppStore } from '../state/store.js'
@@ -140,9 +141,9 @@ export function CreateWorkspaceDialog(props: IDialogProps): React.JSX.Element {
                 <label className="field__label">{t('GraphQL endpoint')}</label>
                 <input
                     className="input mono"
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     value={url}
                     onChange={(event) => setUrl(event.target.value)}
                 />
@@ -167,63 +168,50 @@ export function ConfirmDialog(): React.JSX.Element | null {
     const confirm = useAppStore((state) => state.confirm)
     const dismiss = useAppStore((state) => state.dismissConfirm)
 
-    useEffect(() => {
-        if (!confirm) return
-
-        function onKeyDown(event: KeyboardEvent): void {
-            if (event.key === 'Escape') dismiss()
-        }
-
-        window.addEventListener('keydown', onKeyDown)
-
-        return () => window.removeEventListener('keydown', onKeyDown)
-    }, [confirm, dismiss])
-
     if (!confirm) return null
 
     return (
-        <div className="overlay" onMouseDown={dismiss}>
-            <div
-                className={`dialog${confirm.danger ? ' dialog--danger' : ''}`}
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                <div className="dialog__body">
-                    <div className="dialog__title">
-                        {confirm.production && <span className="badge badge--prod">PROD</span>}{' '}
-                        {confirm.title}
-                    </div>
-                    <p className="dialog__text">{confirm.description}</p>
+        <DialogSurface
+            label={confirm.title}
+            onClose={dismiss}
+            className={confirm.danger ? 'dialog--danger' : undefined}
+        >
+            <div className="dialog__body">
+                <div className="dialog__title">
+                    {confirm.production && <span className="badge badge--prod">PROD</span>}{' '}
+                    {confirm.title}
                 </div>
+                <p className="dialog__text">{confirm.description}</p>
+            </div>
 
-                <div className="dialog__footer">
-                    <button type="button" className="btn" onClick={dismiss} autoFocus>
-                        {t('Cancel')}
-                    </button>
-                    {confirm.secondaryLabel && (
-                        <button
-                            type="button"
-                            className="btn"
-                            onClick={() => {
-                                dismiss()
-                                void confirm.secondaryRun?.()
-                            }}
-                        >
-                            {confirm.secondaryLabel}
-                        </button>
-                    )}
+            <div className="dialog__footer">
+                <button type="button" className="btn" onClick={dismiss} autoFocus>
+                    {t('Cancel')}
+                </button>
+                {confirm.secondaryLabel && (
                     <button
                         type="button"
-                        className={`btn ${confirm.danger ? 'btn--danger' : 'btn--primary'}`}
+                        className="btn"
                         onClick={() => {
                             dismiss()
-                            void confirm.run()
+                            void confirm.secondaryRun?.()
                         }}
                     >
-                        {confirm.actionLabel}
+                        {confirm.secondaryLabel}
                     </button>
-                </div>
+                )}
+                <button
+                    type="button"
+                    className={`btn ${confirm.danger ? 'btn--danger' : 'btn--primary'}`}
+                    onClick={() => {
+                        dismiss()
+                        void confirm.run()
+                    }}
+                >
+                    {confirm.actionLabel}
+                </button>
             </div>
-        </div>
+        </DialogSurface>
     )
 }
 
@@ -236,38 +224,33 @@ interface IModalProps {
 
 function Modal(props: IModalProps): React.JSX.Element {
     const t = useT()
-    useEffect(() => {
-        function onKeyDown(event: KeyboardEvent): void {
-            if (event.key === 'Escape') props.onClose()
-            if (event.key === 'Enter' && isModKey(event)) void props.onSubmit()
-        }
-
-        window.addEventListener('keydown', onKeyDown)
-
-        return () => window.removeEventListener('keydown', onKeyDown)
-    }, [props])
-
     return (
-        <div className="overlay" onMouseDown={props.onClose}>
-            <div className="dialog" onMouseDown={(event) => event.stopPropagation()}>
-                <div className="dialog__body">
-                    <div className="dialog__title">{props.title}</div>
-                    {props.children}
-                </div>
-
-                <div className="dialog__footer">
-                    <button type="button" className="btn" onClick={props.onClose}>
-                        {t('Cancel')}
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--primary"
-                        onClick={() => void props.onSubmit()}
-                    >
-                        {t('Save')}
-                    </button>
-                </div>
+        <DialogSurface
+            label={props.title}
+            onClose={props.onClose}
+            onKeyDown={(event) => {
+                if (event.key !== 'Enter' || !isModKey(event.nativeEvent)) return
+                event.preventDefault()
+                void props.onSubmit()
+            }}
+        >
+            <div className="dialog__body">
+                <div className="dialog__title">{props.title}</div>
+                {props.children}
             </div>
-        </div>
+
+            <div className="dialog__footer">
+                <button type="button" className="btn" onClick={props.onClose}>
+                    {t('Cancel')}
+                </button>
+                <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => void props.onSubmit()}
+                >
+                    {t('Save')}
+                </button>
+            </div>
+        </DialogSurface>
     )
 }

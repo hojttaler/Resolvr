@@ -104,7 +104,7 @@ Screenshots in this README come from the showcase page (`showcase.html`, fixture
 `pnpm --filter @resolvr/desktop shots` renders every screen with Playwright, then
 `python3 scripts/readme-media.py <shots dir>` resizes them and assembles the GIF.
 
-Requirements: Node.js 20+, pnpm 10, Rust stable; Xcode Command Line Tools on macOS,
+Requirements: Node.js 20.19+ (20.x) or 22.12+, pnpm 10, Rust stable; Xcode Command Line Tools on macOS,
 WebKitGTK 4.1 on Linux.
 
 | Package | Role |

@@ -51,11 +51,14 @@ export function countMatches(value: unknown, needle: string, label?: string): nu
     let total = nodeMatches(label, value, needle) ? 1 : 0
 
     if (value !== null && typeof value === 'object') {
-        const entries = Array.isArray(value)
-            ? value.map((item, index) => [String(index), item] as const)
-            : Object.entries(value as Record<string, unknown>)
-
-        for (const [key, item] of entries) total += countMatches(item, needle, key)
+        if (Array.isArray(value)) {
+            for (let index = 0; index < value.length; index += 1) {
+                total += countMatches(value[index], needle, String(index))
+            }
+        } else {
+            const object = value as Record<string, unknown>
+            for (const key of Object.keys(object)) total += countMatches(object[key], needle, key)
+        }
     }
 
     return total

@@ -11,6 +11,7 @@ import {
     diffSchemas,
     SessionSchema,
     SettingsSchema,
+    THEME_COLOR_NAMES,
     TabStateSchema,
     findJwt,
     readJwtInfo,
@@ -34,11 +35,14 @@ import {
     type IHistoryEntry,
     type ILayoutPreset,
     type ILayoutState,
+    type ILocalTheme,
+    type ILocalThemeCatalog,
     type IOperation,
     type IOperationKind,
     type IActivitySession,
     type IRunResult,
     type ISchemaChange,
+    type ISchemaCompletion,
     type IVariableProblem,
     type ISession,
     type ISettings,
@@ -122,13 +126,25 @@ const AUTOSAVE_DELAY_MS = 300
 const MAX_SUBSCRIPTION_EVENTS = 500
 
 const sessionSaver = new Debouncer(AUTOSAVE_DELAY_MS)
+const settingsSaver = new Debouncer(AUTOSAVE_DELAY_MS)
 const draftSavers = new Map<string, Debouncer>()
 const flowDraftSavers = new Map<string, Debouncer>()
+
+let initializing = false
+let workspaceSelection = 0
+let treeLoad = 0
+let historyLoad = 0
+let schemaLoad = 0
+let themeLoad = 0
+
+const EMPTY_THEME_CATALOG: ILocalThemeCatalog = { themes: [], invalidFiles: [] }
 
 export interface IAppState {
     ready: boolean
     initError?: string
     settings: ISettings
+    localThemeCatalog: ILocalThemeCatalog
+    localThemeCatalogError?: boolean
 
     workspaces: IWorkspace[]
     workspace?: IWorkspace
@@ -147,6 +163,9 @@ export interface IAppState {
     /** Вкладки текущего workspace; вкладки остальных ждут в `tabsByWorkspace`. */
     tabs: ITabState[]
     activeTabId?: string
+    /** Последний редактор запроса для действий из документации схемы. */
+    schemaRequestTabId?: string
+    schemaCompletion?: ISchemaCompletion & { tabId: string }
     /**
      * Вкладки неактивных workspace. При переключении наборы меняются местами:
      * коллеги открывают несколько проектов, и вкладки одного не должны
@@ -217,7 +236,14 @@ export interface IAppActions {
     /** Создаёт демо-workspace на публичном API и открывает первую операцию. */
     openDemoWorkspace(): Promise<void>
 
-    openTab(input?: { operationRef?: string; title?: string; query?: string }): Promise<void>
+    openTab(input?: {
+        operationRef?: string
+        title?: string
+        query?: string
+        variables?: Record<string, unknown>
+        dirty?: boolean
+        schemaCompletion?: ISchemaCompletion
+    }): Promise<void>
     /**
      * Открывает запуск из истории: запрос, переменные и — если тело
      * сохранилось — сам ответ, как будто запрос только что выполнен.
@@ -337,6 +363,7 @@ export interface IAppActions {
     }): Promise<void>
 
     updateSettings(patch: Partial<ISettings>): Promise<void>
+    refreshLocalThemes(): Promise<void>
 
     setLayoutPreset(preset: ILayoutPreset): void
     setLayoutSizes(key: string, sizes: Record<string, number>): void
@@ -354,6 +381,7 @@ export type IAppStore = IAppState & IAppActions
 export const useAppStore = create<IAppStore>((set, get) => ({
     ready: false,
     settings: SettingsSchema.parse({}),
+    localThemeCatalog: EMPTY_THEME_CATALOG,
     workspaces: [],
     tree: [],
     flows: [],
@@ -382,10 +410,15 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     subscriptions: {},
 
     async initialize() {
+        if (initializing || get().ready) return
+        initializing = true
         try {
             const context = await getAppContext()
             const settings = await context.workspaces.getSettings()
-            applySettings(settings)
+            const localThemeCatalog = settings.theme.startsWith('local:')
+                ? await context.workspaces.listLocalThemes().catch(() => EMPTY_THEME_CATALOG)
+                : EMPTY_THEME_CATALOG
+            applySettings(settings, localThemeCatalog.themes)
 
             const workspaces = await context.workspaces.listWorkspaces()
             const session = await context.sessions.load()
@@ -451,6 +484,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             set({
                 ready: true,
                 settings,
+                localThemeCatalog,
                 workspaces,
                 workspace,
                 selections,
@@ -470,9 +504,11 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             window.setTimeout(() => void get().checkUpdates({ silent: true }), 8_000)
 
             if (workspace) {
-                await get().reloadTree()
-                await get().loadHistory()
-                await loadCachedSchema(workspace, activeEndpointOf(workspace, selections), set)
+                await Promise.all([
+                    get().reloadTree(),
+                    get().loadHistory(),
+                    loadCachedSchema(workspace, activeEndpointOf(workspace, selections), get, set),
+                ])
 
                 // Старые файлы истории удаляются при старте: чистка на каждой
                 // записи била бы по скорости выполнения запросов.
@@ -481,6 +517,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             }
         } catch (error) {
             set({ ready: true, initError: toErrorMessage(error) })
+        } finally {
+            initializing = false
         }
     },
 
@@ -489,6 +527,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         if (!workspace) return
 
         const context = await getAppContext()
+        const request = ++treeLoad
         const collections = await context.workspaces.listCollections(workspace.id)
 
         const [tree, flows, flowRuns] = await Promise.all([
@@ -502,14 +541,20 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             context.flowState.read(workspace.id),
         ])
 
-        set({ tree, flows, flowRuns })
+        if (treeLoad === request && get().workspace?.id === workspace.id) {
+            set({ tree, flows, flowRuns })
+        }
     },
 
     async selectWorkspace(workspaceId) {
+        const request = ++workspaceSelection
+        if (get().workspace?.id === workspaceId) return
+
         const context = await getAppContext()
         const workspace = await context.tokens.attach(
             await context.workspaces.getWorkspace(workspaceId),
         )
+        if (workspaceSelection !== request) return
 
         set((state) => {
             // Текущие вкладки и раскладка убираются в запас, набор нового
@@ -538,17 +583,28 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 layoutSizes: layout?.sizes ?? {},
                 sidebarCollapsed: layout?.sidebarCollapsed ?? false,
                 sidebarTab: layout?.sidebarTab ?? 'collections',
+                tree: [],
+                flows: [],
+                flowRuns: {},
+                history: [],
                 schema: undefined,
                 schemaFetchedAt: undefined,
+                schemaError: undefined,
+                schemaDiff: undefined,
+                schemaDiffNote: undefined,
+                variableProblems: [],
                 flowRun: undefined,
+                confirm: undefined,
             }
         })
 
-        await get().reloadTree()
-        await get().loadHistory()
-        await loadCachedSchema(workspace, activeEndpointOf(workspace, get().selections), set)
-        await get().syncTokenInfo()
         scheduleSessionSave(get)
+        await Promise.all([
+            get().reloadTree(),
+            get().loadHistory(),
+            loadCachedSchema(workspace, selectActiveEndpoint(get()), get, set),
+        ])
+        if (workspaceSelection === request) await get().syncTokenInfo()
     },
 
     async createWorkspace(name, endpointUrl) {
@@ -590,7 +646,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         const tabId = `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
         let query = input.query ?? ''
-        let variables = '{}'
+        let variables = input.variables ? JSON.stringify(input.variables, null, 2) : '{}'
         let headers: Record<string, string> = {}
         let title = input.title ?? t('New request')
 
@@ -610,12 +666,14 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             workspaceId: workspace?.id,
             title,
             operationRef: input.operationRef,
-            dirty: false,
+            dirty: input.dirty ?? false,
         })
 
         set((state) => ({
             tabs: [...state.tabs, tab],
             activeTabId: tabId,
+            schemaRequestTabId: tabId,
+            schemaCompletion: input.schemaCompletion && { tabId, ...input.schemaCompletion },
             contents: { ...state.contents, [tabId]: { query, variables, headers } },
         }))
 
@@ -711,8 +769,13 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         })
 
         for (const tabId of closing) {
-            draftSavers.get(tabId)?.cancel()
+            const draftSaver = draftSavers.get(tabId)
+            const flowSaver = flowDraftSavers.get(tabId)
+            draftSaver?.cancel()
+            flowSaver?.cancel()
             draftSavers.delete(tabId)
+            flowDraftSavers.delete(tabId)
+            await Promise.all([draftSaver?.flush(), flowSaver?.flush()])
             await context.sessions.deleteDraft(tabId)
         }
         scheduleSessionSave(get)
@@ -935,14 +998,23 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         await get().saveFlow(parsed.data)
 
-        set((state) => ({
-            flowDrafts: { ...state.flowDrafts, [tabId]: parsed.data },
-            tabs: state.tabs.map((tab) =>
-                tab.id === tabId
-                    ? { ...tab, dirty: false, flowId: parsed.data.id, title: parsed.data.name }
-                    : tab,
-            ),
-        }))
+        set((state) => {
+            const current = state.flowDrafts[tabId]
+            if (!current) return state
+            const dirty = current !== draft
+
+            return {
+                flowDrafts: {
+                    ...state.flowDrafts,
+                    [tabId]: dirty ? { ...current, id: parsed.data.id } : parsed.data,
+                },
+                tabs: state.tabs.map((tab) =>
+                    tab.id === tabId
+                        ? { ...tab, dirty, flowId: parsed.data.id, title: dirty ? tab.title : parsed.data.name }
+                        : tab,
+                ),
+            }
+        })
 
         scheduleFlowDraftSave(tabId, get)
         scheduleSessionSave(get)
@@ -951,12 +1023,19 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     },
 
     activateTab(tabId) {
-        set({ activeTabId: tabId })
+        const tab = get().tabs.find((item) => item.id === tabId)
+        set({
+            activeTabId: tabId,
+            schemaCompletion: undefined,
+            ...(tab?.kind === 'operation' ? { schemaRequestTabId: tabId } : {}),
+        })
         scheduleSessionSave(get)
     },
 
     updateQuery(tabId, query) {
         set((state) => ({
+            schemaCompletion:
+                state.schemaCompletion?.tabId === tabId ? undefined : state.schemaCompletion,
             contents: {
                 ...state.contents,
                 [tabId]: { ...requireContent(state.contents, tabId), query },
@@ -1013,6 +1092,12 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         if (!workspace) return
 
         set((state) => ({
+            schema: undefined,
+            schemaFetchedAt: undefined,
+            schemaError: undefined,
+            schemaDiff: undefined,
+            schemaDiffNote: undefined,
+            confirm: undefined,
             selections: {
                 ...state.selections,
                 [workspace.id]: { ...state.selections[workspace.id], endpointId },
@@ -1021,12 +1106,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         scheduleSessionSave(get)
 
         // Автокомплит должен соответствовать схеме выбранного эндпоинта.
-        const endpoint = activeEndpointOf(workspace, get().selections)
-        if (endpoint) {
-            const context = await getAppContext()
-            const schema = await context.schemas.getSchema(workspace.id, endpoint.id)
-            set({ schema: schema ?? undefined, schemaFetchedAt: undefined })
-        }
+        await loadCachedSchema(workspace, selectActiveEndpoint(get()), get, set)
     },
 
     setBottomTab(tabId, bottomTab) {
@@ -1048,6 +1128,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const tab = state.tabs.find((item) => item.id === state.activeTabId)
         const workspace = state.workspace
         if (!tab || !workspace) return
+        const existingRun = state.runs[tab.id]
+        if (existingRun?.status === 'running' || existingRun?.status === 'streaming') return
 
         const content = state.contents[tab.id]
         if (!content) return
@@ -1081,17 +1163,26 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         // Мутация на боевом окружении или в защищённом workspace выполняется
         // только после подтверждения.
         const environment = selectActiveEnvironment(state)
+        const endpoint = selectActiveEndpoint(state)
         const what = t('mutation {name}', {
             name: extractOperationName(content.query) ?? t('unnamed'),
         })
         if (kind === 'mutation' && !options.confirmed) {
+            const runConfirmed = async (): Promise<void> => {
+                const current = get()
+                if (
+                    current.workspace?.id !== workspace.id ||
+                    current.activeTabId !== tab.id ||
+                    current.contents[tab.id] !== content ||
+                    selectActiveEnvironment(current)?.id !== environment?.id ||
+                    selectActiveEndpoint(current)?.id !== endpoint?.id
+                ) return
+
+                await get().runActiveTab({ ...options, confirmed: true })
+            }
             const request = environment?.production
-                ? productionConfirm(environment.name, what, () =>
-                      get().runActiveTab({ ...options, confirmed: true }),
-                  )
-                : protectionConfirm(workspace, what, () =>
-                      get().runActiveTab({ ...options, confirmed: true }),
-                  )
+                ? productionConfirm(environment.name, what, runConfirmed)
+                : protectionConfirm(workspace, what, runConfirmed)
 
             if (request) {
                 get().requestConfirm(request)
@@ -1100,23 +1191,23 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             }
         }
 
-        const context = await getAppContext()
-
         if (kind === 'subscription') {
             await startSubscription(tab, workspace.id, content, variables, set, get)
 
             return
         }
 
-        setRun(set, tab.id, { status: 'running', events: [], startedAt: Date.now() })
+        const running: ITabRun = { status: 'running', events: [], startedAt: Date.now() }
+        setRun(set, tab.id, running)
 
         try {
+            const context = await getAppContext()
             const result = await context.runner.run({
                 workspaceId: workspace.id,
                 query: content.query,
                 variables,
                 headers: content.headers,
-                endpointId: selectActiveEndpoint(state)?.id,
+                endpointId: endpoint?.id,
                 environmentId: environment?.id,
                 operationName: extractOperationName(content.query),
                 timeoutMs: state.settings.request.timeoutMs,
@@ -1124,17 +1215,23 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 confirmed: options.confirmed,
             })
 
-            setRun(set, tab.id, { status: 'done', result, events: [] })
+            if (get().runs[tab.id] === running) setRun(set, tab.id, { status: 'done', result, events: [] })
             if (result.savedVariables) {
-                set({
-                    workspace: await context.tokens.attach(
-                        await context.workspaces.getWorkspace(workspace.id),
-                    ),
-                })
+                const updated = await context.tokens.attach(
+                    await context.workspaces.getWorkspace(workspace.id),
+                )
+                if (get().workspace?.id === workspace.id) {
+                    set({ workspace: updated })
+                    if (selectActiveEnvironment(get())?.id === environment?.id &&
+                        selectActiveEndpoint(get())?.id === endpoint?.id &&
+                        (!get().schema || get().schemaError)) void get().refreshSchema()
+                }
             }
-            await get().loadHistory()
+            if (get().workspace?.id === workspace.id) await get().loadHistory()
         } catch (error) {
-            setRun(set, tab.id, { status: 'error', error: toErrorMessage(error), events: [] })
+            if (get().runs[tab.id] === running) {
+                setRun(set, tab.id, { status: 'error', error: toErrorMessage(error), events: [] })
+            }
         }
     },
 
@@ -1169,7 +1266,9 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         if (get().closeAfterSaveTabId === activeTabId) {
             set({ closeAfterSaveTabId: undefined })
-            await get().closeTabs([activeTabId])
+            if (!get().tabs.find((tab) => tab.id === activeTabId)?.dirty) {
+                await get().closeTabs([activeTabId])
+            }
         }
     },
 
@@ -1178,6 +1277,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         if (!workspace) return
 
         const endpoint = selectActiveEndpoint(get())
+        const environmentId = selectActiveEnvironment(get())?.id
 
         if (!endpoint) {
             set({ schemaError: t('The workspace has no endpoints') })
@@ -1185,14 +1285,22 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             return
         }
 
+        const request = ++schemaLoad
+        const isCurrent = (): boolean =>
+            request === schemaLoad && get().workspace?.id === workspace.id &&
+            selectActiveEndpoint(get())?.id === endpoint.id &&
+            selectActiveEnvironment(get())?.id === environmentId
         try {
             const context = await getAppContext()
-            const cache = await context.schemas.introspect(workspace.id, endpoint)
+            const cache = await context.schemas.introspect(workspace.id, endpoint, {
+                environmentId,
+                timeoutMs: get().settings.request.timeoutMs,
+            })
             const schema = await context.schemas.getSchema(workspace.id, endpoint.id)
 
-            set({ schema, schemaFetchedAt: cache.fetchedAt, schemaError: undefined })
+            if (isCurrent()) set({ schema, schemaFetchedAt: cache.fetchedAt, schemaError: undefined })
         } catch (error) {
-            set({ schemaError: toErrorMessage(error) })
+            if (isCurrent()) set({ schemaError: toErrorMessage(error) })
         }
     },
 
@@ -1302,8 +1410,10 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const { workspace } = get()
         if (!workspace) return
 
+        const request = ++historyLoad
         const context = await getAppContext()
-        set({ history: await context.history.list(workspace.id, { limit: 100 }) })
+        const history = await context.history.list(workspace.id, { limit: 100 })
+        if (historyLoad === request && get().workspace?.id === workspace.id) set({ history })
     },
 
     async runFlow(flowId, options = {}) {
@@ -1312,6 +1422,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         const environment = selectActiveEnvironment(get())
         const environmentId = environment?.id
+        const endpointId = selectActiveEndpoint(get())?.id
 
         // Цепочка почти всегда содержит мутации — на боевом окружении она
         // требует того же подтверждения, что и одиночная мутация.
@@ -1337,20 +1448,28 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 environmentId,
                 confirmed: options.confirmed,
             })
-            set({ flowRun: run })
+            if (get().workspace?.id === workspace.id) set({ flowRun: run })
 
             // Токен, добытый цепочкой, сохраняется в окружение: иначе он жил бы
             // только внутри одного запроса и логин повторялся бы каждый раз.
             if (run.ok) {
                 const keeper = new TokenKeeper(context.workspaces, context.resolver, context.tokens)
-                const remembered = await keeper.remember(workspace.id, environmentId, run.context)
+                const tokenVariable =
+                    (environment?.recovery?.flowId === flowId ? environment?.recovery?.tokenVariable : undefined) ??
+                    (environment?.auth.type === 'bearer' ? environment.auth.tokenVariable : undefined)
+                const remembered = await keeper.remember(workspace.id, environmentId, run.context, tokenVariable)
 
                 if (remembered) {
-                    set({
-                        workspace: await context.tokens.attach(
-                            await context.workspaces.getWorkspace(workspace.id),
-                        ),
-                    })
+                    const updated = await context.tokens.attach(
+                        await context.workspaces.getWorkspace(workspace.id),
+                    )
+                    if (get().workspace?.id === workspace.id) {
+                        set({ workspace: updated })
+                        if (!get().tokenRefreshing &&
+                            selectActiveEnvironment(get())?.id === environmentId &&
+                            selectActiveEndpoint(get())?.id === endpointId &&
+                            (!get().schema || get().schemaError)) void get().refreshSchema()
+                    }
                 }
             }
         } catch (error) {
@@ -1770,7 +1889,17 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         if (!tab?.operationRef) return false
 
         const ref = parseOperationRef(tab.operationRef)
-        await get().saveActiveTab(ref.collectionId, ref.name)
+        try {
+            await get().saveActiveTab(ref.collectionId, ref.name)
+        } catch (error) {
+            get().requestConfirm({
+                title: t('Could not save the operation'),
+                description: toErrorMessage(error),
+                actionLabel: t('Close'),
+                danger: false,
+                run: () => undefined,
+            })
+        }
 
         return true
     },
@@ -1815,7 +1944,12 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             }
         }
 
-        if (changed) set({ workspace: await context.tokens.attach(workspace) })
+        if (changed) {
+            const current = get().workspace
+            if (current?.id !== workspace.id) return
+            const updated = await context.tokens.attach(current)
+            if (get().workspace === current) set({ workspace: updated })
+        }
     },
 
     async refreshToken() {
@@ -1825,6 +1959,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const environment = selectActiveEnvironment(get())
         if (!environment?.recovery?.flowId) return
 
+        const endpointId = selectActiveEndpoint(get())?.id
         set({ tokenRefreshing: true })
 
         try {
@@ -1837,11 +1972,21 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             }
 
             const context = await getAppContext()
-            set({
-                workspace: await context.tokens.attach(
-                    await context.workspaces.getWorkspace(workspace.id),
-                ),
-            })
+            const updated = await context.tokens.attach(
+                await context.workspaces.getWorkspace(workspace.id),
+            )
+            if (get().workspace?.id !== workspace.id) return
+            set({ workspace: updated })
+
+            if (
+                selectActiveEndpoint(get())?.id === endpointId &&
+                selectActiveEnvironment(get())?.id === environment.id &&
+                get().flowRun?.flowId === environment.recovery.flowId &&
+                get().flowRun?.ok &&
+                (!get().schema || get().schemaError)
+            ) {
+                await get().refreshSchema()
+            }
         } finally {
             set({ tokenRefreshing: false })
         }
@@ -1852,10 +1997,16 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const context = await getAppContext()
         await context.workspaces.saveWorkspace(workspace)
 
-        set({
-            workspace: await context.tokens.attach(workspace),
-            workspaces: await context.workspaces.listWorkspaces(),
-        })
+        const [updated, workspaces] = await Promise.all([
+            context.tokens.attach(workspace),
+            context.workspaces.listWorkspaces(),
+        ])
+        if (get().workspace?.id === workspace.id) {
+            set({ workspace: updated, workspaces })
+            if (!get().schema || get().schemaError) void get().refreshSchema()
+        } else {
+            set({ workspaces })
+        }
     },
 
     /**
@@ -1944,21 +2095,45 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
     /** Перечитывает журнал действий агента с диска. */
     async loadActivity() {
+        if (!isTauri()) return
         const context = await getAppContext()
         const store = new ActivityStore(context.fs, context.paths)
 
         set({ activitySessions: await store.listSessions() })
     },
 
+    async refreshLocalThemes() {
+        if (!isTauri()) return
+
+        const request = ++themeLoad
+        try {
+            const context = await getAppContext()
+            const catalog = await context.workspaces.listLocalThemes()
+            if (request !== themeLoad) return
+
+            applyTheme(get().settings.theme, catalog.themes)
+            set({ localThemeCatalog: catalog, localThemeCatalogError: false })
+        } catch {
+            if (request === themeLoad) set({ localThemeCatalogError: true })
+        }
+    },
+
     async updateSettings(patch) {
-        const next = SettingsSchema.parse({ ...get().settings, ...patch })
+        const { settings: previous, localThemeCatalog } = get()
+        const next = SettingsSchema.parse({ ...previous, ...patch })
 
-        applySettings(next)
+        applySettings(next, localThemeCatalog.themes, previous)
         set({ settings: next })
+        if (!isTauri()) return
 
-        const context = await getAppContext()
-        context.secrets.use(next.secrets.storage)
-        await context.workspaces.saveSettings(next)
+        settingsSaver.schedule(async () => {
+            const context = await getAppContext()
+            await context.workspaces.saveSettings(get().settings)
+        })
+        if (next.secrets.storage !== previous.secrets.storage) {
+            const context = await getAppContext()
+            context.secrets.use(get().settings.secrets.storage)
+        }
     },
 
     setLayoutPreset(preset) {
@@ -1993,7 +2168,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     async flushAll() {
         await Promise.all([...draftSavers.values()].map((saver) => saver.flush()))
         await Promise.all([...flowDraftSavers.values()].map((saver) => saver.flush()))
-        await sessionSaver.flush()
+        await Promise.all([sessionSaver.flush(), settingsSaver.flush()])
     },
 }))
 
@@ -2003,37 +2178,75 @@ export const useAppStore = create<IAppStore>((set, get) => ({
  * Тема и размер шрифта редактора живут в CSS-переменных, поэтому меняются без
  * пересоздания редакторов и без перерисовки дерева компонентов.
  */
-function applySettings(settings: ISettings): void {
+function applySettings(
+    settings: ISettings,
+    themes: readonly ILocalTheme[],
+    previous?: ISettings,
+): void {
     const root = document.documentElement
 
-    if (settings.theme === 'system') root.removeAttribute('data-theme')
-    else root.setAttribute('data-theme', settings.theme)
+    if (!previous || settings.theme !== previous.theme) {
+        applyTheme(settings.theme, themes)
+    }
+    if (!previous || settings.language !== previous.language) {
+        const language = resolveLanguage(settings.language)
+        setLanguage(language)
+        void invokeSafely('set_menu_language', { language }).catch(() => undefined)
+    }
+    if (!previous || settings.editor.fontSize !== previous.editor.fontSize) {
+        root.style.setProperty('--code-size', `${settings.editor.fontSize}px`)
+    }
+    if (!previous || settings.appearance.opacity !== previous.appearance.opacity) {
+        root.style.setProperty('--window-opacity', String(settings.appearance.opacity))
+    }
+    if (
+        !previous ||
+        settings.appearance.workspaceTransparency !== previous.appearance.workspaceTransparency
+    ) {
+        root.toggleAttribute('data-workspace-transparency', settings.appearance.workspaceTransparency)
+    }
 
-    // Язык интерфейса и нативного меню: меню пересобирается в Rust.
-    const language = resolveLanguage(settings.language)
-    setLanguage(language)
-    void invokeSafely('set_menu_language', { language }).catch(() => undefined)
+    // При полностью непрозрачном окне нативный материал не виден.
+    const material = settings.appearance.opacity === 100 ? 'none' : settings.appearance.material
+    const oldMaterial = previous?.appearance.opacity === 100 ? 'none' : previous?.appearance.material
+    if (material !== oldMaterial && root.dataset.platform === 'macos') {
+        void invokeSafely('set_window_material', { material }).catch(() => undefined)
+    }
+}
 
-    root.style.setProperty('--code-size', `${settings.editor.fontSize}px`)
-    root.style.setProperty('--window-opacity', String(settings.appearance.opacity))
+function applyTheme(selected: ISettings['theme'], themes: readonly ILocalTheme[]): void {
+    const local = themes.find((theme) => theme.id === selected)
+    const base = local?.base ?? selected
+    const root = document.documentElement
+    if (base === 'system' || base.startsWith('local:')) root.removeAttribute('data-theme')
+    else root.setAttribute('data-theme', base)
 
-    // Материал задаётся нативно: степень размытия — свойство окна, а не CSS.
-    void invokeSafely('set_window_material', { material: settings.appearance.material }).catch(() => {
-        // Вне macOS команда ничего не делает — приложение работает без эффекта.
-    })
+    for (const name of THEME_COLOR_NAMES) {
+        const value = local?.colors[name]
+        if (value) root.style.setProperty(`--${name}`, value)
+        else root.style.removeProperty(`--${name}`)
+    }
 }
 
 /** Читает схему из кэша, чтобы автокомплит работал сразу после запуска. */
 async function loadCachedSchema(
     workspace: IWorkspace,
     endpoint: IEndpoint | undefined,
+    get: () => IAppStore,
     set: (partial: Partial<IAppState>) => void,
 ): Promise<void> {
+    const request = ++schemaLoad
     if (!endpoint) return
 
     const context = await getAppContext()
     const schema = await context.schemas.getSchema(workspace.id, endpoint.id)
-    if (schema) set({ schema })
+    if (
+        request === schemaLoad &&
+        get().workspace?.id === workspace.id &&
+        selectActiveEndpoint(get())?.id === endpoint.id
+    ) {
+        set({ schema, schemaFetchedAt: undefined })
+    }
 }
 
 /**
@@ -2433,8 +2646,9 @@ async function saveOperationTab(
     const content = state.contents[tab.id]
     if (!content) return
 
-    const context = await getAppContext()
     const variables = parseVariables(content.variables)
+    if (variables instanceof Error) throw variables
+    const context = await getAppContext()
 
     // Перезапись существующей операции сохраняет то, чего нет во вкладке:
     // описание, цепочку подготовки и правила сохранения в окружение.
@@ -2447,7 +2661,7 @@ async function saveOperationTab(
         name,
         query: content.query,
         description: existing?.description,
-        variables: variables instanceof Error ? {} : variables,
+        variables,
         headers: content.headers,
         endpointId: selectActiveEndpoint(state)?.id,
         environmentId: selectActiveEnvironment(state)?.id,
@@ -2460,7 +2674,7 @@ async function saveOperationTab(
             item.id === tab.id
                 ? {
                       ...item,
-                      dirty: false,
+                      dirty: state.contents[item.id] !== content,
                       title: name,
                       operationRef: formatOperationRef({ collectionId, name }),
                   }
@@ -2496,9 +2710,22 @@ async function saveTab(
     if (!tab.operationRef) return false
 
     const ref = parseOperationRef(tab.operationRef)
-    await saveOperationTab(tabId, ref.collectionId, ref.name, set, get)
+    try {
+        await saveOperationTab(tabId, ref.collectionId, ref.name, set, get)
 
-    return true
+        return !get().tabs.find((item) => item.id === tabId)?.dirty
+    } catch (error) {
+        get().activateTab(tabId)
+        get().requestConfirm({
+            title: t('Could not save the operation'),
+            description: toErrorMessage(error),
+            actionLabel: t('Close'),
+            danger: false,
+            run: () => undefined,
+        })
+
+        return false
+    }
 }
 
 /** Разбирает текст переменных; ошибка возвращается значением, а не исключением. */

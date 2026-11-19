@@ -25,7 +25,7 @@ pnpm --filter @resolvr/mock-server start   # test GraphQL server on :4000
 pnpm dev                                   # app in dev mode
 ```
 
-Requirements: Node.js 20+, pnpm 10, Rust stable, Xcode Command Line Tools (macOS).
+Requirements: Node.js 20.19+ (20.x) or 22.12+, pnpm 10, Rust stable, Xcode Command Line Tools (macOS).
 
 Before pushing:
 

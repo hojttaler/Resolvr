@@ -85,6 +85,7 @@ export class NodeFileSystem implements IFileSystem {
             return entries.map((entry) => ({
                 name: entry.name,
                 isDirectory: entry.isDirectory(),
+                isFile: entry.isFile(),
             }))
         } catch (error) {
             if (isNotFound(error)) return []

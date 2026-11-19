@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 — 2026-11-19
+
+- Refreshed the workbench, flow editor, settings and app icon. Settings includes a
+  catalog of built-in and local themes, including Graphite, and an option to extend
+  window transparency to the workbench on macOS.
+- The Schema Explorer creates a request when an operation is selected. Selecting
+  fields inserts them into the query. A field picker in the query editor supports
+  selecting several fields at once or filling all fields up to a chosen depth.
+- The variables editor can insert inputs from the schema for the selected variable.
+  Its field picker stays open while several inputs are selected.
+- Introspection uses the active environment and the same authentication flow as
+  requests, so schemas protected by login can be loaded after authorization.
+- Editor context menus offer formatting, clipboard actions and schema-aware field
+  insertion where available. Large JSON responses and background draft saves have
+  also been improved.
+
 ## 0.3.0 — 2026-09-30
 
 - Flows: run-time variables and flow constants. A flow carries a `variables` block — the

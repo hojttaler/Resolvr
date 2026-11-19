@@ -90,6 +90,7 @@ export class TauriFileSystem implements IFileSystem {
             return entries.map((entry) => ({
                 name: entry.name,
                 isDirectory: entry.isDirectory,
+                isFile: entry.isFile,
             }))
         } catch {
             return []

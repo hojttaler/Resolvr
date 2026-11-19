@@ -1,5 +1,5 @@
 import { FlowSchema } from '@resolvr/core'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -93,10 +93,99 @@ describe('диалоги', () => {
         document.documentElement.setAttribute('data-platform', 'macos')
         render(<SettingsDialog onClose={() => undefined} />)
 
-        expect(screen.getByText('Внешний вид')).toBeTruthy()
+        expect(screen.getByRole('heading', { name: 'Внешний вид' })).toBeTruthy()
         expect(screen.getByText('Редактор')).toBeTruthy()
         expect(screen.getByText('Запросы и ответы')).toBeTruthy()
-        expect(screen.getByText('Прозрачность окна')).toBeTruthy()
+        expect(screen.getByRole('slider', { name: 'Непрозрачность окна' })).toBeTruthy()
+    })
+
+    it('переключает прозрачность рабочей области отдельно от плотности окна', async () => {
+        const root = document.documentElement
+        const previousPlatform = root.getAttribute('data-platform')
+        const previous = useAppStore.getState().settings.appearance
+        root.setAttribute('data-platform', 'macos')
+        await useAppStore.getState().updateSettings({
+            appearance: { ...previous, opacity: 45, workspaceTransparency: false },
+        })
+
+        try {
+            render(<SettingsDialog onClose={() => undefined} />)
+            const control = screen.getByRole('switch', { name: 'Прозрачность рабочей области' })
+            expect(control.getAttribute('aria-checked')).toBe('false')
+
+            fireEvent.click(control)
+            expect(control.getAttribute('aria-checked')).toBe('true')
+            expect(root.hasAttribute('data-workspace-transparency')).toBe(true)
+            expect(useAppStore.getState().settings.appearance.opacity).toBe(45)
+
+            fireEvent.click(control)
+            expect(root.hasAttribute('data-workspace-transparency')).toBe(false)
+        } finally {
+            cleanup()
+            await useAppStore.getState().updateSettings({ appearance: previous })
+            if (previousPlatform === null) root.removeAttribute('data-platform')
+            else root.setAttribute('data-platform', previousPlatform)
+        }
+    })
+
+    it('применяет тему «Графит» и возвращается к системной теме', async () => {
+        const root = document.documentElement
+        const { theme } = useAppStore.getState().settings
+        await useAppStore.getState().updateSettings({ theme: 'system' })
+
+        try {
+            render(<SettingsDialog onClose={() => undefined} />)
+            fireEvent.click(screen.getByRole('button', { name: 'Каталог тем' }))
+            const graphite = screen.getByRole('button', { name: 'Графит' })
+            fireEvent.click(graphite)
+
+            expect(graphite.getAttribute('aria-pressed')).toBe('true')
+            expect(root.dataset.theme).toBe('graphite')
+            expect(useAppStore.getState().settings.theme).toBe('graphite')
+
+            fireEvent.click(screen.getByRole('button', { name: 'Системная' }))
+            expect(root.dataset.theme).toBeUndefined()
+        } finally {
+            cleanup()
+            await useAppStore.getState().updateSettings({ theme })
+        }
+    })
+
+    it('применяет локальную палитру и очищает её при переключении на встроенную', async () => {
+        const root = document.documentElement
+        const { settings, localThemeCatalog } = useAppStore.getState()
+        useAppStore.setState({
+            localThemeCatalog: {
+                themes: [{
+                    id: 'local:amber',
+                    name: 'Янтарная',
+                    base: 'graphite',
+                    colors: { accent: '#ffb44c' },
+                }],
+                invalidFiles: [],
+            },
+        })
+
+        try {
+            render(<SettingsDialog onClose={() => undefined} />)
+            fireEvent.click(screen.getByRole('button', { name: 'Темы' }))
+            fireEvent.click(screen.getByRole('button', { name: 'Янтарная' }))
+            expect(useAppStore.getState().settings.theme).toBe('local:amber')
+            expect(root.dataset.theme).toBe('graphite')
+            expect(root.style.getPropertyValue('--accent')).toBe('#ffb44c')
+
+            fireEvent.click(screen.getByRole('button', { name: 'Светлая' }))
+            expect(root.dataset.theme).toBe('light')
+            expect(root.style.getPropertyValue('--accent')).toBe('')
+
+            await act(() => useAppStore.getState().updateSettings({ theme: 'local:missing' }))
+            expect(root.dataset.theme).toBeUndefined()
+            expect(root.style.getPropertyValue('--accent')).toBe('')
+        } finally {
+            cleanup()
+            await useAppStore.getState().updateSettings({ theme: settings.theme })
+            useAppStore.setState({ localThemeCatalog })
+        }
     })
 })
 

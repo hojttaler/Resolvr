@@ -1,16 +1,42 @@
 import { useEffect, useState } from 'react'
+import { DialogSurface } from './DialogSurface.js'
 
 import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { formatDiagnostics, readAboutInfo, type IAboutInfo } from '../platform/about.js'
 import { logError, openLogDir } from '../platform/logger.js'
+import { useAppStore } from '../state/store.js'
+import { ThemeCatalog } from './ThemeCatalog.js'
 
 /** Размытие и прозрачность окна существуют только на macOS. */
 function isMacOs(): boolean {
     return document.documentElement.getAttribute('data-platform') === 'macos'
 }
 
-import { useAppStore } from '../state/store.js'
+const SECTIONS = [
+    {
+        id: 'appearance',
+        label: 'Appearance',
+        icon: 'M8 5a3 3 0 1 0 0 6 3 3 0 1 0 0-6z M8 1v2m0 10v2M1 8h2m10 0h2M3 3l1.4 1.4m7.2 7.2L13 13M3 13l1.4-1.4m7.2-7.2L13 3',
+    },
+    { id: 'themes', label: 'Themes', icon: 'M2 3h12v10H2z M2 6h12 M5 9h6' },
+    { id: 'editor', label: 'Editor', icon: 'M5 4 1.5 8 5 12m6-8 3.5 4-3.5 4M9.5 2l-3 12' },
+    {
+        id: 'requests',
+        label: 'Requests and responses',
+        icon: 'M1.5 5h12m-3-3 3 3-3 3M14.5 11h-12m3-3-3 3 3 3',
+    },
+    {
+        id: 'secrets',
+        label: 'Tokens and secrets',
+        icon: 'M5 7V5a3 3 0 1 1 6 0v2M4 7h8a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z',
+    },
+    {
+        id: 'about',
+        label: 'About',
+        icon: 'M8 2a6 6 0 1 0 0 12 6 6 0 1 0 0-12z M8 7.5v3.2M8 5.3h.01',
+    },
+] as const
 
 export interface ISettingsDialogProps {
     onClose: () => void
@@ -27,335 +53,404 @@ export function SettingsDialog(props: ISettingsDialogProps): React.JSX.Element {
     const settings = useAppStore((state) => state.settings)
     const updateSettings = useAppStore((state) => state.updateSettings)
     const t = useT()
-
-    useEffect(() => {
-        function onKeyDown(event: KeyboardEvent): void {
-            if (event.key === 'Escape') props.onClose()
-        }
-
-        window.addEventListener('keydown', onKeyDown)
-
-        return () => window.removeEventListener('keydown', onKeyDown)
-    }, [props])
+    const [section, setSection] = useState<(typeof SECTIONS)[number]['id']>('appearance')
 
     return (
-        <div className="overlay" onMouseDown={props.onClose}>
-            <div
-                className="dialog dialog--wide"
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                <div className="dialog__body">
-                    <div className="dialog__title">{t('Settings')}</div>
+        <DialogSurface label={t('Settings')} className="settings-dialog" onClose={props.onClose}>
+            <div className="settings-dialog__header">
+                <h1 className="dialog__title">{t('Settings')}</h1>
+                <button
+                    type="button"
+                    className="btn btn--quiet btn--icon"
+                    aria-label={t('Close')}
+                    onClick={props.onClose}
+                >
+                    ×
+                </button>
+            </div>
+            <div className="settings-dialog__layout">
+                <nav className="settings-dialog__nav" aria-label={t('Settings')}>
+                    {SECTIONS.map((item) => (
+                        <button
+                            key={item.id}
+                            type="button"
+                            className="settings-dialog__link"
+                            aria-current={section === item.id ? 'true' : undefined}
+                            onClick={() => setSection(item.id)}
+                        >
+                            <svg
+                                width="17"
+                                height="17"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    d={item.icon}
+                                    stroke="currentColor"
+                                    strokeWidth="1.35"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                />
+                            </svg>
+                            {t(item.label)}
+                        </button>
+                    ))}
+                </nav>
+                <div className="settings-dialog__content" key={section}>
+                    {section === 'appearance' && (
+                        <section className="settings__group">
+                            <h2 className="settings-dialog__heading">{t('Appearance')}</h2>
 
-                    <section className="settings__group">
-                        <div className="settings__caption">{t('Appearance')}</div>
+                            <SettingRow label={t('Theme')}>
+                                <button type="button" className="btn" onClick={() => setSection('themes')}>
+                                    {t('Theme catalog')}
+                                </button>
+                            </SettingRow>
 
-                        <SettingRow label={t('Theme')} hint={t('Follow the system or fix')}>
-                            <div className="segmented">
-                                {(['system', 'light', 'dark'] as const).map((theme) => (
-                                    <button
-                                        key={theme}
-                                        type="button"
-                                        className={`segmented__item${
-                                            settings.theme === theme ? ' segmented__item--active' : ''
-                                        }`}
-                                        onClick={() => void updateSettings({ theme })}
+                            <SettingRow label={t('Language')}>
+                                <select
+                                    className="select"
+                                    aria-label={t('Language')}
+                                    value={settings.language}
+                                    onChange={(event) => {
+                                        const language = event.target.value
+                                        if (
+                                            language === 'system' ||
+                                            language === 'en' ||
+                                            language === 'ru'
+                                        ) {
+                                            void updateSettings({ language })
+                                        }
+                                    }}
+                                >
+                                    <option value="system">{t('System')}</option>
+                                    <option value="en">English</option>
+                                    <option value="ru">Русский</option>
+                                </select>
+                            </SettingRow>
+
+                            {isMacOs() && (
+                                <>
+                                    <SettingRow
+                                        label={t('Window opacity')}
+                                        hint={
+                                            settings.appearance.opacity === 0
+                                                ? t('No background tint')
+                                                : settings.appearance.opacity === 100
+                                                  ? t('Opaque window')
+                                                  : t('Background density {n} %', {
+                                                        n: settings.appearance.opacity,
+                                                    })
+                                        }
                                     >
-                                        {theme === 'system'
-                                            ? t('System')
-                                            : theme === 'light'
-                                              ? t('Light')
-                                              : t('Dark')}
-                                    </button>
-                                ))}
-                            </div>
-                        </SettingRow>
+                                        <input
+                                            type="range"
+                                            aria-label={t('Window opacity')}
+                                            min={0}
+                                            max={100}
+                                            step={5}
+                                            value={settings.appearance.opacity}
+                                            onChange={(event) =>
+                                                void updateSettings({
+                                                    appearance: {
+                                                        ...settings.appearance,
+                                                        opacity: Number(event.target.value),
+                                                    },
+                                                })
+                                            }
+                                        />
+                                        <output>{settings.appearance.opacity}%</output>
+                                    </SettingRow>
 
-                        <SettingRow label={t('Language')} hint={t('Interface language; “System” follows the OS')}>
-                            <div className="segmented">
-                                {(['system', 'en', 'ru'] as const).map((language) => (
-                                    <button
-                                        key={language}
-                                        type="button"
-                                        className={`segmented__item${
-                                            settings.language === language ? ' segmented__item--active' : ''
-                                        }`}
-                                        onClick={() => void updateSettings({ language })}
+                                    <SettingRow label={t('Workspace transparency')}>
+                                        <Toggle
+                                            label={t('Workspace transparency')}
+                                            checked={settings.appearance.workspaceTransparency}
+                                            onChange={(workspaceTransparency) =>
+                                                void updateSettings({
+                                                    appearance: {
+                                                        ...settings.appearance,
+                                                        workspaceTransparency,
+                                                    },
+                                                })
+                                            }
+                                        />
+                                    </SettingRow>
+
+                                    <SettingRow
+                                        label={t('Blur material')}
+                                        hint={t('Density of the native effect under the window')}
                                     >
-                                        {language === 'system'
-                                            ? t('System')
-                                            : language === 'en'
-                                              ? 'English'
-                                              : 'Русский'}
-                                    </button>
-                                ))}
-                            </div>
-                        </SettingRow>
+                                        <select
+                                            className="select"
+                                            aria-label={t('Blur material')}
+                                            value={settings.appearance.material}
+                                            onChange={(event) =>
+                                                void updateSettings({
+                                                    appearance: {
+                                                        ...settings.appearance,
+                                                        material: event.target
+                                                            .value as typeof settings.appearance.material,
+                                                    },
+                                                })
+                                            }
+                                        >
+                                            <option value="hud">{t('HUD')}</option>
+                                            <option value="sidebar">{t('Sidebar')}</option>
+                                            <option value="under-window">
+                                                {t('Under window')}
+                                            </option>
+                                            <option value="popover">{t('Popover')}</option>
+                                            <option value="window">{t('Window')}</option>
+                                            <option value="none">{t('No blur')}</option>
+                                        </select>
+                                    </SettingRow>
+                                </>
+                            )}
 
-                        {isMacOs() && (
-                            <>
-                                <SettingRow
-                                    label={t('Window transparency')}
-                                    hint={
-                                        settings.appearance.opacity === 0
-                                            ? t('Native blur only — background fully transparent')
-                                            : settings.appearance.opacity === 100
-                                              ? t('Opaque window')
-                                              : t('Background density {n} %', { n: settings.appearance.opacity })
+                            <SettingRow
+                                label={t('Editor font size')}
+                                hint={`${settings.editor.fontSize} px`}
+                            >
+                                <input
+                                    type="range"
+                                    aria-label={t('Editor font size')}
+                                    min={9}
+                                    max={24}
+                                    value={settings.editor.fontSize}
+                                    onChange={(event) =>
+                                        void updateSettings({
+                                            editor: {
+                                                ...settings.editor,
+                                                fontSize: Number(event.target.value),
+                                            },
+                                        })
                                     }
-                                >
-                                    <input
-                                        type="range"
-                                        min={0}
-                                        max={100}
-                                        step={5}
-                                        value={settings.appearance.opacity}
-                                        onChange={(event) =>
-                                            void updateSettings({
-                                                appearance: {
-                                                    ...settings.appearance,
-                                                    opacity: Number(event.target.value),
-                                                },
-                                            })
-                                        }
-                                    />
-                                </SettingRow>
+                                />
+                            </SettingRow>
+                            <pre className="settings-dialog__sample">
+                                <span>query</span> Products {'{'} <strong>products</strong> {'{'} id{' '}
+                                {'} }'}
+                            </pre>
+                        </section>
+                    )}
 
-                                <SettingRow
-                                    label={t('Blur material')}
-                                    hint={t('Density of the native effect under the window')}
-                                >
-                                    <select
-                                        className="select"
-                                        value={settings.appearance.material}
-                                        onChange={(event) =>
-                                            void updateSettings({
-                                                appearance: {
-                                                    ...settings.appearance,
-                                                    material: event.target
-                                                        .value as typeof settings.appearance.material,
-                                                },
-                                            })
-                                        }
-                                    >
-                                        <option value="hud">{t('HUD')}</option>
-                                        <option value="sidebar">{t('Sidebar')}</option>
-                                        <option value="under-window">{t('Under window')}</option>
-                                        <option value="popover">{t('Popover')}</option>
-                                        <option value="window">{t('Window')}</option>
-                                        <option value="none">{t('No blur')}</option>
-                                    </select>
-                                </SettingRow>
-                            </>
-                        )}
+                    {section === 'themes' && <ThemeCatalog />}
 
-                        <SettingRow
-                            label={t('Editor font size')}
-                            hint={`${settings.editor.fontSize} px`}
-                        >
-                            <input
-                                type="range"
-                                min={9}
-                                max={24}
-                                value={settings.editor.fontSize}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        editor: {
-                                            ...settings.editor,
-                                            fontSize: Number(event.target.value),
-                                        },
-                                    })
-                                }
-                            />
-                        </SettingRow>
-                    </section>
+                    {section === 'editor' && (
+                        <section className="settings__group">
+                            <h2 className="settings-dialog__heading">{t('Editor')}</h2>
 
-                    <section className="settings__group">
-                        <div className="settings__caption">{t('Editor')}</div>
+                            <SettingRow
+                                label={t('Indent size')}
+                                hint={t('Spaces per nesting level')}
+                            >
+                                <input
+                                    className="input input--narrow"
+                                    type="number"
+                                    min={2}
+                                    max={8}
+                                    value={settings.editor.tabSize}
+                                    onChange={(event) =>
+                                        void updateSettings({
+                                            editor: {
+                                                ...settings.editor,
+                                                tabSize: clamp(Number(event.target.value), 2, 8),
+                                            },
+                                        })
+                                    }
+                                />
+                            </SettingRow>
 
-                        <SettingRow label={t('Indent size')} hint={t('Spaces per nesting level')}>
-                            <input
-                                className="input input--narrow"
-                                type="number"
-                                min={2}
-                                max={8}
-                                value={settings.editor.tabSize}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        editor: {
-                                            ...settings.editor,
-                                            tabSize: clamp(Number(event.target.value), 2, 8),
-                                        },
-                                    })
-                                }
-                            />
-                        </SettingRow>
+                            <SettingRow label={t('Line numbers')}>
+                                <Toggle
+                                    checked={settings.editor.lineNumbers}
+                                    onChange={(lineNumbers) =>
+                                        void updateSettings({
+                                            editor: { ...settings.editor, lineNumbers },
+                                        })
+                                    }
+                                />
+                            </SettingRow>
 
-                        <SettingRow label={t('Line numbers')}>
-                            <Toggle
-                                checked={settings.editor.lineNumbers}
-                                onChange={(lineNumbers) =>
-                                    void updateSettings({
-                                        editor: { ...settings.editor, lineNumbers },
-                                    })
-                                }
-                            />
-                        </SettingRow>
+                            <SettingRow
+                                label={t('Wrap long lines')}
+                                hint={t('Otherwise horizontal scrolling appears')}
+                            >
+                                <Toggle
+                                    checked={settings.editor.lineWrapping}
+                                    onChange={(lineWrapping) =>
+                                        void updateSettings({
+                                            editor: { ...settings.editor, lineWrapping },
+                                        })
+                                    }
+                                />
+                            </SettingRow>
 
-                        <SettingRow
-                            label={t('Wrap long lines')}
-                            hint={t('Otherwise horizontal scrolling appears')}
-                        >
-                            <Toggle
-                                checked={settings.editor.lineWrapping}
-                                onChange={(lineWrapping) =>
-                                    void updateSettings({
-                                        editor: { ...settings.editor, lineWrapping },
-                                    })
-                                }
-                            />
-                        </SettingRow>
+                            <SettingRow
+                                label={t('Selection autofill depth')}
+                                hint={t(
+                                    'How many levels of nested types to expand when clicking a schema field',
+                                )}
+                            >
+                                <input
+                                    className="input input--narrow"
+                                    type="number"
+                                    min={1}
+                                    max={6}
+                                    value={settings.editor.autofillDepth}
+                                    onChange={(event) =>
+                                        void updateSettings({
+                                            editor: {
+                                                ...settings.editor,
+                                                autofillDepth: clamp(
+                                                    Number(event.target.value),
+                                                    1,
+                                                    6,
+                                                ),
+                                            },
+                                        })
+                                    }
+                                />
+                            </SettingRow>
+                        </section>
+                    )}
 
-                        <SettingRow
-                            label={t('Selection autofill depth')}
-                            hint={t('How many levels of nested types to expand when clicking a schema field')}
-                        >
-                            <input
-                                className="input input--narrow"
-                                type="number"
-                                min={1}
-                                max={6}
-                                value={settings.editor.autofillDepth}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        editor: {
-                                            ...settings.editor,
-                                            autofillDepth: clamp(Number(event.target.value), 1, 6),
-                                        },
-                                    })
-                                }
-                            />
-                        </SettingRow>
-                    </section>
+                    {section === 'requests' && (
+                        <section className="settings__group">
+                            <h2 className="settings-dialog__heading">
+                                {t('Requests and responses')}
+                            </h2>
 
-                    <section className="settings__group">
-                        <div className="settings__caption">{t('Requests and responses')}</div>
+                            <SettingRow label={t('Request timeout')} hint={t('Milliseconds')}>
+                                <input
+                                    className="input input--narrow"
+                                    type="number"
+                                    min={1000}
+                                    max={600000}
+                                    step={1000}
+                                    value={settings.request.timeoutMs}
+                                    onChange={(event) =>
+                                        void updateSettings({
+                                            request: {
+                                                timeoutMs: clamp(
+                                                    Number(event.target.value),
+                                                    1000,
+                                                    600_000,
+                                                ),
+                                            },
+                                        })
+                                    }
+                                />
+                            </SettingRow>
 
-                        <SettingRow label={t('Request timeout')} hint={t('Milliseconds')}>
-                            <input
-                                className="input input--narrow"
-                                type="number"
-                                min={1000}
-                                max={600000}
-                                step={1000}
-                                value={settings.request.timeoutMs}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        request: {
-                                            timeoutMs: clamp(
-                                                Number(event.target.value),
-                                                1000,
-                                                600_000,
-                                            ),
-                                        },
-                                    })
-                                }
-                            />
-                        </SettingRow>
+                            <SettingRow
+                                label={t('Expand response to levels')}
+                                hint={t('Deeper nodes stay collapsed')}
+                            >
+                                <input
+                                    className="input input--narrow"
+                                    type="number"
+                                    min={1}
+                                    max={8}
+                                    value={settings.response.expandDepth}
+                                    onChange={(event) =>
+                                        void updateSettings({
+                                            response: {
+                                                expandDepth: clamp(
+                                                    Number(event.target.value),
+                                                    1,
+                                                    8,
+                                                ),
+                                            },
+                                        })
+                                    }
+                                />
+                            </SettingRow>
 
-                        <SettingRow
-                            label={t('Expand response to levels')}
-                            hint={t('Deeper nodes stay collapsed')}
-                        >
-                            <input
-                                className="input input--narrow"
-                                type="number"
-                                min={1}
-                                max={8}
-                                value={settings.response.expandDepth}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        response: {
-                                            expandDepth: clamp(Number(event.target.value), 1, 8),
-                                        },
-                                    })
-                                }
-                            />
-                        </SettingRow>
+                            <SettingRow
+                                label={t('Keep history, days')}
+                                hint={t('Older log files are deleted at startup')}
+                            >
+                                <input
+                                    className="input input--narrow"
+                                    type="number"
+                                    min={1}
+                                    max={365}
+                                    value={settings.history.retentionDays}
+                                    onChange={(event) =>
+                                        void updateSettings({
+                                            history: {
+                                                retentionDays: clamp(
+                                                    Number(event.target.value),
+                                                    1,
+                                                    365,
+                                                ),
+                                            },
+                                        })
+                                    }
+                                />
+                            </SettingRow>
+                        </section>
+                    )}
 
-                        <SettingRow
-                            label={t('Keep history, days')}
-                            hint={t('Older log files are deleted at startup')}
-                        >
-                            <input
-                                className="input input--narrow"
-                                type="number"
-                                min={1}
-                                max={365}
-                                value={settings.history.retentionDays}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        history: {
-                                            retentionDays: clamp(
-                                                Number(event.target.value),
-                                                1,
-                                                365,
-                                            ),
-                                        },
-                                    })
-                                }
-                            />
-                        </SettingRow>
-                    </section>
+                    {section === 'secrets' && (
+                        <section className="settings__group">
+                            <h2 className="settings-dialog__heading">{t('Tokens and secrets')}</h2>
 
-                    <section className="settings__group">
-                        <div className="settings__caption">{t('Tokens and secrets')}</div>
-
-                        <SettingRow
-                            label={t('Where to store')}
-                            hint={
-                                settings.secrets.storage === 'file'
-                                    ? t('File ~/Resolvr/.secrets/, owner-only access. No password prompts.')
-                                    : t('macOS Keychain. After each reinstall the system asks for the password again.')
-                            }
-                        >
-                            <select
-                                className="select"
-                                value={settings.secrets.storage}
-                                onChange={(event) =>
-                                    void updateSettings({
-                                        secrets: {
-                                            storage: event.target.value === 'keychain' ? 'keychain' : 'file',
-                                        },
-                                    })
+                            <SettingRow
+                                label={t('Where to store')}
+                                hint={
+                                    settings.secrets.storage === 'file'
+                                        ? t(
+                                              'File ~/Resolvr/.secrets/, owner-only access. No password prompts.',
+                                          )
+                                        : t(
+                                              'macOS Keychain. After each reinstall the system asks for the password again.',
+                                          )
                                 }
                             >
-                                <option value="file">{t('In the library file')}</option>
-                                <option value="keychain">{t('In macOS Keychain')}</option>
-                            </select>
-                        </SettingRow>
+                                <select
+                                    className="select"
+                                    value={settings.secrets.storage}
+                                    onChange={(event) =>
+                                        void updateSettings({
+                                            secrets: {
+                                                storage:
+                                                    event.target.value === 'keychain'
+                                                        ? 'keychain'
+                                                        : 'file',
+                                            },
+                                        })
+                                    }
+                                >
+                                    <option value="file">{t('In the library file')}</option>
+                                    <option value="keychain">{t('In macOS Keychain')}</option>
+                                </select>
+                            </SettingRow>
 
-                        <div className="inspector__hint">
-                            {t(
-                                'Storages are not synchronized: after switching, obtain the token again with the button in the header. Values in the file are not encrypted — like SSH keys.',
-                            )}
-                        </div>
-                    </section>
+                            <div className="inspector__hint">
+                                {t(
+                                    'Storages are not synchronized: after switching, obtain the token again with the button in the header. Values in the file are not encrypted — like SSH keys.',
+                                )}
+                            </div>
+                        </section>
+                    )}
 
-                    <AboutSection secretStorage={settings.secrets.storage} />
-
-                    <div className="inspector__hint">
-                        {t('Settings are stored in')} <span className="mono">~/Resolvr/settings.json</span>
-                    </div>
-                </div>
-
-                <div className="dialog__footer">
-                    <button type="button" className="btn btn--primary" onClick={props.onClose}>
-                        {t('Done')}
-                    </button>
+                    {section === 'about' && (
+                        <AboutSection secretStorage={settings.secrets.storage} />
+                    )}
                 </div>
             </div>
-        </div>
+
+            <div className="dialog__footer settings-dialog__footer">
+                <span className="mono">~/Resolvr/settings.json</span>
+                <button type="button" className="btn btn--primary" onClick={props.onClose}>
+                    {t('Done')}
+                </button>
+            </div>
+        </DialogSurface>
     )
 }
 
@@ -382,7 +477,7 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
 
     return (
         <section className="settings__group">
-            <div className="settings__caption">{t('About')}</div>
+            <h2 className="settings-dialog__heading">{t('About')}</h2>
 
             <SettingRow
                 label={`Resolvr ${info?.appVersion ?? ''}`}
@@ -439,7 +534,11 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
                 }
             >
                 {update ? (
-                    <button type="button" className="btn btn--primary" onClick={() => void installUpdate()}>
+                    <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void installUpdate()}
+                    >
                         {t('Update')}
                     </button>
                 ) : (
@@ -456,7 +555,9 @@ function AboutSection(props: { secretStorage: string }): React.JSX.Element {
 
             <SettingRow
                 label={t('Agent via MCP')}
-                hint={t('The server is bundled with the app; the command registers it in Claude Code')}
+                hint={t(
+                    'The server is bundled with the app; the command registers it in Claude Code',
+                )}
             >
                 <button
                     type="button"
@@ -493,6 +594,7 @@ function SettingRow(props: ISettingRowProps): React.JSX.Element {
 }
 
 function Toggle(props: {
+    label?: string
     checked: boolean
     onChange: (checked: boolean) => void
 }): React.JSX.Element {
@@ -500,6 +602,7 @@ function Toggle(props: {
         <button
             type="button"
             role="switch"
+            aria-label={props.label}
             aria-checked={props.checked}
             className={`toggle${props.checked ? ' toggle--on' : ''}`}
             onClick={() => props.onChange(!props.checked)}

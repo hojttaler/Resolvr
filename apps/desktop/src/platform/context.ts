@@ -71,8 +71,8 @@ async function createAppContext(): Promise<IAppContext> {
     const history = new HistoryStore(fs, paths)
     const resolver = new SecretResolver(secrets)
     const tokens = new TokenInfoStore(fs, paths)
-    const schemas = new SchemaService(fs, paths, transport)
     const runner = new RunEngine({ workspaces, history, resolver, tokens, transport, secrets })
+    const schemas = new SchemaService(fs, paths, runner)
     const flowState = new FlowStateStore(fs, paths)
     const flows = new FlowRunner(workspaces, runner, flowState)
 

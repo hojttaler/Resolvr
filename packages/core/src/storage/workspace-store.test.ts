@@ -12,6 +12,69 @@ function createStore(): { store: WorkspaceStore; fs: MemoryFileSystem } {
 }
 
 describe('WorkspaceStore', () => {
+    it('читает сохранённую тему «Графит»', async () => {
+        const { store } = createStore()
+        const settings = await store.getSettings()
+
+        await store.saveSettings({ ...settings, theme: 'graphite' })
+
+        expect((await store.getSettings()).theme).toBe('graphite')
+    })
+
+    it('читает локальные темы и пропускает файлы с неизвестными токенами или нецветовыми значениями', async () => {
+        const { store, fs } = createStore()
+        const folder = new LibraryPaths('/library').themesDir()
+        await fs.writeTextAtomic(`${folder}/amber.json`, JSON.stringify({
+            name: 'Янтарная',
+            base: 'graphite',
+            colors: { accent: '#ffb44c', 'surface-editor': '#202020bb' },
+        }))
+        await fs.writeTextAtomic(`${folder}/bad.json`, JSON.stringify({
+            name: 'Broken', colors: { accent: 'url(https://example.com/a)' },
+        }))
+        await fs.writeTextAtomic(`${folder}/unknown.json`, JSON.stringify({
+            name: 'Unknown', colors: { 'window-opacity': '#fff' },
+        }))
+        await fs.writeTextAtomic(`${folder}/README.txt`, 'Themes')
+
+        expect(await store.listLocalThemes()).toEqual({
+            themes: [{
+                id: 'local:amber',
+                name: 'Янтарная',
+                base: 'graphite',
+                colors: { accent: '#ffb44c', 'surface-editor': '#202020bb' },
+            }],
+            invalidFiles: ['bad.json', 'unknown.json'],
+        })
+
+        await store.saveSettings({ ...await store.getSettings(), theme: 'local:amber' })
+        expect((await store.getSettings()).theme).toBe('local:amber')
+    })
+
+    it('читает старые параметры окна и сохраняет переключатель прозрачности рабочей области', async () => {
+        const { store, fs } = createStore()
+        await fs.writeTextAtomic(
+            new LibraryPaths('/library').settings(),
+            JSON.stringify({ appearance: { opacity: 45, material: 'sidebar' } }),
+        )
+        const settings = await store.getSettings()
+        expect(settings.appearance).toEqual({
+            opacity: 45,
+            material: 'sidebar',
+            workspaceTransparency: false,
+        })
+
+        await store.saveSettings({
+            ...settings,
+            appearance: { ...settings.appearance, workspaceTransparency: true },
+        })
+        expect((await store.getSettings()).appearance).toEqual({
+            opacity: 45,
+            material: 'sidebar',
+            workspaceTransparency: true,
+        })
+    })
+
     it('создаёт workspace с окружением по умолчанию и находит его в списке', async () => {
         const { store } = createStore()
         await store.init()

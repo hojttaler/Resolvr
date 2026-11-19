@@ -4,12 +4,15 @@ import { ErrorCodeEnum, ResolvrError } from '../model/errors.js'
 import {
     CollectionSchema,
     FlowSchema,
+    LocalThemeSchema,
     OperationMetaSchema,
     SettingsSchema,
+    SlugSchema,
     WorkspaceSchema,
     type ICollection,
     type IEnvironmentCapture,
     type IFlow,
+    type ILocalTheme,
     type IOperation,
     type IOperationKind,
     type IOperationMeta,
@@ -64,6 +67,11 @@ export interface IMoveOperationOptions {
      * на прежнем месте, а перенесённая в другую коллекцию встаёт в конец.
      */
     index?: number
+}
+
+export interface ILocalThemeCatalog {
+    themes: ILocalTheme[]
+    invalidFiles: string[]
 }
 
 /**
@@ -122,6 +130,35 @@ export class WorkspaceStore {
 
     public async saveSettings(settings: ISettings): Promise<void> {
         await writeJsonFile(this._fs, this._paths.settings(), settings)
+    }
+
+    /** Читает JSON-темы библиотеки, пропуская записи с ошибками и ссылки. */
+    public async listLocalThemes(): Promise<ILocalThemeCatalog> {
+        const dir = this._paths.themesDir()
+        const themes: ILocalTheme[] = []
+        const invalidFiles: string[] = []
+
+        for (const entry of await this._fs.listDir(dir)) {
+            if (!entry.isFile || !entry.name.endsWith('.json')) continue
+            const slug = SlugSchema.safeParse(entry.name.slice(0, -'.json'.length))
+            try {
+                const theme = slug.success
+                    ? await readJsonFile(this._fs, `${dir}/${entry.name}`, LocalThemeSchema)
+                    : undefined
+                if (theme && slug.success) {
+                    themes.push({ ...theme, id: `local:${slug.data}` })
+                } else {
+                    invalidFiles.push(entry.name)
+                }
+            } catch {
+                invalidFiles.push(entry.name)
+            }
+        }
+
+        return {
+            themes: themes.sort((left, right) => left.name.localeCompare(right.name)),
+            invalidFiles: invalidFiles.sort(),
+        }
     }
 
     // ── Workspaces ──────────────────────────────────────────────────────────

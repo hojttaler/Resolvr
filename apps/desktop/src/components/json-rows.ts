@@ -1,4 +1,4 @@
-import { subtreeMatches } from './json-search.js'
+import { nodeMatches } from './json-search.js'
 
 /**
  * Плоский список строк дерева JSON.
@@ -43,48 +43,31 @@ export function flattenJson(
     const searching = options.needle.length > 0
 
     function visit(
-        label: IJsonRow['label'],
+        key: string | undefined,
+        parentIsArray: boolean,
         node: unknown,
         depth: number,
-        path: string,
-        root: boolean,
-    ): void {
-        if (searching && !root && !subtreeMatches(label?.text, node, options.needle)) return
-
+        parentPath: string,
+    ): boolean {
+        const root = key === undefined
         const isContainer = node !== null && typeof node === 'object'
+        const matches = !searching || root || nodeMatches(key, node, options.needle)
+        if (!isContainer && !matches) return false
+
+        const path = root ? parentPath : parentPath ? `${parentPath}.${key}` : key
         const isArray = Array.isArray(node)
+        const keys = isContainer && !isArray ? Object.keys(node) : []
+        const childCount = isArray ? node.length : keys.length
 
-        if (!isContainer) {
+        if (childCount === 0) {
+            if (!matches) return false
+
             rows.push({
                 key: path || '$',
                 path,
                 depth,
-                label,
-                kind: 'scalar',
-                value: node,
-                isArray: false,
-                childCount: 0,
-                expanded: false,
-                visibleCount: 0,
-            })
-
-            return
-        }
-
-        const entries: Array<[IJsonRow['label'], unknown]> = isArray
-            ? (node as unknown[]).map((item, index) => [{ text: String(index), kind: 'index' as const }, item])
-            : Object.entries(node as Record<string, unknown>).map(([key, item]) => [
-                  { text: key, kind: 'key' as const },
-                  item,
-              ])
-
-        if (entries.length === 0) {
-            rows.push({
-                key: path || '$',
-                path,
-                depth,
-                label,
-                kind: 'empty',
+                label: key === undefined ? undefined : { text: key, kind: parentIsArray ? 'index' : 'key' },
+                kind: isContainer ? 'empty' : 'scalar',
                 value: node,
                 isArray,
                 childCount: 0,
@@ -92,52 +75,68 @@ export function flattenJson(
                 visibleCount: 0,
             })
 
-            return
+            return true
         }
 
-        const visible = searching
-            ? entries.filter(([itemLabel, item]) =>
-                  subtreeMatches(itemLabel?.text, item, options.needle),
-              )
-            : entries
-        const byDefault = depth < options.expandDepth && entries.length <= options.autoCollapseSize
+        const byDefault = depth < options.expandDepth && childCount <= options.autoCollapseSize
         const isOpen = searching || (expanded.get(path || '$') ?? byDefault)
+        const start = rows.length
+        // Reserving the opening row lets search visit each subtree once and
+        // discard a branch without allocating its row when it had no matches.
+        rows.length += 1
+        let visibleCount = 0
 
-        rows.push({
+        if (isOpen) {
+            if (isArray) {
+                for (let index = 0; index < node.length; index += 1) {
+                    if (visit(String(index), true, node[index], depth + 1, path)) visibleCount += 1
+                }
+            } else {
+                const object = node as Record<string, unknown>
+                for (const childKey of keys) {
+                    if (visit(childKey, false, object[childKey], depth + 1, path)) visibleCount += 1
+                }
+            }
+        }
+
+        if (!matches && visibleCount === 0) {
+            rows.length = start
+
+            return false
+        }
+
+        rows[start] = {
             key: path || '$',
             path,
             depth,
-            label,
+            label: key === undefined ? undefined : { text: key, kind: parentIsArray ? 'index' : 'key' },
             kind: 'open',
             value: node,
             isArray,
-            childCount: entries.length,
+            childCount,
             expanded: isOpen,
-            visibleCount: visible.length,
-        })
-
-        if (!isOpen) return
-
-        for (const [itemLabel, item] of visible) {
-            const childPath = path.length > 0 ? `${path}.${itemLabel?.text ?? ''}` : (itemLabel?.text ?? '')
-            visit(itemLabel, item, depth + 1, childPath, false)
+            visibleCount: searching ? visibleCount : childCount,
         }
 
-        rows.push({
-            key: `${path || '$'}/close`,
-            path,
-            depth,
-            label: undefined,
-            kind: 'close',
-            value: node,
-            isArray,
-            childCount: entries.length,
-            expanded: true,
-            visibleCount: visible.length,
-        })
+        if (isOpen) {
+            rows.push({
+                key: `${path || '$'}/close`,
+                path,
+                depth,
+                label: undefined,
+                kind: 'close',
+                value: node,
+                isArray,
+                childCount,
+                expanded: true,
+                visibleCount: searching ? visibleCount : childCount,
+            })
+        }
+
+        return true
     }
 
-    visit(undefined, value, 0, options.rootPath, true)
+    visit(undefined, false, value, 0, options.rootPath)
 
     return rows
 }

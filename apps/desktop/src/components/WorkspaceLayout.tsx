@@ -1,180 +1,144 @@
-import { Group, Panel, Separator } from 'react-resizable-panels'
+import { useLayoutEffect, useRef } from 'react'
+import { Group, Panel, Separator, type GroupImperativeHandle } from 'react-resizable-panels'
 
+import { useT } from '../i18n/index.js'
+import { kbd } from '../lib/keys.js'
 import { useAppStore } from '../state/store.js'
 import { FlowPage } from './FlowEditor.js'
-import { ReportPage } from './ReportPage.js'
-import { SchemaPage } from './SchemaPage.js'
 import { Inspector } from './Inspector.js'
+import { ReportPage } from './ReportPage.js'
 import { RequestPane } from './RequestPane.js'
 import { ResponsePane } from './ResponsePane.js'
+import { SchemaPage } from './SchemaPage.js'
 import { ActivityRail, Sidebar } from './Sidebar.js'
+import { TabStrip } from './TitleBar.js'
 
-/**
- * Раскладка рабочей области.
- *
- * Три пресета вместо свободного перетаскивания панелей: они покрывают реальные
- * режимы работы (обычный, с инспектором, без отвлечений), переключаются одной
- * клавишей и не дают развалить интерфейс случайным перетаскиванием. Размеры
- * панелей сохраняются на workspace отдельно для каждого пресета.
- */
+/** Каркас рабочей области с общей полосой вкладок и панелями выбранного раздела. */
 export function WorkspaceLayout(): React.JSX.Element {
     const preset = useAppStore((state) => state.layoutPreset)
+    const workspaceId = useAppStore((state) => state.workspace?.id)
+    const kind = useAppStore(
+        (state) => state.tabs.find((tab) => tab.id === state.activeTabId)?.kind,
+    )
+    const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed)
+    const rootKey = `${preset}-root`
+    const layout = useAppStore((state) => state.layoutSizes[rootKey])
+    const expanded = useAppStore((state) => Boolean(state.layoutSizes[`${rootKey}-restore`]))
+    const showSidebar = preset !== 'focus' && !sidebarCollapsed && !expanded
+    const showInspector =
+        preset === 'inspector' &&
+        !expanded &&
+        kind !== 'flow' &&
+        kind !== 'report' &&
+        kind !== 'schema'
+    const sidebar = layout?.sidebar ?? 19
+    const inspector = layout?.inspector ?? 25
 
-    // Полоса разделов стоит слева от всех панелей и не участвует в
-    // перетаскивании; в режиме Focus её нет — как и сайдбара.
     return (
         <div className="workspace">
             {preset !== 'focus' && <ActivityRail />}
-            <div className="workspace__panels">
-                <WorkspacePanels />
-            </div>
+            <Group
+                key={`${workspaceId ?? ''}:${preset}`}
+                orientation="horizontal"
+                className="layout-group workspace__panels"
+                defaultLayout={
+                    showSidebar && showInspector
+                        ? { sidebar, center: 100 - sidebar - inspector, inspector }
+                        : showSidebar
+                          ? { sidebar, center: 100 - sidebar }
+                          : showInspector
+                            ? { center: 100 - inspector, inspector }
+                            : { center: 100 }
+                }
+                onLayoutChanged={(sizes, meta) => {
+                    if (!meta.isUserInteraction || expanded) return
+                    const store = useAppStore.getState()
+                    const next = { ...store.layoutSizes[rootKey] }
+                    if (sizes.sidebar !== undefined) next.sidebar = sizes.sidebar
+                    if (sizes.inspector !== undefined) next.inspector = sizes.inspector
+                    if (next.sidebar !== layout?.sidebar || next.inspector !== layout?.inspector) {
+                        store.setLayoutSizes(rootKey, next)
+                    }
+                }}
+            >
+                {showSidebar && (
+                    <Panel id="sidebar" minSize="168px" maxSize="40%">
+                        <Sidebar />
+                    </Panel>
+                )}
+                {showSidebar && <Separator id="sidebar-separator" className="resize-handle" />}
+                <Panel id="center" minSize="40%">
+                    <div className="workbench">
+                        <TabStrip />
+                        <div className="workbench__content">
+                            <WorkspacePage />
+                        </div>
+                    </div>
+                </Panel>
+                {showInspector && <Separator id="inspector-separator" className="resize-handle" />}
+                {showInspector && (
+                    <Panel id="inspector" minSize="15%" maxSize="45%">
+                        <Inspector />
+                    </Panel>
+                )}
+            </Group>
         </div>
     )
 }
 
-function WorkspacePanels(): React.JSX.Element {
-    const preset = useAppStore((state) => state.layoutPreset)
-    const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed)
-    const layoutSizes = useAppStore((state) => state.layoutSizes)
-    const setLayoutSizes = useAppStore((state) => state.setLayoutSizes)
+function WorkspacePage(): React.JSX.Element {
     const activeTab = useAppStore((state) => state.tabs.find((tab) => tab.id === state.activeTabId))
+    const t = useT()
 
+    if (!activeTab) {
+        return (
+            <div className="empty">
+                {t('No open tabs.')}
+                <br />
+                {t('Press {keys} or pick an operation in the collections.', { keys: kbd('T') })}
+            </div>
+        )
+    }
+    if (activeTab.kind === 'flow') return <FlowPage key={activeTab.id} tabId={activeTab.id} />
+    if (activeTab.kind === 'report') return <ReportPage tabId={activeTab.id} />
+    if (activeTab.kind === 'schema') return <SchemaPage tabId={activeTab.id} />
+
+    return <RequestWorkspace />
+}
+
+function RequestWorkspace(): React.JSX.Element {
+    const preset = useAppStore((state) => state.layoutPreset)
     const rootKey = `${preset}-root`
-    const centerKey = `${preset}-center`
+    const layoutKey = preset === 'inspector' ? `${preset}-center` : rootKey
+    const saved = useAppStore((state) => state.layoutSizes[layoutKey])
+    const expanded = useAppStore((state) => Boolean(state.layoutSizes[`${rootKey}-restore`]))
+    const group = useRef<GroupImperativeHandle | null>(null)
+    // Сохранённые до изменения каркаса размеры classic включают ширину сайдбара.
+    // Отношение ширин запроса и ответа переносится во вложенную группу.
+    const savedTotal = (saved?.request ?? 0) + (saved?.response ?? 0)
+    const request = expanded ? 25 : savedTotal ? ((saved?.request ?? 0) / savedTotal) * 100 : 48
 
-    // Вкладка-цепочка и вкладка-отчёт занимают всё место запроса и ответа:
-    // у них свои шаги со своими ответами, отдельная панель ответа была бы пустой.
-    if (activeTab?.kind === 'flow' || activeTab?.kind === 'report' || activeTab?.kind === 'schema') {
-        const page =
-            activeTab.kind === 'flow' ? (
-                <FlowPage tabId={activeTab.id} />
-            ) : activeTab.kind === 'report' ? (
-                <ReportPage tabId={activeTab.id} />
-            ) : (
-                <SchemaPage tabId={activeTab.id} />
-            )
-        if (preset === 'focus' || sidebarCollapsed) return page
-
-        // Ширина сайдбара берётся из основной раскладки: при переключении
-        // между вкладкой запроса и вкладкой цепочки он не должен прыгать.
-        const sidebar = layoutSizes[rootKey]?.sidebar ?? 20
-
-        return (
-            <Group
-                orientation="horizontal"
-                className="layout-group"
-                defaultLayout={{ sidebar, center: 100 - sidebar }}
-                onLayoutChanged={(layout, meta) => {
-                    if (meta.isUserInteraction && layout.sidebar !== undefined) {
-                        setLayoutSizes(rootKey, { ...layoutSizes[rootKey], sidebar: layout.sidebar })
-                    }
-                }}
-            >
-                <Panel id="sidebar" minSize="14" maxSize="40">
-                    <Sidebar />
-                </Panel>
-                <Separator className="resize-handle" />
-                <Panel id="center" minSize="30">
-                    {page}
-                </Panel>
-            </Group>
-        )
-    }
-
-    if (preset === 'focus') {
-        return (
-            <Group
-                orientation="horizontal"
-                className="layout-group"
-                defaultLayout={layoutSizes[rootKey] ?? { request: 55, response: 45 }}
-                onLayoutChanged={(layout, meta) => {
-                    if (meta.isUserInteraction) setLayoutSizes(rootKey, layout)
-                }}
-            >
-                <Panel id="request" minSize="25">
-                    <RequestPane />
-                </Panel>
-                <Separator className="resize-handle" />
-                <Panel id="response" minSize="20">
-                    <ResponsePane />
-                </Panel>
-            </Group>
-        )
-    }
-
-    if (preset === 'inspector') {
-        return (
-            <Group
-                orientation="horizontal"
-                className="layout-group"
-                defaultLayout={
-                    layoutSizes[rootKey] ?? { sidebar: 20, center: 55, inspector: 25 }
-                }
-                onLayoutChanged={(layout, meta) => {
-                    if (meta.isUserInteraction) setLayoutSizes(rootKey, layout)
-                }}
-            >
-                {!sidebarCollapsed && (
-                    <>
-                        <Panel id="sidebar" minSize="14" maxSize="40">
-                            <Sidebar />
-                        </Panel>
-                        <Separator className="resize-handle" />
-                    </>
-                )}
-
-                <Panel id="center" minSize="30">
-                    <Group
-                        orientation="vertical"
-                        className="layout-group"
-                        defaultLayout={
-                            layoutSizes[centerKey] ?? { request: 55, response: 45 }
-                        }
-                        onLayoutChanged={(layout, meta) => {
-                            if (meta.isUserInteraction) setLayoutSizes(centerKey, layout)
-                        }}
-                    >
-                        <Panel id="request" minSize="20">
-                            <RequestPane />
-                        </Panel>
-                        <Separator className="resize-handle" />
-                        <Panel id="response" minSize="15">
-                            <ResponsePane />
-                        </Panel>
-                    </Group>
-                </Panel>
-
-                <Separator className="resize-handle" />
-                <Panel id="inspector" minSize="15" maxSize="45">
-                    <Inspector />
-                </Panel>
-            </Group>
-        )
-    }
+    useLayoutEffect(() => {
+        group.current?.setLayout({ request, response: 100 - request })
+    }, [request])
 
     return (
         <Group
-            orientation="horizontal"
+            groupRef={group}
+            orientation={preset === 'inspector' && !expanded ? 'vertical' : 'horizontal'}
             className="layout-group"
-            defaultLayout={layoutSizes[rootKey] ?? { sidebar: 21, request: 44, response: 35 }}
-            onLayoutChanged={(layout, meta) => {
-                if (meta.isUserInteraction) setLayoutSizes(rootKey, layout)
+            defaultLayout={{ request, response: 100 - request }}
+            onLayoutChanged={(sizes, meta) => {
+                if (!meta.isUserInteraction || expanded) return
+                const store = useAppStore.getState()
+                store.setLayoutSizes(layoutKey, { ...store.layoutSizes[layoutKey], ...sizes })
             }}
         >
-            {!sidebarCollapsed && (
-                <>
-                    <Panel id="sidebar" minSize="12" maxSize="40">
-                        <Sidebar />
-                    </Panel>
-                    <Separator className="resize-handle" />
-                </>
-            )}
-
-            <Panel id="request" minSize="25">
+            <Panel id="request" minSize="20%">
                 <RequestPane />
             </Panel>
             <Separator className="resize-handle" />
-            <Panel id="response" minSize="20">
+            <Panel id="response" minSize="20%">
                 <ResponsePane />
             </Panel>
         </Group>

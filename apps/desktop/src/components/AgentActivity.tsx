@@ -1,9 +1,6 @@
-import type {
-    IActivityCallRecord,
-    IActivityNoteRecord,
-    IActivitySession,
-} from '@resolvr/core'
+import type { IActivityCallRecord, IActivityNoteRecord, IActivitySession } from '@resolvr/core'
 import { useEffect, useMemo, useState } from 'react'
+import { DialogSurface } from './DialogSurface.js'
 
 import { useAppStore } from '../state/store.js'
 import { JsonViewer } from './JsonViewer.js'
@@ -37,16 +34,6 @@ export function AgentActivity(props: IAgentActivityProps): React.JSX.Element {
         void loadActivity()
     }, [loadActivity])
 
-    useEffect(() => {
-        function onKeyDown(event: KeyboardEvent): void {
-            if (event.key === 'Escape') props.onClose()
-        }
-
-        window.addEventListener('keydown', onKeyDown)
-
-        return () => window.removeEventListener('keydown', onKeyDown)
-    }, [props])
-
     const session: IActivitySession | undefined =
         sessions.find((item) => item.sessionId === sessionId) ?? sessions[0]
 
@@ -61,114 +48,119 @@ export function AgentActivity(props: IAgentActivityProps): React.JSX.Element {
     }, [session, filter])
 
     const selected =
-        session?.entries.find((entry) => entry.seq === selectedSeq) ??
-        [...(session?.entries ?? [])].reverse().find((entry) => entry.kind === 'call')
+        entries.find((entry) => entry.seq === selectedSeq) ??
+        entries.findLast((entry) => entry.kind === 'call') ??
+        entries.at(-1)
 
     return (
-        <div className="overlay" onMouseDown={props.onClose}>
-            <div className="dialog dialog--full" onMouseDown={(event) => event.stopPropagation()}>
-                <div className="activity__head">
-                    <div className="dialog__title">{t('Agent activity')}</div>
+        <DialogSurface label={t('Agent activity')} className="dialog--full" onClose={props.onClose}>
+            <div className="activity__head">
+                <div className="dialog__title">{t('Agent activity')}</div>
 
-                    <select
-                        className="select"
-                        style={{ maxWidth: 230 }}
-                        value={session?.sessionId ?? ''}
-                        onChange={(event) => {
-                            setSessionId(event.target.value)
-                            setSelectedSeq(undefined)
-                        }}
-                    >
-                        {sessions.length === 0 && <option value="">{t('No records')}</option>}
-                        {sessions.map((item) => (
-                            <option key={item.sessionId} value={item.sessionId}>
-                                {formatSessionLabel(item)}
-                            </option>
-                        ))}
-                    </select>
+                <select
+                    className="select"
+                    aria-label={t('Session')}
+                    style={{ maxWidth: 230 }}
+                    value={session?.sessionId ?? ''}
+                    onChange={(event) => {
+                        setSessionId(event.target.value)
+                        setSelectedSeq(undefined)
+                    }}
+                >
+                    {sessions.length === 0 && <option value="">{t('No records')}</option>}
+                    {sessions.map((item) => (
+                        <option key={item.sessionId} value={item.sessionId}>
+                            {formatSessionLabel(item)}
+                        </option>
+                    ))}
+                </select>
 
-                    <div className="segmented">
-                        {(
-                            [
-                                ['all', t('All')],
-                                ['failed', t('Errors')],
-                                ['notes', t('Notes')],
-                            ] as const
-                        ).map(([value, label]) => (
-                            <button
-                                key={value}
-                                type="button"
-                                className={`segmented__item${
-                                    filter === value ? ' segmented__item--active' : ''
-                                }`}
-                                onClick={() => setFilter(value)}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-
-                    <span className="panel__spacer" />
-
-                    {session && <SessionStats session={session} />}
-
-                    <button type="button" className="btn btn--quiet" onClick={() => void loadActivity()}>
-                        {t('Refresh')}
-                    </button>
-                    <button type="button" className="btn" onClick={props.onClose}>
-                        {t('Close')}
-                    </button>
+                <div className="segmented">
+                    {(
+                        [
+                            ['all', t('All')],
+                            ['failed', t('Errors')],
+                            ['notes', t('Notes')],
+                        ] as const
+                    ).map(([value, label]) => (
+                        <button
+                            key={value}
+                            type="button"
+                            className={`segmented__item${
+                                filter === value ? ' segmented__item--active' : ''
+                            }`}
+                            aria-pressed={filter === value}
+                            onClick={() => setFilter(value)}
+                        >
+                            {label}
+                        </button>
+                    ))}
                 </div>
 
-                {!session ? (
-                    <div className="empty">
-                        {t('The agent has not contacted the app yet.')}
-                        <br />
-                        {t('The log appears after the first call via MCP.')}
-                    </div>
-                ) : (
-                    <div className="activity__body">
-                        <div className="activity__timeline">
-                            {session.plan && (
-                                <div className="activity__plan">
-                                    <div className="settings__caption">{t('Plan')}</div>
-                                    <div className="activity__goal">{session.plan.goal}</div>
-                                    <ol className="activity__steps">
-                                        {session.plan.steps.map((step, index) => (
-                                            <li key={`${index}-${step}`}>{step}</li>
-                                        ))}
-                                    </ol>
-                                </div>
-                            )}
+                <span className="panel__spacer" />
 
-                            {entries.length === 0 && <div className="empty">{t('Nothing found')}</div>}
+                {session && <SessionStats session={session} />}
 
-                            {entries.map((entry) => (
-                                <TimelineRow
-                                    key={entry.seq}
-                                    entry={entry}
-                                    active={entry.seq === selected?.seq}
-                                    stepLabel={
-                                        entry.step !== undefined
-                                            ? session.plan?.steps[entry.step]
-                                            : undefined
-                                    }
-                                    onSelect={() => setSelectedSeq(entry.seq)}
-                                />
-                            ))}
-                        </div>
-
-                        <div className="activity__details">
-                            {selected ? (
-                                <EntryDetails entry={selected} expandDepth={expandDepth} />
-                            ) : (
-                                <div className="empty">{t('Pick a step on the left')}</div>
-                            )}
-                        </div>
-                    </div>
-                )}
+                <button
+                    type="button"
+                    className="btn btn--quiet"
+                    onClick={() => void loadActivity()}
+                >
+                    {t('Refresh')}
+                </button>
+                <button type="button" className="btn" onClick={props.onClose}>
+                    {t('Close')}
+                </button>
             </div>
-        </div>
+
+            {!session ? (
+                <div className="empty">
+                    {t('The agent has not contacted the app yet.')}
+                    <br />
+                    {t('The log appears after the first call via MCP.')}
+                </div>
+            ) : (
+                <div className="activity__body">
+                    <div className="activity__timeline">
+                        {session.plan && (
+                            <div className="activity__plan">
+                                <div className="settings__caption">{t('Plan')}</div>
+                                <div className="activity__goal">{session.plan.goal}</div>
+                                <ol className="activity__steps">
+                                    {session.plan.steps.map((step, index) => (
+                                        <li key={`${index}-${step}`}>{step}</li>
+                                    ))}
+                                </ol>
+                            </div>
+                        )}
+
+                        {entries.length === 0 && <div className="empty">{t('Nothing found')}</div>}
+
+                        {entries.map((entry) => (
+                            <TimelineRow
+                                key={entry.seq}
+                                entry={entry}
+                                active={entry.seq === selected?.seq}
+                                stepLabel={
+                                    entry.step !== undefined
+                                        ? session.plan?.steps[entry.step]
+                                        : undefined
+                                }
+                                onSelect={() => setSelectedSeq(entry.seq)}
+                            />
+                        ))}
+                    </div>
+
+                    <div className="activity__details">
+                        {selected ? (
+                            <EntryDetails entry={selected} expandDepth={expandDepth} />
+                        ) : (
+                            <div className="empty">{t('Pick a step on the left')}</div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </DialogSurface>
     )
 }
 
@@ -178,11 +170,15 @@ function SessionStats({ session }: { session: IActivitySession }): React.JSX.Ele
         <span className="row">
             <span className="badge">{tn(session.stats.totalCalls, 'call|calls')}</span>
             {session.stats.failedCalls > 0 ? (
-                <span className="badge badge--fail">{t('{n} failed', { n: session.stats.failedCalls })}</span>
+                <span className="badge badge--fail">
+                    {t('{n} failed', { n: session.stats.failedCalls })}
+                </span>
             ) : (
                 <span className="badge badge--ok">{t('no errors')}</span>
             )}
-            <span className="badge">{t('{n} ms', { n: Math.round(session.stats.durationMs) })}</span>
+            <span className="badge">
+                {t('{n} ms', { n: Math.round(session.stats.durationMs) })}
+            </span>
         </span>
     )
 }
@@ -200,24 +196,28 @@ function TimelineRow(props: ITimelineRowProps): React.JSX.Element {
 
     if (entry.kind === 'note') {
         return (
-            <div
+            <button
+                type="button"
+                aria-pressed={props.active}
                 className={`activity__row activity__row--note${
                     props.active ? ' activity__row--active' : ''
                 }`}
                 onClick={props.onSelect}
             >
                 <span className="activity__seq">{entry.seq}</span>
-                <div className="activity__main">
-                    <div className="activity__intent">{entry.text}</div>
-                    {props.stepLabel && <div className="activity__step">{props.stepLabel}</div>}
-                </div>
+                <span className="activity__main">
+                    <span className="activity__intent">{entry.text}</span>
+                    {props.stepLabel && <span className="activity__step">{props.stepLabel}</span>}
+                </span>
                 <span className="badge">{t('note')}</span>
-            </div>
+            </button>
         )
     }
 
     return (
-        <div
+        <button
+            type="button"
+            aria-pressed={props.active}
             className={`activity__row${props.active ? ' activity__row--active' : ''}${
                 entry.ok ? '' : ' activity__row--failed'
             }`}
@@ -225,20 +225,20 @@ function TimelineRow(props: ITimelineRowProps): React.JSX.Element {
         >
             <span className="activity__seq">{entry.seq}</span>
 
-            <div className="activity__main">
-                <div className="activity__intent">{entry.intent || t('— no description —')}</div>
-                <div className="activity__meta">
+            <span className="activity__main">
+                <span className="activity__intent">{entry.intent || t('— no description —')}</span>
+                <span className="activity__meta">
                     <span className="mono">{entry.tool}</span>
                     <span>{entry.summary}</span>
-                </div>
-                {props.stepLabel && <div className="activity__step">{props.stepLabel}</div>}
-            </div>
+                </span>
+                {props.stepLabel && <span className="activity__step">{props.stepLabel}</span>}
+            </span>
 
             <span className={`badge ${entry.ok ? 'badge--ok' : 'badge--fail'}`}>
                 {entry.ok ? '✓' : '✕'}
             </span>
             <span className="badge">{t('{n} ms', { n: Math.round(entry.durationMs) })}</span>
-        </div>
+        </button>
     )
 }
 
@@ -267,7 +267,9 @@ function EntryDetails({ entry, expandDepth }: IEntryDetailsProps): React.JSX.Ele
             <div className="activity__intent selectable">{entry.intent}</div>
 
             {entry.expectation && (
-                <div className="inspector__hint selectable">{t('Expected: {text}', { text: entry.expectation })}</div>
+                <div className="inspector__hint selectable">
+                    {t('Expected: {text}', { text: entry.expectation })}
+                </div>
             )}
 
             <div className="row" style={{ flexWrap: 'wrap' }}>

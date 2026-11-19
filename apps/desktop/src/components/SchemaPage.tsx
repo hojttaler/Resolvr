@@ -1,13 +1,14 @@
 import {
-    buildOperation,
     describeType,
     findTypeUsages,
+    schemaSelectionTargets,
     type IFieldInfo,
     type ITypeInfo,
     type ITypeUsage,
 } from '@resolvr/core'
 import { useEffect, useMemo, useState } from 'react'
 
+import { useSchemaRequest } from '../hooks/use-schema-request.js'
 import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { useAppStore } from '../state/store.js'
@@ -18,8 +19,8 @@ import { useAppStore } from '../state/store.js'
  * Тип показан как страница документации: описание, поля с аргументами,
  * значения enum, реализующие типы и раздел «используется в». Каждое имя
  * типа кликабельно — переход ведёт историю, как в браузере, чтобы можно было
- * пройти по связям туда и вернуться. Для корневых полей есть «Вставить
- * запрос»: готовая операция с выборкой и переменными уходит во вкладку.
+ * пройти по связям туда и вернуться. Поля добавляются в выбранную ветку
+ * открытого запроса, сохраняя исходный документ.
  */
 export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
     const schema = useAppStore((state) => state.schema)
@@ -29,9 +30,8 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
     const schemaGoBack = useAppStore((state) => state.schemaGoBack)
     const schemaGoForward = useAppStore((state) => state.schemaGoForward)
     const refreshSchema = useAppStore((state) => state.refreshSchema)
-    const openTab = useAppStore((state) => state.openTab)
-    const replaceActiveQuery = useAppStore((state) => state.replaceActiveQuery)
-    const autofillDepth = useAppStore((state) => state.settings.editor.autofillDepth)
+    const request = useSchemaRequest(schema)
+    const [targetIndex, setTargetIndex] = useState(0)
     const [filter, setFilter] = useState('')
     const [showSdl, setShowSdl] = useState(false)
     const [copied, setCopied] = useState(false)
@@ -43,6 +43,7 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
     // иначе невидимое условие с прошлой страницы прятало бы поля следующей.
     useEffect(() => {
         setFilter('')
+        setTargetIndex(0)
     }, [typeName])
 
     const info = useMemo(
@@ -53,6 +54,15 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
         () => (schema && info ? findTypeUsages(schema, info.name) : []),
         [schema, info],
     )
+
+    const targets = useMemo(
+        () =>
+            schema && request.operation
+                ? schemaSelectionTargets(schema, request.operation, typeName)
+                : [],
+        [schema, request.operation, typeName],
+    )
+    const target = targets[targetIndex] ?? targets[0]
 
     if (!schema) {
         return (
@@ -76,7 +86,9 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
     if (!info) {
         return (
             <div className="panel">
-                <div className="empty">{t('Type “{name}” is not in the schema', { name: typeName })}</div>
+                <div className="empty">
+                    {t('Type “{name}” is not in the schema', { name: typeName })}
+                </div>
             </div>
         )
     }
@@ -95,17 +107,12 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
             field.type.toLowerCase().includes(needle),
     )
 
-    async function insertOperation(field: IFieldInfo): Promise<void> {
-        if (!schema || !info?.root) return
-
-        const built = buildOperation(schema, {
-            kind: info.root,
-            fieldName: field.name,
-            depth: autofillDepth,
-        })
-        await openTab({ title: field.name, query: built.query })
-        replaceActiveQuery(built.query, built.variables)
-    }
+    const operationKind = info.root ?? request.operation?.operation
+    const output = info.kind === 'object' || info.kind === 'interface'
+    const canInsert =
+        output &&
+        operationKind !== undefined &&
+        (info.root !== undefined || (!request.invalid && target !== undefined))
 
     return (
         <div className="panel schema-page">
@@ -131,14 +138,14 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
                     ›
                 </button>
 
-                <span className={`badge badge--kind-${info.kind}`}>{kindLabel(info, t)}</span>
-                <span className="panel__title mono">{info.name}</span>
+                <span className="panel__title">{t('Schema')}</span>
 
                 <span className="panel__spacer" />
 
                 <button
                     type="button"
-                    className={`btn btn--quiet${showSdl ? ' btn--on' : ''}`}
+                    className={`btn${showSdl ? ' btn--on' : ''}`}
+                    aria-pressed={showSdl}
                     onClick={() => setShowSdl((current) => !current)}
                 >
                     SDL
@@ -157,7 +164,58 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
             </div>
 
             <div className="panel__content schema-page__body">
-                {info.description && <p className="schema-page__description">{info.description}</p>}
+                <header className="schema-page__lead">
+                    <span className={`badge badge--kind-${info.kind}`}>{kindLabel(info, t)}</span>
+                    <h1 className="mono">{info.name}</h1>
+                    {info.description && (
+                        <p className="schema-page__description">{info.description}</p>
+                    )}
+                </header>
+
+                {output && (request.title || info.root) && (
+                    <div className="schema-page__target">
+                        {request.title && <strong>{request.title}</strong>}
+                        {request.operations.length > 1 && (
+                            <select
+                                className="select"
+                                aria-label={t('Operation to edit')}
+                                value={request.operationIndex}
+                                onChange={(event) => {
+                                    request.selectOperation(Number(event.target.value))
+                                    setTargetIndex(0)
+                                }}
+                            >
+                                {request.operations.map((operation, index) => (
+                                    <option key={index} value={index}>
+                                        {operation.name?.value ?? operation.operation}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        {targets.length > 1 && (
+                            <select
+                                className="select"
+                                aria-label={t('Selection to edit')}
+                                value={target && targets.indexOf(target)}
+                                onChange={(event) => setTargetIndex(Number(event.target.value))}
+                            >
+                                {targets.map((location, index) => (
+                                    <option key={location.offset} value={index}>
+                                        {location.label}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        {!info.root && request.invalid ? (
+                            <span>{t('Complete the request syntax before adding fields')}</span>
+                        ) : !info.root && request.operation && !target ? (
+                            <span>
+                                {t('Open this type as a branch in Explorer to add its fields')}
+                            </span>
+                        ) : null}
+                        {request.message && <span role="status">{request.message}</span>}
+                    </div>
+                )}
 
                 {info.interfaces.length > 0 && (
                     <div className="schema-page__meta">
@@ -174,7 +232,8 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
                     <section className="schema-page__section">
                         <div className="schema-page__section-head">
                             <span className="settings__caption">
-                                {info.kind === 'input' ? t('Input fields') : t('Fields')} · {info.fields.length}
+                                {info.kind === 'input' ? t('Input fields') : t('Fields')} ·{' '}
+                                {info.fields.length}
                             </span>
                             {filterable && (
                                 <input
@@ -190,12 +249,22 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
                             <FieldRow
                                 key={field.name}
                                 field={field}
-                                root={info.root !== undefined}
                                 onOpen={go}
-                                onInsert={() => void insertOperation(field)}
+                                onInsert={
+                                    canInsert && operationKind
+                                        ? () =>
+                                              void request.insert({
+                                                  kind: operationKind,
+                                                  field: field.name,
+                                                  target: info.root ? undefined : target,
+                                              })
+                                        : undefined
+                                }
                             />
                         ))}
-                        {fields.length === 0 && <div className="inspector__hint">{t('Nothing found')}</div>}
+                        {fields.length === 0 && (
+                            <div className="inspector__hint">{t('Nothing found')}</div>
+                        )}
                     </section>
                 )}
 
@@ -208,7 +277,10 @@ export function SchemaPage({ tabId }: { tabId: string }): React.JSX.Element {
                             <div key={value.name} className="schema-field">
                                 <span className="mono schema-field__name">{value.name}</span>
                                 {value.deprecationReason && (
-                                    <span className="badge badge--fail" title={value.deprecationReason}>
+                                    <span
+                                        className="badge badge--fail"
+                                        title={value.deprecationReason}
+                                    >
                                         {t('deprecated')}
                                     </span>
                                 )}
@@ -271,7 +343,15 @@ function kindLabel(info: ITypeInfo, t: ReturnType<typeof useT>): string {
 }
 
 /** Имя типа как ссылка; обёртки `[]` и `!` остаются текстом. */
-function TypeRef({ type, named, onOpen }: { type: string; named: string; onOpen: (name: string) => void }): React.JSX.Element {
+function TypeRef({
+    type,
+    named,
+    onOpen,
+}: {
+    type: string
+    named: string
+    onOpen: (name: string) => void
+}): React.JSX.Element {
     const [prefix, suffix] = type.split(named) as [string, string?]
 
     return (
@@ -283,7 +363,13 @@ function TypeRef({ type, named, onOpen }: { type: string; named: string; onOpen:
     )
 }
 
-function TypeLink({ name, onOpen }: { name: string; onOpen: (name: string) => void }): React.JSX.Element {
+function TypeLink({
+    name,
+    onOpen,
+}: {
+    name: string
+    onOpen: (name: string) => void
+}): React.JSX.Element {
     return (
         <button type="button" className="schema-link mono" onClick={() => onOpen(name)}>
             {name}
@@ -293,9 +379,8 @@ function TypeLink({ name, onOpen }: { name: string; onOpen: (name: string) => vo
 
 function FieldRow(props: {
     field: IFieldInfo
-    root: boolean
     onOpen: (name: string) => void
-    onInsert: () => void
+    onInsert?: () => void
 }): React.JSX.Element {
     const { field } = props
     const [open, setOpen] = useState(false)
@@ -303,7 +388,9 @@ function FieldRow(props: {
     const hasArgs = field.args.length > 0
 
     return (
-        <div className={`schema-field${field.deprecationReason ? ' schema-field--deprecated' : ''}`}>
+        <div
+            className={`schema-field${field.deprecationReason ? ' schema-field--deprecated' : ''}`}
+        >
             <div className="schema-field__row">
                 <button
                     type="button"
@@ -314,9 +401,22 @@ function FieldRow(props: {
                 >
                     ▶
                 </button>
-                <span className="mono schema-field__name">{field.name}</span>
+                {props.onInsert ? (
+                    <button
+                        type="button"
+                        className="mono schema-field__name schema-field__name--insert"
+                        onClick={props.onInsert}
+                    >
+                        {field.name}
+                    </button>
+                ) : (
+                    <span className="mono schema-field__name">{field.name}</span>
+                )}
                 {hasArgs && (
-                    <span className="mono schema-field__args" onClick={() => setOpen((current) => !current)}>
+                    <span
+                        className="mono schema-field__args"
+                        onClick={() => setOpen((current) => !current)}
+                    >
                         ({field.args.map((arg) => arg.name).join(', ')})
                     </span>
                 )}
@@ -326,12 +426,6 @@ function FieldRow(props: {
                     <span className="badge badge--fail" title={field.deprecationReason}>
                         {t('deprecated')}
                     </span>
-                )}
-                <span className="panel__spacer" />
-                {props.root && (
-                    <button type="button" className="btn btn--quiet" onClick={props.onInsert}>
-                        {t('Insert query')}
-                    </button>
                 )}
             </div>
 
@@ -359,16 +453,28 @@ function FieldRow(props: {
     )
 }
 
-function UsageRow({ usage, onOpen }: { usage: ITypeUsage; onOpen: (name: string) => void }): React.JSX.Element {
+function UsageRow({
+    usage,
+    onOpen,
+}: {
+    usage: ITypeUsage
+    onOpen: (name: string) => void
+}): React.JSX.Element {
     const t = useT()
 
     return (
         <div className="schema-field__row">
             <TypeLink name={usage.typeName} onOpen={onOpen} />
             <span className="mono">.{usage.fieldName}</span>
-            {usage.argumentName && <span className="mono inspector__hint">({usage.argumentName})</span>}
+            {usage.argumentName && (
+                <span className="mono inspector__hint">({usage.argumentName})</span>
+            )}
             <span className="badge">
-                {usage.role === 'field' ? t('field') : usage.role === 'argument' ? t('argument') : t('input field')}
+                {usage.role === 'field'
+                    ? t('field')
+                    : usage.role === 'argument'
+                      ? t('argument')
+                      : t('input field')}
             </span>
         </div>
     )

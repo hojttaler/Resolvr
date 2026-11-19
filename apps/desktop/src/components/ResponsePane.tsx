@@ -7,6 +7,7 @@ import { t as translate, tn, useT } from '../i18n/index.js'
 import { isModKey, kbd } from '../lib/keys.js'
 import { SELECT_ALL_EVENT } from '../lib/select-all.js'
 import { extractOperationName, selectActiveEnvironment, useAppStore, type ITabRun } from '../state/store.js'
+import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { countMatches } from './json-search.js'
 import { JsonViewer } from './JsonViewer.js'
 import { SaveValueDialog } from './SaveValueDialog.js'
@@ -31,18 +32,20 @@ export function ResponsePane(): React.JSX.Element {
     const [search, setSearch] = useState('')
     const [searchOpen, setSearchOpen] = useState(false)
     const [allSelected, setAllSelected] = useState(false)
+    const [menu, setMenu] = useState<IContextMenuState>()
     const [copied, setCopied] = useState(false)
     const searchInput = useRef<HTMLInputElement>(null)
     const body = useRef<HTMLDivElement>(null)
     const t = useT()
 
     const view = tab?.responseTab ?? 'response'
+    const hasJson = run?.status === 'done' && Boolean(run.result)
     const canCopy = run !== undefined && (run.status === 'done' ? run.result !== undefined : run.events.length > 0)
 
     // Поиск по большому ответу обходит всё дерево: ввод не должен ждать
     // этого обхода на каждой букве.
     const deferredSearch = useDeferredValue(search)
-    const needle = deferredSearch.trim().toLowerCase()
+    const needle = searchOpen ? deferredSearch.trim().toLowerCase() : ''
     const matches = useMemo(
         () =>
             searchOpen
@@ -113,6 +116,8 @@ export function ResponsePane(): React.JSX.Element {
             if (target instanceof HTMLElement && target.closest('.cm-editor')) return
 
             event.preventDefault()
+            const store = useAppStore.getState()
+            if (store.activeTabId) store.setResponseTab(store.activeTabId, 'response')
             setSearchOpen(true)
             searchInput.current?.focus()
             searchInput.current?.select()
@@ -123,16 +128,27 @@ export function ResponsePane(): React.JSX.Element {
         return () => window.removeEventListener('keydown', onKeyDown)
     }, [])
 
+    useEffect(() => {
+        if (searchOpen) searchInput.current?.focus()
+    }, [searchOpen, hasJson])
+
     // Поиск относится к конкретному ответу: при переходе на другую вкладку
     // прежний запрос фильтровал бы чужие данные.
     useEffect(() => {
         setSearch('')
     }, [activeTabId])
 
+    useEffect(() => {
+        if (view !== 'response') {
+            setSearch('')
+            setSearchOpen(false)
+        }
+    }, [view])
+
     if (!activeTabId || !tab) return <div className="empty">{t('No active tab')}</div>
 
     return (
-        <div className="panel">
+        <div className="panel response-panel">
             <div className="panel__header">
                 <div className="segmented">
                     {RESPONSE_TABS.map((item) => (
@@ -160,44 +176,69 @@ export function ResponsePane(): React.JSX.Element {
                 >
                     {copied ? t('Copied') : t('Copy')}
                 </button>
-
-                <button
-                    type="button"
-                    className={`btn btn--quiet btn--icon${searchOpen ? ' btn--on' : ''}`}
-                    onClick={() => {
-                        setSearchOpen((current) => !current)
-                        if (!searchOpen) window.setTimeout(() => searchInput.current?.focus(), 0)
-                    }}
-                    title={t('Search response ({keys})', { keys: kbd('F') })}
-                    aria-label={t('Search response')}
-                >
-                    <SearchIcon />
-                </button>
-
-                <ResponseStatus run={run} />
+                {run?.status !== 'done' && <ResponseStatus run={run} />}
             </div>
 
-            {searchOpen && (
-                <SearchBar
-                    inputRef={searchInput}
-                    value={search}
-                    matches={matches}
-                    onChange={setSearch}
-                    onClose={() => {
-                        setSearchOpen(false)
-                        setSearch('')
-                    }}
-                />
+            {view === 'response' && run?.status === 'done' && run.result && (
+                <div className="response-toolbar">
+                    {searchOpen ? (
+                        <SearchBar
+                            inputRef={searchInput}
+                            value={search}
+                            matches={matches}
+                            onChange={setSearch}
+                            onClose={() => {
+                                setSearchOpen(false)
+                                setSearch('')
+                            }}
+                        />
+                    ) : (
+                        <button
+                            type="button"
+                            className="btn response-toolbar__search"
+                            onClick={() => setSearchOpen(true)}
+                            title={t('Search response ({keys})', { keys: kbd('F') })}
+                            aria-label={t('Search response')}
+                        >
+                            <SearchIcon />
+                            <span>{t('Search JSON')}</span>
+                        </button>
+                    )}
+                    <ResponseStatus run={run} />
+                </div>
+            )}
+
+            {view !== 'response' && run?.status === 'done' && (
+                <div className="response-toolbar response-toolbar--status"><ResponseStatus run={run} /></div>
             )}
 
             <SavedVariablesNotice result={run?.result} />
+            <ContextMenu menu={menu} onClose={() => setMenu(undefined)} />
 
             <div
                 ref={body}
                 className={`panel__content response-body${allSelected ? ' response-body--all-selected' : ''}`}
                 tabIndex={0}
                 data-select-all=""
-                onMouseDown={() => setAllSelected(false)}
+                onMouseDown={(event) => { if (event.button === 0) setAllSelected(false) }}
+                onContextMenu={(event) => {
+                    if (!canCopy || event.defaultPrevented) return
+                    event.preventDefault()
+                    const selection = window.getSelection()
+                    const selected = body.current?.contains(selection?.anchorNode ?? null) ? selection?.toString() : undefined
+                    setMenu({
+                        x: event.clientX, y: event.clientY,
+                        items: [
+                            { label: t('Copy'), hint: kbd('C'), disabled: !selected, run: () => selected ? copyText(selected) : undefined },
+                            { label: t('Copy the whole tab content'), run: copy },
+                            { label: t('Select all'), hint: kbd('A'), run: selectAll },
+                            ...(hasJson ? [{
+                                label: t('Search response'), hint: kbd('F'), separated: true,
+                                run: () => { setResponseTab(activeTabId, 'response'); setSearchOpen(true) },
+                            }] : []),
+                        ],
+                    })
+                }}
                 onKeyDown={(event) => {
                     // Поле поиска и прочие поля ввода внутри панели выделяют
                     // собственный текст.
@@ -223,7 +264,7 @@ export function ResponsePane(): React.JSX.Element {
                     run={run}
                     view={tab.responseTab}
                     expandDepth={expandDepth}
-                    search={deferredSearch}
+                    search={needle}
                     onSaveValue={setSaving}
                 />
             </div>

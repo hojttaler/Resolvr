@@ -1,11 +1,12 @@
 import { StrictMode, useEffect, useState } from 'react'
+import { TextFieldContextMenu } from '../components/TextFieldContextMenu.js'
 import { createRoot } from 'react-dom/client'
 
 import { AgentActivity } from '../components/AgentActivity.js'
 import { CommandPalette } from '../components/CommandPalette.js'
 import { SaveOperationDialog } from '../components/Dialogs.js'
 import { SettingsDialog } from '../components/SettingsDialog.js'
-import { TabStrip, TitleBar } from '../components/TitleBar.js'
+import { TitleBar } from '../components/TitleBar.js'
 import { WorkspaceLayout } from '../components/WorkspaceLayout.js'
 import { WorkspaceSettings } from '../components/WorkspaceSettings.js'
 import { useAppStore } from '../state/store.js'
@@ -38,6 +39,7 @@ function Showcase(): React.JSX.Element {
         // Экран цепочки — это вкладка: открывается через состояние, как в приложении.
         const screenParam = new URLSearchParams(location.search).get('screen')
         if (screenParam === 'flow') {
+            useAppStore.setState({ sidebarTab: 'flows' })
             void useAppStore.getState().openFlowTab('sign-in')
         }
         if (screenParam === 'report') {
@@ -94,7 +96,7 @@ function Showcase(): React.JSX.Element {
     return (
         <div className="app">
             <TitleBar />
-            <TabStrip />
+            <TextFieldContextMenu />
             <div className="app__body">
                 <WorkspaceLayout />
             </div>

@@ -1,5 +1,6 @@
 import { formatOperationRef } from '@resolvr/core'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { DialogSurface } from './DialogSurface.js'
 
 import { useAppStore } from '../state/store.js'
 import { t as translate, useT } from '../i18n/index.js'
@@ -22,30 +23,26 @@ export interface ICommand {
  * актуальные коллекции и окружения.
  */
 export function CommandPalette(): React.JSX.Element | null {
-    const t = useT()
     const open = useAppStore((state) => state.paletteOpen)
+
+    return open ? <OpenCommandPalette /> : null
+}
+
+function OpenCommandPalette(): React.JSX.Element {
+    const t = useT()
     const setPaletteOpen = useAppStore((state) => state.setPaletteOpen)
     const commands = useCommands()
 
     const [query, setQuery] = useState('')
     const [activeIndex, setActiveIndex] = useState(0)
-    const inputRef = useRef<HTMLInputElement>(null)
+    const listId = useId()
+    const list = useRef<HTMLDivElement>(null)
 
     const filtered = useMemo(() => filterCommands(commands, query), [commands, query])
 
     useEffect(() => {
-        if (!open) return
-
-        setQuery('')
-        setActiveIndex(0)
-        inputRef.current?.focus()
-    }, [open])
-
-    useEffect(() => {
-        setActiveIndex(0)
-    }, [query])
-
-    if (!open) return null
+        list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
+    }, [activeIndex])
 
     function runCommand(index: number): void {
         const command = filtered[index]
@@ -56,53 +53,79 @@ export function CommandPalette(): React.JSX.Element | null {
     }
 
     return (
-        <div className="overlay" onMouseDown={() => setPaletteOpen(false)}>
-            <div className="dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <DialogSurface
+            label={t('Command palette')}
+            className="dialog--palette"
+            onClose={() => setPaletteOpen(false)}
+        >
+            <div className="palette__search">
+                <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <circle cx="7" cy="7" r="4.25" stroke="currentColor" strokeWidth="1.4" />
+                    <path
+                        d="m10.3 10.3 3.3 3.3"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                    />
+                </svg>
                 <input
-                    ref={inputRef}
+                    autoFocus
                     className="palette__input"
+                    role="combobox"
+                    aria-label={t('Command palette')}
+                    aria-controls={listId}
+                    aria-expanded="true"
+                    aria-autocomplete="list"
+                    aria-activedescendant={filtered.length ? `${listId}-${activeIndex}` : undefined}
                     placeholder={t('Operation, flow or command…')}
                     value={query}
-                    onChange={(event) => setQuery(event.target.value)}
+                    onChange={(event) => {
+                        setQuery(event.target.value)
+                        setActiveIndex(0)
+                    }}
                     onKeyDown={(event) => {
                         if (event.key === 'ArrowDown') {
                             event.preventDefault()
-                            setActiveIndex((index) => Math.min(index + 1, filtered.length - 1))
+                            setActiveIndex((index) =>
+                                Math.max(0, Math.min(index + 1, filtered.length - 1)),
+                            )
                         } else if (event.key === 'ArrowUp') {
                             event.preventDefault()
                             setActiveIndex((index) => Math.max(index - 1, 0))
                         } else if (event.key === 'Enter') {
                             event.preventDefault()
                             runCommand(activeIndex)
-                        } else if (event.key === 'Escape') {
-                            setPaletteOpen(false)
                         }
                     }}
                 />
 
-                <div className="palette__list">
-                    {filtered.length === 0 && <div className="empty">{t('Nothing found')}</div>}
-
-                    {filtered.map((command, index) => (
-                        <div
-                            key={command.id}
-                            className={`palette__item${
-                                index === activeIndex ? ' palette__item--active' : ''
-                            }`}
-                            onMouseEnter={() => setActiveIndex(index)}
-                            onMouseDown={(event) => {
-                                event.preventDefault()
-                                runCommand(index)
-                            }}
-                        >
-                            {command.badge && <span className="badge">{command.badge}</span>}
-                            <span>{command.label}</span>
-                            {command.hint && <span className="palette__hint">{command.hint}</span>}
-                        </div>
-                    ))}
-                </div>
+                <kbd className="palette__key">Esc</kbd>
             </div>
-        </div>
+            <div ref={list} className="palette__list" role="listbox" id={listId}>
+                {filtered.length === 0 && <div className="empty">{t('Nothing found')}</div>}
+
+                {filtered.map((command, index) => (
+                    <div
+                        key={command.id}
+                        id={`${listId}-${index}`}
+                        role="option"
+                        aria-selected={index === activeIndex}
+                        className={`palette__item${
+                            index === activeIndex ? ' palette__item--active' : ''
+                        }`}
+                        onMouseEnter={() => setActiveIndex(index)}
+                        onMouseDown={(event) => {
+                            event.preventDefault()
+                            runCommand(index)
+                        }}
+                    >
+                        {command.badge && <span className="badge">{command.badge}</span>}
+                        <span>{command.label}</span>
+                        {command.hint && <span className="palette__hint">{command.hint}</span>}
+                    </div>
+                ))}
+            </div>
+        </DialogSurface>
     )
 }
 

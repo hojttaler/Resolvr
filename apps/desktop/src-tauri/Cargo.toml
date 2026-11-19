@@ -1,6 +1,6 @@
 [package]
 name = "resolvr"
-version = "0.3.0"
+version = "0.4.0"
 description = "Desktop GraphQL client and IDE for macOS, Linux and Windows with an MCP server for AI agents"
 authors = ["hojttaler"]
 edition = "2021"
@@ -60,3 +60,7 @@ panic = "abort"
 # падения в нативном коде (gdb, отчёты о сбоях) состоит из одних `???`, и
 # повреждение памяти на Linux не привязать к функции.
 strip = "debuginfo"
+
+# Xcode 27's loader rejects stripped Rust procedural macro libraries.
+[profile.release.build-override]
+strip = "none"

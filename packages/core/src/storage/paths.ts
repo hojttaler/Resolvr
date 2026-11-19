@@ -15,6 +15,10 @@ export class LibraryPaths {
         return `${this.root}/settings.json`
     }
 
+    public themesDir(): string {
+        return `${this.root}/themes`
+    }
+
     /** Секреты в файловом режиме: отдельная директория, доступная только владельцу. */
     public secretsDir(): string {
         return `${this.root}/.secrets`

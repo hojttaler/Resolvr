@@ -503,7 +503,11 @@ function registerSchemaTools(register: IRegisterTool, context: INodeContext): vo
         title: 'Обновить схему',
         description:
             'Выполняет интроспекцию эндпоинта и обновляет кэш схемы. Предыдущий снимок сохраняется — на нём работает schema_diff.',
-        inputSchema: { workspaceId: z.string(), endpointId: z.string().optional() },
+        inputSchema: {
+            workspaceId: z.string(),
+            endpointId: z.string().optional(),
+            environmentId: z.string().optional(),
+        },
         run: async (args) => {
             const workspace = await context.workspaces.getWorkspace(args.workspaceId)
             const endpointId = args.endpointId ?? workspace.defaultEndpointId
@@ -512,7 +516,7 @@ function registerSchemaTools(register: IRegisterTool, context: INodeContext): vo
 
             if (!endpoint) throw new Error(`В workspace "${args.workspaceId}" нет эндпоинтов`)
 
-            const cache = await context.schemas.introspect(args.workspaceId, endpoint)
+            const cache = await context.schemas.introspect(args.workspaceId, endpoint, { environmentId: args.environmentId })
 
             return {
                 endpointId: endpoint.id,
