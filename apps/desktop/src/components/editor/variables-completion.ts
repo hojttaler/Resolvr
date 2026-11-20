@@ -362,10 +362,11 @@ interface IInputObjectFields {
     firstProperty?: number
     lastPropertyEnd?: number
     fields: GraphQLInputField[]
+    filled: ReadonlySet<string>
     single: boolean
 }
 
-/** Находит ближайший input-объект под указателем и его отсутствующие поля. */
+/** Находит ближайший input-объект под указателем и отмечает уже заданные поля. */
 export function findInputObjectFields(
     state: EditorState,
     position: number,
@@ -407,10 +408,7 @@ export function findInputObjectFields(
         if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
 
         const properties = object.getChildren('Property')
-        if (type.isOneOf && properties.length > 0) return undefined
-        const fields = Object.values(type.getFields()).filter(
-            (field) => !Object.hasOwn(value, field.name),
-        )
+        const fields = Object.values(type.getFields())
         if (!fields.length) return undefined
 
         return {
@@ -420,6 +418,7 @@ export function findInputObjectFields(
             firstProperty: properties[0]?.from,
             lastPropertyEnd: properties.at(-1)?.to,
             fields,
+            filled: new Set(Object.keys(value)),
             single: type.isOneOf,
         }
     } catch {
@@ -445,7 +444,9 @@ export function insertInputFields(
         first && first.number !== opening.number
             ? (/^\s*/.exec(first.text)?.[0] ?? '')
             : closingIndent + indentUnit
-    const fields = object.fields.filter((field) => names.has(field.name))
+    const fields = object.single && object.filled.size > 0
+        ? []
+        : object.fields.filter((field) => names.has(field.name) && !object.filled.has(field.name))
     const properties = (object.single ? fields.slice(0, 1) : fields).map((field) => {
         const defaultValue = field.default?.literal
             ? valueFromASTUntyped(field.default.literal)

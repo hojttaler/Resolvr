@@ -11,7 +11,6 @@ import type { Extension } from '@codemirror/state'
  */
 const editorTheme = EditorView.theme({
     '&': {
-        height: '100%',
         fontSize: 'var(--code-size)',
         color: 'var(--text-primary)',
         backgroundColor: 'transparent',
@@ -55,14 +54,31 @@ const editorTheme = EditorView.theme({
         fontSize: 'var(--text-size)',
         overflow: 'hidden',
     },
-    '.cm-tooltip-autocomplete > ul': {
+    '.cm-tooltip.cm-tooltip-autocomplete': {
+        width: 'max-content',
+        maxWidth: 'min(700px, calc(100% - 16px))',
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+        minWidth: 'min(250px, 100%)',
+        maxWidth: '100%',
         padding: '3px',
     },
-    '.cm-tooltip-autocomplete > ul > li': {
-        padding: '3px 8px',
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li': {
+        position: 'relative',
+        padding: '3px 8px 3px 24px',
         borderRadius: '6px',
         fontFamily: 'var(--font-mono)',
         fontSize: 'var(--text-size)',
+        lineHeight: '1.3',
+        whiteSpace: 'normal',
+        overflowWrap: 'anywhere',
+    },
+    '.cm-tooltip-autocomplete .cm-completionIcon': {
+        position: 'absolute',
+        top: '3px',
+        left: '8px',
+        width: '12px',
+        paddingRight: '0',
     },
     '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
         backgroundColor: 'var(--accent-muted)',

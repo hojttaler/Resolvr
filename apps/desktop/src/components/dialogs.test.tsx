@@ -1,13 +1,16 @@
-import { FlowSchema } from '@resolvr/core'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { FlowSchema, REQUEST_SCRIPT_CRYPTO_MODULE, WorkspaceSchema, type IRequestScripts } from '@resolvr/core'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useAppStore } from '../state/store.js'
 import { AgentActivity } from './AgentActivity.js'
+import { ConfirmDialog, MissingVariablesDialog } from './Dialogs.js'
+import { FieldPicker } from './FieldPicker.js'
 import { collectPaths, FlowPage } from './FlowEditor.js'
 import { JsonViewer } from './JsonViewer.js'
 import { KeyValueEditor } from './KeyValueEditor.js'
+import { RequestScriptsEditor } from './RequestScriptsEditor.js'
 import { SettingsDialog } from './SettingsDialog.js'
 import { WorkspaceSettings } from './WorkspaceSettings.js'
 import { TitleBar } from './TitleBar.js'
@@ -66,6 +69,104 @@ describe('KeyValueEditor', () => {
 })
 
 describe('диалоги', () => {
+    it('вставляет импорт в начало Pre-request и сохраняет оба скрипта', () => {
+        const initial = {
+            preRequest: '// Можно импортировать из "@resolvr/crypto"\nrequest.variables.id = "demo";',
+            postRequest: 'assert(response.ok);',
+        }
+        const onChange = vi.fn()
+        function Harness(): React.JSX.Element {
+            const [scripts, setScripts] = useState<IRequestScripts>(initial)
+            return <RequestScriptsEditor scripts={scripts} onChange={(next) => {
+                setScripts(next)
+                onChange(next)
+            }} />
+        }
+
+        render(<Harness />)
+        fireEvent.click(screen.getByRole('button', { name: 'После запроса' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Модули' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Вставить импорт' }))
+
+        expect(onChange).toHaveBeenCalledOnce()
+        expect(onChange).toHaveBeenCalledWith({
+            preRequest: REQUEST_SCRIPT_CRYPTO_MODULE.importStatement + '\n\n' + initial.preRequest,
+            postRequest: initial.postRequest,
+        })
+        expect(screen.getByRole('button', { name: 'Перед запросом', pressed: true })).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Модули' }))
+        expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Импорт уже добавлен' }).disabled).toBe(true)
+    })
+
+    it('удаляет workspace только после подтверждения и показывает ошибку удаления', async () => {
+        const original = useAppStore.getState()
+        const workspace = WorkspaceSchema.parse({
+            id: 'demo', name: 'Demo', createdAt: '2026-11-20T00:00:00Z', updatedAt: '2026-11-20T00:00:00Z',
+        })
+        const deleteWorkspace = vi.fn().mockRejectedValueOnce(new Error('Нет доступа'))
+            .mockResolvedValueOnce(undefined)
+        const onClose = vi.fn()
+        useAppStore.setState({ workspace, deleteWorkspace })
+
+        try {
+            render(<><WorkspaceSettings onClose={onClose} /><ConfirmDialog /></>)
+            const openConfirm = screen.getByRole('button', { name: 'Удалить workspace…' })
+            const confirmation = (): HTMLElement => screen.getByRole('dialog', { name: 'Удалить workspace' })
+            fireEvent.click(openConfirm)
+            expect(within(confirmation()).getByText(/«Demo»/)).toBeTruthy()
+            fireEvent.click(within(confirmation()).getByRole('button', { name: 'Отмена' }))
+            expect(deleteWorkspace).not.toHaveBeenCalled()
+
+            fireEvent.click(openConfirm)
+            fireEvent.click(within(confirmation()).getByRole('button', { name: 'Удалить workspace' }))
+            expect((await screen.findByRole('alert')).textContent).toBe('Нет доступа')
+            expect(onClose).not.toHaveBeenCalled()
+
+            fireEvent.click(openConfirm)
+            await act(async () => fireEvent.click(
+                within(confirmation()).getByRole('button', { name: 'Удалить workspace' }),
+            ))
+            expect(deleteWorkspace).toHaveBeenLastCalledWith(workspace.id)
+            expect(onClose).toHaveBeenCalledOnce()
+        } finally {
+            cleanup()
+            useAppStore.setState(original, true)
+        }
+    })
+
+    it('показывает добавленные поля отмеченными и вставляет только новые на первом уровне', () => {
+        const apply = vi.fn(() => undefined)
+        render(<FieldPicker
+            config={{ typeName: 'User', fields: [
+                { name: 'id', type: 'ID', selected: true },
+                { name: 'name', type: 'String' },
+            ], apply }}
+            onClose={() => undefined}
+        />)
+
+        const existing = screen.getByRole<HTMLInputElement>('checkbox', { name: /id/ })
+        expect(existing.checked).toBe(true)
+        expect(existing.disabled).toBe(true)
+        fireEvent.click(screen.getByRole('checkbox', { name: /name/ }))
+        fireEvent.click(screen.getByRole('button', { name: /Вставить поля/ }))
+
+        expect(apply).toHaveBeenCalledWith(new Set(['name']), 1)
+    })
+    it('передаёт заполненные поля в приостановленный запуск', () => {
+        const finish = vi.fn()
+        useAppStore.setState({ missingVariables: { names: ['clientId', 'scope'], finish } })
+        try {
+            render(<MissingVariablesDialog />)
+            fireEvent.change(screen.getByLabelText('{{clientId}}'), { target: { value: 'client-7' } })
+            fireEvent.change(screen.getByLabelText('{{scope}}'), { target: { value: 'read' } })
+            fireEvent.click(screen.getByRole('button', { name: 'Продолжить запуск' }))
+
+            expect(finish).toHaveBeenCalledWith({ clientId: 'client-7', scope: 'read' })
+        } finally {
+            useAppStore.setState({ missingVariables: undefined })
+        }
+    })
+
     it('редактор цепочек открывается для новой цепочки', () => {
         // Регрессия: заготовка новой цепочки прогонялась через строгую схему
         // с пустым id и роняла экран.
@@ -298,6 +399,7 @@ describe('collectPaths', () => {
 
 describe('журнал действий агента', () => {
     const session = {
+        id: 's1:1',
         sessionId: 's1',
         startedAt: '2026-08-14T10:00:00.000Z',
         client: { name: 'claude-code', version: '2.0' },
@@ -306,6 +408,7 @@ describe('журнал действий агента', () => {
             sessionId: 's1',
             seq: 1,
             ts: '2026-08-14T10:00:01.000Z',
+            title: 'Проверка логина',
             goal: 'Проверить, что логин выдаёт токен',
             steps: ['Загрузить схему', 'Выполнить логин'],
         },
@@ -350,20 +453,48 @@ describe('журнал действий агента', () => {
     }
 
     it('показывает план, намерения вызовов и статистику сессии', () => {
-        useAppStore.setState({ activitySessions: [session] })
+        useAppStore.setState({ activityTasks: [session] })
         render(<AgentActivity onClose={() => undefined} />)
 
+        expect(screen.getByRole('option', { name: 'Проверка логина' })).toBeTruthy()
         expect(screen.getByText('Проверить, что логин выдаёт токен')).toBeTruthy()
         expect(screen.getByText('Загрузить схему')).toBeTruthy()
         expect(screen.getAllByText('Выполняю логин и проверяю токен').length).toBeGreaterThan(0)
         expect(screen.getByText('2 вызова')).toBeTruthy()
         expect(screen.getByText('1 с ошибкой')).toBeTruthy()
 
-        useAppStore.setState({ activitySessions: [] })
+        useAppStore.setState({ activityTasks: [] })
+    })
+
+    it('следит за новыми действиями и сохраняет вручную выбранное', () => {
+        useAppStore.setState({ activityTasks: [session] })
+        render(<AgentActivity onClose={() => undefined} />)
+        const latest = {
+            kind: 'note' as const,
+            sessionId: session.sessionId,
+            seq: 4,
+            ts: '2026-08-14T10:00:04.000Z',
+            text: 'Проверка закончена',
+        }
+        act(() => useAppStore.setState({
+            activityTasks: [{ ...session, entries: [...session.entries, latest] }],
+        }))
+        expect(screen.getByRole('button', { name: /Проверка закончена/, pressed: true })).toBeTruthy()
+
+        const login = screen.getByRole('button', { name: /Выполняю логин/ })
+        fireEvent.click(login)
+        act(() => useAppStore.setState({
+            activityTasks: [{ ...session, entries: [...session.entries, latest, { ...latest, seq: 5, text: 'Ещё одно действие' }] }],
+        }))
+        expect(login.getAttribute('aria-pressed')).toBe('true')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Следить за новыми шагами' }))
+        expect(screen.getByRole('button', { name: /Ещё одно действие/, pressed: true })).toBeTruthy()
+        useAppStore.setState({ activityTasks: [] })
     })
 
     it('раскрывает аргументы и результат выбранного вызова', () => {
-        useAppStore.setState({ activitySessions: [session] })
+        useAppStore.setState({ activityTasks: [session] })
         render(<AgentActivity onClose={() => undefined} />)
 
         fireEvent.click(screen.getAllByText('Выполняю логин и проверяю токен')[0]!)
@@ -372,11 +503,40 @@ describe('журнал действий агента', () => {
         expect(screen.getByText(/Ожидалось/)).toBeTruthy()
         expect(screen.getAllByText('accessToken').length).toBeGreaterThan(0)
 
-        useAppStore.setState({ activitySessions: [] })
+        useAppStore.setState({ activityTasks: [] })
+    })
+
+    it('показывает действие до ответа и обновляет его статус на месте', () => {
+        const call = {
+            sessionId: session.sessionId, seq: 4, ts: '2026-08-14T10:00:04.000Z',
+            tool: 'run', intent: 'Загружаю профиль', step: 1,
+        }
+        useAppStore.setState({
+            activityTasks: [{ ...session, entries: [...session.entries, { kind: 'call_started', ...call }] }],
+        })
+        try {
+            render(<AgentActivity onClose={() => undefined} />)
+            const active = screen.getByRole('button', { name: /Загружаю профиль/, pressed: true })
+            expect(screen.getByText('Результат вызова ещё не записан')).toBeTruthy()
+
+            act(() => useAppStore.setState({
+                activityTasks: [{ ...session, entries: [...session.entries, {
+                    kind: 'call', ...call, args: {}, ok: false, durationMs: 300,
+                    summary: 'HTTP 200 · ошибок GraphQL: 1', truncated: false,
+                }] }],
+            }))
+
+            expect(screen.getByRole('button', { name: /Загружаю профиль/, pressed: true })).toBe(active)
+            expect(screen.queryByText('Результат вызова ещё не записан')).toBeNull()
+            expect(screen.getByRole('heading', { name: 'Результат' })).toBeTruthy()
+            expect(screen.getByText('Ошибка', { exact: true })).toBeTruthy()
+        } finally {
+            useAppStore.setState({ activityTasks: [] })
+        }
     })
 
     it('фильтр «Ошибки» оставляет только неудачные вызовы', () => {
-        useAppStore.setState({ activitySessions: [session] })
+        useAppStore.setState({ activityTasks: [session] })
         render(<AgentActivity onClose={() => undefined} />)
 
         fireEvent.click(screen.getByRole('button', { name: 'Ошибки' }))
@@ -384,7 +544,7 @@ describe('журнал действий агента', () => {
         expect(screen.queryByText('Выполняю логин и проверяю токен')).toBeNull()
         expect(screen.getAllByText('Читаю несуществующую операцию').length).toBeGreaterThan(0)
 
-        useAppStore.setState({ activitySessions: [] })
+        useAppStore.setState({ activityTasks: [] })
     })
 })
 
@@ -433,9 +593,15 @@ describe('заголовки и подготовка запроса', () => {
 
         render(<WorkspaceSettings onClose={() => undefined} />)
 
+        fireEvent.click(screen.getByRole('button', { name: 'Окружения' }))
         expect(screen.getByDisplayValue('Staging')).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Заголовки и переменные' }))
         expect(screen.getByDisplayValue('authorization')).toBeTruthy()
         expect(screen.getByDisplayValue('Bearer {{token}}')).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Скрипты' }))
+        expect(screen.getByRole('textbox', { name: /Перед запросом/ })).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'После запроса' }))
+        expect(screen.getByRole('textbox', { name: /После запроса/ })).toBeTruthy()
 
         useAppStore.setState({ workspace: undefined, flows: [] })
     })
@@ -473,6 +639,8 @@ describe('заголовки и подготовка запроса', () => {
 
         render(<WorkspaceSettings onClose={() => undefined} />)
 
+        fireEvent.click(screen.getByRole('button', { name: 'Окружения' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Авторизация' }))
         expect(screen.getByText('— токен не получаем —')).toBeTruthy()
         expect(screen.getByRole('option', { name: 'Авторизация' })).toBeTruthy()
 

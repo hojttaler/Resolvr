@@ -11,6 +11,9 @@ export interface ISecretStore {
     set(ref: ISecretRef, value: string): Promise<void>
 
     delete(ref: ISecretRef): Promise<void>
+
+    /** Сбрасывает локальный кэш после изменения файлов другим процессом. */
+    invalidate?(): void
 }
 
 export interface ISecretRef {

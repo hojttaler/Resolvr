@@ -101,6 +101,19 @@ describe('WorkspaceStore', () => {
         )
     })
 
+    it('удаляет только каталог указанного workspace', async () => {
+        const { store, fs } = createStore()
+        await store.createWorkspace({ name: 'API' })
+        await store.createWorkspace({ name: 'Other' })
+        await store.createCollection('api', 'Users')
+
+        await expect(store.deleteWorkspace('api/../other')).rejects.toThrow()
+        await store.deleteWorkspace('api')
+
+        expect(await fs.exists('/library/workspaces/api')).toBe(false)
+        expect((await store.listWorkspaces()).map((item) => item.id)).toEqual(['other'])
+    })
+
     it('сохраняет операцию как пару .graphql + .meta.json и читает её обратно', async () => {
         const { store, fs } = createStore()
         await store.createWorkspace({ name: 'API' })
@@ -443,5 +456,62 @@ describe('проверка версии при записи', () => {
         await expect(store.saveFlow('api', flow, { expectedVersion: absent })).rejects.toThrow(
             /изменился с момента чтения/,
         )
+    })
+})
+
+describe('настройка скриптов', () => {
+    it('редактирует только указанные фазы и сохраняет старый файл запроса без изменений', async () => {
+        const { store, fs } = createStore()
+        const paths = new LibraryPaths('/library')
+        await store.createWorkspace({ name: 'API' })
+        await store.createCollection('api', 'Users')
+        const ref = { collectionId: 'users', name: 'Получить профиль' }
+        const target = { kind: 'operation', ref } as const
+        const queryFile = paths.operationQueryFile('api', ref.collectionId, ref.name)
+        const query = 'query GetProfile { me { id } }'
+        await fs.writeTextAtomic(queryFile, query)
+
+        const first = await store.getRequestScripts('api', target)
+        expect(first.scripts).toEqual({})
+        const installed = await store.patchRequestScripts('api', target, {
+            preRequest: 'request.variables.id = "demo";',
+            postRequest: 'assert(response.ok);',
+        }, first.version)
+        expect(installed.changed).toBe(true)
+        await expect(store.patchRequestScripts('api', target, { preRequest: null }, first.version))
+            .rejects.toMatchObject({ code: 'VERSION_CONFLICT' })
+
+        const updated = await store.patchRequestScripts('api', target, { preRequest: null }, installed.version)
+        expect(await store.getRequestScripts('api', target)).toEqual({
+            scripts: { postRequest: 'assert(response.ok);' }, version: updated.version,
+        })
+        expect(await fs.readText(queryFile)).toBe(query)
+        expect(await store.patchRequestScripts('api', target, { preRequest: null }, updated.version))
+            .toMatchObject({ changed: false, version: updated.version })
+    })
+
+    it('сохраняет обе параллельные правки окружения и его настройки', async () => {
+        const { store } = createStore()
+        const workspace = await store.createWorkspace({ name: 'API' })
+        workspace.environments[0]!.variables = { secret: 'keychain://api/default/secret' }
+        workspace.environments[0]!.headers = { authorization: 'Bearer {{secret}}' }
+        await store.saveWorkspace(workspace)
+        const target = { kind: 'environment', environmentId: 'default' } as const
+        const first = await store.getRequestScripts('api', target)
+
+        await Promise.all([
+            store.patchRequestScripts('api', target, { preRequest: 'request.headers.accept = "application/json";' }),
+            store.patchRequestScripts('api', target, { postRequest: 'assert(response.status === 200);' }),
+        ])
+        expect((await store.getWorkspace('api')).environments[0]).toMatchObject({
+            variables: { secret: 'keychain://api/default/secret' },
+            headers: { authorization: 'Bearer {{secret}}' },
+            scripts: {
+                preRequest: 'request.headers.accept = "application/json";',
+                postRequest: 'assert(response.status === 200);',
+            },
+        })
+        await expect(store.patchRequestScripts('api', target, { postRequest: null }, first.version))
+            .rejects.toMatchObject({ code: 'VERSION_CONFLICT' })
     })
 })

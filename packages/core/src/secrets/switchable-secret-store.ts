@@ -26,6 +26,11 @@ export class SwitchableSecretStore implements ISecretStore {
         this._current = storage
     }
 
+    /** Сбрасывает кэш файлового хранилища независимо от выбранного бэкенда. */
+    public invalidate(): void {
+        this._backends.file.invalidate?.()
+    }
+
     public get(ref: ISecretRef): Promise<string | undefined> {
         return this._backends[this._current].get(ref)
     }

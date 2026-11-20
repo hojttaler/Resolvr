@@ -63,6 +63,48 @@ const loginFlow = FlowSchema.parse({
 })
 
 describe('FlowRunner', () => {
+    it('выбирает эндпоинт шага, цепочки или запуска в этом порядке', async () => {
+        const harness = await createHarness(() => '{"data":{"ok":true}}')
+        const workspace = await harness.workspaces.getWorkspace('api')
+        for (const id of ['toolbar', 'flow', 'step']) {
+            workspace.endpoints.push({ id, name: id, url: `https://${id}.example.com/graphql`, headers: {}, acceptInvalidCerts: false })
+        }
+        await harness.workspaces.saveWorkspace(workspace)
+        const flow = FlowSchema.parse({
+            id: 'endpoints',
+            name: 'Endpoints',
+            steps: [
+                { id: 'first', name: 'First', query: '{ ok }' },
+                { id: 'second', name: 'Second', query: '{ ok }', endpointId: 'step' },
+            ],
+        })
+
+        const fallback = await harness.flows.runFlow('api', flow, { endpointId: 'toolbar' })
+        const custom = await harness.flows.runFlow('api', { ...flow, endpointId: 'flow' }, { endpointId: 'toolbar' })
+
+        expect(fallback.steps.map((step) => step.result?.endpointId)).toEqual(['toolbar', 'step'])
+        expect(custom.steps.map((step) => step.result?.endpointId)).toEqual(['flow', 'step'])
+    })
+
+    it('отмена ввода останавливает цепочку даже у шага с continueOnFailure', async () => {
+        const harness = await createHarness(() => '{"data":{"ok":true}}')
+        const flow = FlowSchema.parse({
+            id: 'input', name: 'Input',
+            steps: [
+                { id: 'first', name: 'First', query: '{ ok }', variables: { id: '{{id}}' }, continueOnFailure: true },
+                { id: 'second', name: 'Second', query: '{ ok }' },
+            ],
+        })
+
+        await expect(harness.flows.runFlow('api', flow, {
+            resolveMissingVariables: async (names) => {
+                expect(names).toEqual(['id'])
+                return undefined
+            },
+        })).rejects.toMatchObject({ code: 'RUN_CANCELLED' })
+        expect(harness.transport.exchanges).toHaveLength(0)
+    })
+
     it('пробрасывает извлечённое значение в следующий шаг', async () => {
         const harness = await createHarness((body) =>
             body.includes('login')
@@ -79,6 +121,34 @@ describe('FlowRunner', () => {
             variables: Record<string, unknown>
         }
         expect(secondCall.variables.token).toBe('tok-123')
+    })
+
+    it('запрашивает недостающие данные шага, учитывая результат предыдущего шага', async () => {
+        const harness = await createHarness((body) =>
+            body.includes('login')
+                ? '{"data":{"login":{"accessToken":"test-token"}}}'
+                : '{"data":{"me":{"id":"u1"}}}',
+        )
+        const flow = FlowSchema.parse({
+            ...loginFlow,
+            steps: [
+                loginFlow.steps[0],
+                { ...loginFlow.steps[1], variables: { token: '{{token}}', client: '{{client}}' } },
+            ],
+        })
+
+        const result = await harness.flows.runFlow('api', flow, {
+            resolveMissingVariables: async (names) => {
+                expect(names).toEqual(['client'])
+                expect(harness.transport.exchanges).toHaveLength(1)
+                return { client: 'client-7' }
+            },
+        })
+
+        expect(result.ok).toBe(true)
+        expect(harness.transport.lastPayload().variables).toEqual({
+            token: 'test-token', client: 'client-7',
+        })
     })
 
     it('падает на нужном шаге и пропускает остальные', async () => {

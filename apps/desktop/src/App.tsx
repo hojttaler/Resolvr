@@ -8,6 +8,7 @@ import { CommandPalette } from './components/CommandPalette.js'
 import {
     CreateWorkspaceDialog,
     ConfirmDialog,
+    MissingVariablesDialog,
     SaveOperationDialog,
 } from './components/Dialogs.js'
 import { SettingsDialog } from './components/SettingsDialog.js'
@@ -179,6 +180,7 @@ export function App(): React.JSX.Element {
 
             <CommandPalette />
             <ConfirmDialog />
+            <MissingVariablesDialog />
             {dialog === 'save' && <SaveOperationDialog onClose={() => setDialog('none')} />}
             {dialog === 'workspace' && <CreateWorkspaceDialog onClose={() => setDialog('none')} />}
             {dialog === 'settings' && <SettingsDialog onClose={() => setDialog('none')} />}

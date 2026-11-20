@@ -7,9 +7,10 @@ const FIELD_PAGE_SIZE = 100
 
 export interface IFieldPickerConfig {
     typeName: string
-    fields: readonly { name: string; type: string; description?: string }[]
+    fields: readonly { name: string; type: string; description?: string; selected?: boolean }[]
     maxDepth?: number
     single?: boolean
+    readOnly?: boolean
     emptyMessage?: string
     apply: (names: ReadonlySet<string>, depth: number) => string | undefined
 }
@@ -29,7 +30,10 @@ export function FieldPicker(props: {
     const needle = search.trim().toLowerCase()
     const fields = config.fields.filter((field) => field.name.toLowerCase().includes(needle))
     const title = t('Fields of {name}', { name: config.typeName })
-    const all = fields.length > 0 && fields.every((field) => chosen.has(field.name))
+    const available = fields.filter((field) => !field.selected)
+    const all = available.length > 0 && available.every((field) => chosen.has(field.name))
+    const existing = depth > 1 ? config.fields.filter((field) => field.selected) : []
+    const canApply = chosen.size > 0 || existing.length > 0
 
     function toggle(name: string, checked: boolean): void {
         setChosen((current) => {
@@ -52,8 +56,8 @@ export function FieldPicker(props: {
                 className="field-picker"
                 onSubmit={(event) => {
                     event.preventDefault()
-                    if (!chosen.size) return
-                    const message = config.apply(chosen, depth)
+                    if (!canApply) return
+                    const message = config.apply(new Set([...chosen, ...existing.map((field) => field.name)]), depth)
                     if (message) setError(message)
                     else onClose()
                 }}
@@ -76,11 +80,11 @@ export function FieldPicker(props: {
                             <button
                                 type="button"
                                 className="btn btn--quiet"
-                                disabled={!fields.length}
+                                disabled={!available.length}
                                 onClick={() => {
                                     setChosen((current) => {
                                         const next = new Set(current)
-                                        for (const field of fields) {
+                                        for (const field of available) {
                                             if (all) next.delete(field.name)
                                             else next.add(field.name)
                                         }
@@ -126,12 +130,13 @@ export function FieldPicker(props: {
                     {fields.slice(0, visibleCount).map((field) => (
                         <label
                             key={field.name}
-                            className="field-picker__row"
-                            title={field.description}
+                            className={`field-picker__row${field.selected ? ' field-picker__row--existing' : ''}`}
+                            title={field.selected ? t('Already added') : field.description}
                         >
                             <input
                                 type="checkbox"
-                                checked={chosen.has(field.name)}
+                                checked={field.selected || chosen.has(field.name)}
+                                disabled={field.selected || config.readOnly}
                                 onChange={(event) => toggle(field.name, event.target.checked)}
                             />
                             <span className="field-picker__name mono">{field.name}</span>
@@ -160,8 +165,10 @@ export function FieldPicker(props: {
                     <button type="button" className="btn" onClick={onClose}>
                         {t('Cancel')}
                     </button>
-                    <button type="submit" className="btn btn--primary" disabled={!chosen.size}>
-                        {t('Insert fields ({n})', { n: chosen.size })}
+                    <button type="submit" className="btn btn--primary" disabled={!canApply}>
+                        {!chosen.size && existing.length
+                            ? t('Add nested fields')
+                            : t('Insert fields ({n})', { n: chosen.size })}
                     </button>
                 </footer>
             </form>

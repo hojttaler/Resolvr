@@ -6,6 +6,7 @@ import {
     FlowSchema,
     LocalThemeSchema,
     OperationMetaSchema,
+    RequestScriptsSchema,
     SettingsSchema,
     SlugSchema,
     WorkspaceSchema,
@@ -16,13 +17,14 @@ import {
     type IOperation,
     type IOperationKind,
     type IOperationMeta,
+    type IRequestScripts,
     type ISettings,
     type IWorkspace,
 } from '../model/schemas.js'
 import type { IFileSystem } from '../ports/file-system.js'
-import { readJsonFile, readRequiredJsonFile, writeJsonFile } from './json.js'
+import { parseJson, readJsonFile, readRequiredJsonFile, writeJsonFile } from './json.js'
 import { toSlug, type LibraryPaths } from './paths.js'
-import { ensureVersion, versionOfFiles } from './version.js'
+import { ensureVersion, versionOf, versionOfFiles } from './version.js'
 
 const OPERATION_QUERY_SUFFIX = '.graphql'
 const FLOW_SUFFIX = '.flow.json'
@@ -31,6 +33,21 @@ const FLOW_SUFFIX = '.flow.json'
 export interface IOperationRef {
     collectionId: string
     name: string
+}
+
+export type IRequestScriptTarget =
+    | { kind: 'operation'; ref: IOperationRef }
+    | { kind: 'environment'; environmentId: string }
+
+export type IRequestScriptsPatch = { [Phase in keyof IRequestScripts]: IRequestScripts[Phase] | null }
+
+interface IRequestScriptsSnapshot {
+    scripts: IRequestScripts
+    version: string
+}
+
+interface IRequestScriptsFile extends IRequestScriptsSnapshot {
+    write(scripts: IRequestScripts | undefined): Promise<string>
 }
 
 export interface ICreateWorkspaceInput {
@@ -54,6 +71,7 @@ export interface ISaveOperationInput {
     prerequisiteFlow?: string
     /** Значения ответа, сохраняемые в окружение после успешного запуска. */
     saveToEnvironment?: IEnvironmentCapture[]
+    scripts?: IRequestScripts
     /**
      * Версия, прочитанная перед правкой: запись отменяется, если файл успели
      * изменить. Нужна, когда над одной коллекцией работают несколько агентов.
@@ -93,6 +111,7 @@ workspaces/*/.cache/
 export class WorkspaceStore {
     private readonly _fs: IFileSystem
     private readonly _paths: LibraryPaths
+    private readonly _scriptWrites = new Map<string, Promise<unknown>>()
 
     constructor(fs: IFileSystem, paths: LibraryPaths) {
         this._fs = fs
@@ -258,7 +277,8 @@ export class WorkspaceStore {
     }
 
     public async deleteWorkspace(workspaceId: string): Promise<void> {
-        await this._fs.removeDir(this._paths.workspaceDir(workspaceId))
+        const id = WorkspaceSchema.shape.id.parse(workspaceId)
+        await this._fs.removeDir(this._paths.workspaceDir(id))
     }
 
     // ── Коллекции ───────────────────────────────────────────────────────────
@@ -374,6 +394,115 @@ export class WorkspaceStore {
         return versionOfFiles(this._fs, [this._paths.flowFile(workspaceId, flowId)])
     }
 
+    /** Возвращает скрипты и версию из одного снимка файлов. */
+    public async getRequestScripts(workspaceId: string, target: IRequestScriptTarget): Promise<IRequestScriptsSnapshot> {
+        const { scripts, version } = await this._requestScriptsFile(workspaceId, target)
+
+        return { scripts, version }
+    }
+
+    /** Меняет указанные фазы. `null` удаляет фазу, пропущенное поле сохраняет её. */
+    public async patchRequestScripts(
+        workspaceId: string,
+        target: IRequestScriptTarget,
+        patch: IRequestScriptsPatch,
+        expectedVersion?: string,
+    ): Promise<IRequestScriptsSnapshot & { changed: boolean }> {
+        const previous = this._scriptWrites.get(workspaceId) ?? Promise.resolve()
+        const pending = previous.catch(() => undefined).then(
+            () => this._patchRequestScripts(workspaceId, target, patch, expectedVersion),
+        )
+        this._scriptWrites.set(workspaceId, pending)
+        try {
+            return await pending
+        } finally {
+            if (this._scriptWrites.get(workspaceId) === pending) this._scriptWrites.delete(workspaceId)
+        }
+    }
+
+    private async _patchRequestScripts(
+        workspaceId: string,
+        target: IRequestScriptTarget,
+        patch: IRequestScriptsPatch,
+        expectedVersion?: string,
+    ): Promise<IRequestScriptsSnapshot & { changed: boolean }> {
+        const file = await this._requestScriptsFile(workspaceId, target)
+        ensureVersion(expectedVersion, file.version, { workspaceId, target })
+        const scripts = RequestScriptsSchema.parse({
+            preRequest: patch.preRequest === undefined ? file.scripts.preRequest : patch.preRequest ?? undefined,
+            postRequest: patch.postRequest === undefined ? file.scripts.postRequest : patch.postRequest ?? undefined,
+        })
+        if (scripts.preRequest === file.scripts.preRequest && scripts.postRequest === file.scripts.postRequest) {
+            return { scripts: file.scripts, version: file.version, changed: false }
+        }
+
+        const version = await file.write(scripts.preRequest !== undefined || scripts.postRequest !== undefined
+            ? scripts : undefined)
+
+        return { scripts, version, changed: true }
+    }
+
+    private async _requestScriptsFile(workspaceId: string, target: IRequestScriptTarget): Promise<IRequestScriptsFile> {
+        SlugSchema.parse(workspaceId)
+        if (target.kind === 'environment') {
+            const file = this._paths.workspaceFile(workspaceId)
+            const raw = await this._fs.readText(file)
+            if (raw === undefined) {
+                throw new ResolvrError(ErrorCodeEnum.WORKSPACE_NOT_FOUND, `Workspace "${workspaceId}" не найден`, { workspaceId })
+            }
+            const workspace = parseJson(raw, WorkspaceSchema, file)
+            if (workspace.id !== workspaceId) {
+                throw new ResolvrError(ErrorCodeEnum.INVALID_FILE_FORMAT, 'Идентификатор workspace не совпадает с именем его каталога', { workspaceId })
+            }
+            const environmentId = SlugSchema.parse(target.environmentId)
+            const environment = workspace.environments.find((item) => item.id === environmentId)
+            if (!environment) {
+                throw new ResolvrError(ErrorCodeEnum.ENVIRONMENT_NOT_FOUND, `Окружение "${environmentId}" не найдено`, { workspaceId, environmentId })
+            }
+            const version = versionOf(raw)
+            return {
+                scripts: environment.scripts ?? {},
+                version,
+                write: async (scripts) => {
+                    ensureVersion(version, await versionOfFiles(this._fs, [file]), { workspaceId, environmentId })
+                    environment.scripts = scripts
+                    await this.saveWorkspace(workspace)
+
+                    return versionOfFiles(this._fs, [file])
+                },
+            }
+        }
+
+        const { collectionId, name } = target.ref
+        SlugSchema.parse(collectionId)
+        if (!name || /[/\\]/.test(name) || name.includes('\0')) {
+            throw new ResolvrError(ErrorCodeEnum.INVALID_REFERENCE, 'Недопустимое имя операции', { workspaceId, collectionId })
+        }
+        const file = this._paths.operationMetaFile(workspaceId, collectionId, name)
+        const [query, raw] = await Promise.all([
+            this._fs.readText(this._paths.operationQueryFile(workspaceId, collectionId, name)),
+            this._fs.readText(file),
+        ])
+        if (query === undefined) {
+            throw new ResolvrError(ErrorCodeEnum.OPERATION_NOT_FOUND, `Операция "${collectionId}/${name}" не найдена`, { workspaceId, ...target.ref })
+        }
+        const meta = raw === undefined
+            ? OperationMetaSchema.parse({ name, updatedAt: new Date(0).toISOString() })
+            : parseJson(raw, OperationMetaSchema, file)
+        const version = versionOf(query, raw)
+
+        return {
+            scripts: meta.scripts ?? {},
+            version,
+            write: async (scripts) => {
+                ensureVersion(version, await this.operationVersion(workspaceId, target.ref), { workspaceId, ...target.ref })
+                await writeJsonFile(this._fs, file, { ...meta, scripts, updatedAt: new Date().toISOString() })
+
+                return this.operationVersion(workspaceId, target.ref)
+            },
+        }
+    }
+
     public async saveOperation(
         workspaceId: string,
         input: ISaveOperationInput,
@@ -403,6 +532,7 @@ export class WorkspaceStore {
             environmentId: input.environmentId,
             prerequisiteFlow: input.prerequisiteFlow,
             saveToEnvironment: input.saveToEnvironment ?? [],
+            scripts: input.scripts,
             updatedAt: new Date().toISOString(),
         })
 
@@ -472,6 +602,7 @@ export class WorkspaceStore {
             environmentId: operation.environmentId,
             prerequisiteFlow: operation.prerequisiteFlow,
             saveToEnvironment: operation.saveToEnvironment,
+            scripts: operation.scripts,
         })
         await this.deleteOperation(workspaceId, from)
         await this._writeCollectionOrder(workspaceId, to.collectionId, order)

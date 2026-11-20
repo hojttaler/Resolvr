@@ -99,6 +99,15 @@ export const RecoveryRuleSchema = z.object({
     enabled: z.boolean().default(true),
 })
 
+export const REQUEST_SCRIPT_MAX_LENGTH = 32_768
+
+export const RequestScriptsSchema = z.object({
+    preRequest: z.string().max(REQUEST_SCRIPT_MAX_LENGTH).optional(),
+    postRequest: z.string().max(REQUEST_SCRIPT_MAX_LENGTH).optional(),
+})
+
+export type IRequestScripts = z.infer<typeof RequestScriptsSchema>
+
 export const EnvironmentSchema = z.object({
     id: SlugSchema,
     name: z.string().min(1),
@@ -114,6 +123,7 @@ export const EnvironmentSchema = z.object({
     variables: z.record(z.string(), z.string()).default({}),
     /** Заголовки, добавляемые ко всем запросам окружения. */
     headers: HeadersSchema.default({}),
+    scripts: RequestScriptsSchema.optional(),
     auth: AuthProfileSchema.default({ type: 'none' }),
     /** Цепочка восстановления после ошибки авторизации. */
     recovery: RecoveryRuleSchema.optional(),
@@ -203,6 +213,7 @@ export const OperationMetaSchema = z.object({
     description: z.string().default(''),
     variables: z.record(z.string(), z.unknown()).default({}),
     headers: HeadersSchema.default({}),
+    scripts: RequestScriptsSchema.optional(),
     endpointId: z.string().optional(),
     environmentId: z.string().optional(),
     /**
@@ -315,6 +326,7 @@ export const HistoryEntrySchema = z.object({
     ok: z.boolean(),
     durationMs: z.number(),
     errorCount: z.number().int().default(0),
+    scriptError: z.string().optional(),
     responseBytes: z.number().int().default(0),
     /** Начало тела ответа для превью в списке истории. */
     responsePreview: z.string().default(''),
@@ -369,7 +381,7 @@ export const TabStateSchema = z.object({
     pinned: z.boolean().default(false),
     queryCursor: TabCursorSchema.default({ anchor: 0, head: 0, scrollTop: 0 }),
     variablesCursor: TabCursorSchema.default({ anchor: 0, head: 0, scrollTop: 0 }),
-    bottomTab: z.enum(['variables', 'headers', 'captures']).default('variables'),
+    bottomTab: z.enum(['variables', 'headers', 'captures', 'scripts']).default('variables'),
     responseTab: z.enum(['response', 'raw', 'headers', 'trace']).default('response'),
 })
 
@@ -400,6 +412,7 @@ export const SessionSchema = z.object({
 export const DraftDataSchema = z.object({
     variables: z.string().default('{}'),
     headers: HeadersSchema.default({}),
+    scripts: RequestScriptsSchema.optional(),
 })
 
 /** Материал нативного размытия окна; `none` отключает эффект полностью. */

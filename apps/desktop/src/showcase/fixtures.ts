@@ -214,8 +214,9 @@ export function seedShowcase(): void {
                 },
             },
         },
-        activitySessions: [
+        activityTasks: [
             {
+                id: 's-showcase:1',
                 sessionId: 's-showcase',
                 startedAt: new Date(now - 300_000).toISOString(),
                 client: { name: 'claude-code', version: '2.1' },
@@ -224,6 +225,7 @@ export function seedShowcase(): void {
                     sessionId: 's-showcase',
                     seq: 1,
                     ts: new Date(now - 300_000).toISOString(),
+                    title: 'Sign-in and catalog access',
                     goal: 'Verify that sign-in returns a token and the catalog is readable with it',
                     steps: ['Load the schema', 'Sign in', 'Read the catalog'],
                 },

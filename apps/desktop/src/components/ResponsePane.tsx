@@ -213,6 +213,9 @@ export function ResponsePane(): React.JSX.Element {
             )}
 
             <SavedVariablesNotice result={run?.result} />
+            {run?.result?.scriptError && (
+                <div className="flow__error" role="alert">{run.result.scriptError}</div>
+            )}
             <ContextMenu menu={menu} onClose={() => setMenu(undefined)} />
 
             <div

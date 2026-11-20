@@ -196,6 +196,16 @@ fragment UserName on User { name }
 })
 
 describe('вставка нескольких полей с заданной глубиной', () => {
+    it('отмечает существующие поля по имени из схемы, включая алиасы', () => {
+        const query = '{ current { userId: id } }'
+        const target = findSchemaFieldTarget(schema, query, query.indexOf('userId'))
+        if (!target) throw new Error('Missing field target')
+
+        const choices = schemaFieldChoices(schema, target)
+        expect(choices.find((choice) => choice.name === 'id')?.selected).toBe(true)
+        expect(choices.find((choice) => choice.name === 'name')?.selected).toBe(false)
+    })
+
     it('дополняет только выбранный алиас и объявляет переменные в нужной операции', () => {
         const query = `query First { ping }
 query Second($page: Int!) {

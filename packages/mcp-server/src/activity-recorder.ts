@@ -3,8 +3,12 @@ import {
     ActivityStore,
     buildCallRecord,
     buildNoteRecord,
+    HeadersSchema,
     isResolvrError,
+    maskHeaders,
+    SECRET_MASK,
     toErrorMessage,
+    type IActivityRecord,
 } from '@resolvr/core'
 import type { INodeContext } from '@resolvr/core/node'
 import { z } from 'zod'
@@ -67,7 +71,8 @@ export class ActivityRecorder {
         })
     }
 
-    public async recordPlan(goal: string, steps: string[]): Promise<void> {
+    /** Объявляет новую задачу в журнале текущего подключения. */
+    public async recordPlan(goal: string, steps: string[], title?: string): Promise<void> {
         await this._store.append(
             ActivityPlanRecordSchema.parse({
                 kind: 'plan',
@@ -76,6 +81,7 @@ export class ActivityRecorder {
                 ts: new Date().toISOString(),
                 goal,
                 steps,
+                title,
             }),
         )
     }
@@ -97,28 +103,29 @@ export class ActivityRecorder {
         narration: INarration,
         args: Record<string, unknown>,
         execute: () => Promise<T>,
-        summarize: (result: T) => string,
+        outcome: (result: T) => { ok: boolean; summary: string },
     ): Promise<T> {
+        const call = {
+            sessionId: this._sessionId,
+            seq: this._nextSeq(),
+            tool,
+            ...narration,
+            workspaceId: typeof args.workspaceId === 'string' ? args.workspaceId : undefined,
+        }
+        const loggedArgs = redactCallArgs(tool, args)
+        await this._appendCall({ kind: 'call_started', ...call, ts: new Date().toISOString() })
         const startedAt = performance.now()
-        const seq = this._nextSeq()
 
         try {
             const result = await execute()
 
-            await this._store.append(
+            await this._appendCall(
                 buildCallRecord({
-                    sessionId: this._sessionId,
-                    seq,
-                    tool,
-                    intent: narration.intent,
-                    expectation: narration.expectation,
-                    step: narration.step,
-                    args,
-                    ok: true,
+                    ...call,
+                    ...outcome(result),
+                    args: loggedArgs,
                     durationMs: performance.now() - startedAt,
-                    summary: summarize(result),
-                    result,
-                    workspaceId: typeof args.workspaceId === 'string' ? args.workspaceId : undefined,
+                    result: redactCallPayload(tool, result),
                 }),
             )
 
@@ -126,20 +133,14 @@ export class ActivityRecorder {
         } catch (error) {
             const code = isResolvrError(error) ? error.code : 'UNEXPECTED'
 
-            await this._store.append(
+            await this._appendCall(
                 buildCallRecord({
-                    sessionId: this._sessionId,
-                    seq,
-                    tool,
-                    intent: narration.intent,
-                    expectation: narration.expectation,
-                    step: narration.step,
-                    args,
+                    ...call,
+                    args: loggedArgs,
                     ok: false,
                     durationMs: performance.now() - startedAt,
                     summary: `ошибка: ${code}`,
                     error: toErrorMessage(error),
-                    workspaceId: typeof args.workspaceId === 'string' ? args.workspaceId : undefined,
                 }),
             )
 
@@ -147,10 +148,45 @@ export class ActivityRecorder {
         }
     }
 
+    private async _appendCall(record: IActivityRecord): Promise<void> {
+        try {
+            await this._store.append(record)
+        } catch {
+            process.stderr.write('Resolvr MCP: не удалось записать вызов в журнал действий.\n')
+        }
+    }
+
     private _nextSeq(): number {
         this._seq += 1
 
         return this._seq
+    }
+}
+
+function redactCallArgs(tool: string, args: Record<string, unknown>): Record<string, unknown> {
+    return redactCallPayload(tool, args.secret === true && typeof args.value === 'string'
+        ? { ...args, value: SECRET_MASK }
+        : args)
+}
+
+function redactCallPayload<T>(tool: string, value: T): T {
+    if (typeof value !== 'object' || value === null) return value
+
+    const headers = 'headers' in value ? HeadersSchema.safeParse(value.headers) : undefined
+    const scripts = 'scripts' in value && value.scripts && typeof value.scripts === 'object'
+        ? value.scripts : undefined
+    const hasScriptPage = tool === 'scripts_get' && 'script' in value && typeof value.script === 'string'
+    if (!headers?.success && !scripts && !hasScriptPage) return value
+
+    return {
+        ...value,
+        ...(headers?.success && { headers: maskHeaders(headers.data, []) }),
+        ...(scripts && {
+            scripts: Object.fromEntries(Object.entries(scripts).map(([phase, code]) => [
+                phase, typeof code === 'string' ? SECRET_MASK : code,
+            ])),
+        }),
+        ...(hasScriptPage && { script: SECRET_MASK }),
     }
 }
 

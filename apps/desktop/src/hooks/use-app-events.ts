@@ -38,24 +38,8 @@ export function useAppEvents(onMenuAction: (action: string) => void): void {
         )
         register(
             window.listen<{ paths: string[] }>('library-changed', (event) => {
-                const store = useAppStore.getState()
-                const paths = event.payload.paths.map((path) => path.replaceAll('\\', '/').split('/'))
-
-                if (store.dialog === 'activity' && paths.some(([root]) => root === '.activity')) {
-                    void store.loadActivity().catch((error) => logError('Не удалось обновить журнал', error))
-                }
-
-                const workspaceId = store.workspace?.id
-                if (
-                    workspaceId &&
-                    paths.some(([root, workspace, area]) =>
-                        root === 'workspaces' &&
-                        workspace === workspaceId &&
-                        (area === 'collections' || area === 'flows' || area === undefined),
-                    )
-                ) {
-                    void store.reloadTree().catch((error) => logError('Не удалось обновить коллекции', error))
-                }
+                void useAppStore.getState().applyLibraryChanges(event.payload.paths)
+                    .catch((error) => logError('Не удалось перечитать изменения библиотеки', error))
             }),
         )
 

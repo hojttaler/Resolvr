@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0 — 2026-11-20
+
+- Saved requests and environments support JavaScript pre-request and
+  post-request scripts. The editor completes GraphQL inputs, selected response
+  fields and HTTP headers. The module catalog inserts an import for HMAC-SHA256
+  signing with a secret from the selected environment.
+- MCP can read and update scripts with `scripts_get` and `scripts_set`. Each
+  phase can be edited independently, and the version from a read detects
+  intervening edits.
+- Flows support endpoint overrides for the whole flow and for individual steps.
+  The endpoint selected in the workbench is the fallback when none is assigned.
+  Missing template variables can be entered before a request or flow continues.
+- The agent activity panel groups calls by task, shows calls before their results
+  arrive, and follows new actions until a step is selected manually.
+- Workspace settings group endpoints and environments in separate sections.
+  Workspaces can be deleted from settings after confirmation.
+- The Schema Explorer loads more fields on scroll. Field pickers mark fields
+  that are already present, and saved changes made through MCP are reflected
+  in the app while it is open.
+
 ## 0.4.0 — 2026-11-19
 
 - Refreshed the workbench, flow editor, settings and app icon. Settings includes a

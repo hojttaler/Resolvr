@@ -23,6 +23,7 @@ export class FileSecretStore implements ISecretStore {
     private readonly _fs: IFileSystem
     private readonly _paths: LibraryPaths
     private readonly _cache = new Map<string, ISecretsFile>()
+    private _cacheVersion = 0
 
     constructor(fs: IFileSystem, paths: LibraryPaths) {
         this._fs = fs
@@ -56,6 +57,7 @@ export class FileSecretStore implements ISecretStore {
 
     /** Сбрасывает кэш — после правки файла снаружи. */
     public invalidate(): void {
+        this._cacheVersion += 1
         this._cache.clear()
     }
 
@@ -63,9 +65,10 @@ export class FileSecretStore implements ISecretStore {
         const cached = this._cache.get(workspaceId)
         if (cached) return cached
 
+        const version = this._cacheVersion
         const raw = await this._fs.readText(this._paths.secretsFile(workspaceId))
         const file = raw ? parseSecretsFile(raw) : emptyFile()
-        this._cache.set(workspaceId, file)
+        if (version === this._cacheVersion) this._cache.set(workspaceId, file)
 
         return file
     }

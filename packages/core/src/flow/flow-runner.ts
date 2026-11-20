@@ -1,4 +1,4 @@
-import { ResolvrError, toErrorMessage } from '../model/errors.js'
+import { ErrorCodeEnum, ResolvrError, toErrorMessage } from '../model/errors.js'
 import type {
     IEnvironment,
     IFlow,
@@ -7,7 +7,7 @@ import type {
     IFlowStepExpect,
 } from '../model/schemas.js'
 import { isSecretRef } from '../ports/secret-store.js'
-import { readPath, type IRunResult, type RunEngine } from '../run/run-engine.js'
+import { readPath, type IMissingVariableResolver, type IRunResult, type RunEngine } from '../run/run-engine.js'
 import { defaultContext } from '../secrets/generators.js'
 import { interpolateJson } from '../secrets/secret-resolver.js'
 import type { WorkspaceStore } from '../storage/workspace-store.js'
@@ -57,6 +57,7 @@ export interface IFlowRunResult {
 export interface IFlowRunOptions {
     environmentId?: string
     endpointId?: string
+    resolveMissingVariables?: IMissingVariableResolver
     /**
      * Значения для этого запуска: перекрывают константы цепочки.
      *
@@ -262,6 +263,7 @@ export class FlowRunner {
                 skipFlows: true,
                 producedVariables,
                 confirmed: options.confirmed,
+                resolveMissingVariables: options.resolveMissingVariables,
                 // Значения, добытые предыдущими шагами, доступны в заголовках
                 // как `{{name}}` — тем же способом, что и в переменных.
                 flowContext: toStringContext(context),
@@ -283,7 +285,9 @@ export class FlowRunner {
 
             const asserts = step.assert.map((assertion) => evaluateAssert(assertion, payload))
             const assertsPassed = asserts.every((item) => item.passed)
-            const outcome = judgeStep(step.expect, result, assertsPassed)
+            const outcome = result.scriptError
+                ? { ok: false, error: result.scriptError }
+                : judgeStep(step.expect, result, assertsPassed)
 
             const errors = describeGraphqlErrors(result.errors)
 
@@ -301,6 +305,8 @@ export class FlowRunner {
                 errors: errors.length > 0 ? errors : undefined,
             }
         } catch (error) {
+            if (error instanceof ResolvrError && error.code === ErrorCodeEnum.RUN_CANCELLED) throw error
+
             return {
                 stepId: step.id,
                 name: step.name,

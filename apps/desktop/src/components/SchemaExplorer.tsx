@@ -15,12 +15,13 @@ import {
     type GraphQLSchema,
     type SelectionSetNode,
 } from 'graphql'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { ISchemaRequest } from '../hooks/use-schema-request.js'
 import { useT } from '../i18n/index.js'
 
 const OPERATION_KINDS = ['query', 'mutation', 'subscription'] as const
+const SCHEMA_FIELD_BATCH = 60
 
 /** Дерево полей, которое редактирует открытый запрос. */
 export function SchemaExplorer(props: {
@@ -100,6 +101,7 @@ export function SchemaExplorer(props: {
                         {root.name}
                     </button>
                     <ExplorerFields
+                        key={search.trim().toLowerCase()}
                         schema={schema}
                         type={root}
                         path={[]}
@@ -135,7 +137,25 @@ function ExplorerFields(props: IExplorerFieldsProps): React.JSX.Element {
         ? fields.filter((field) => field.name.toLowerCase().includes(props.search ?? ''))
         : fields
     const fragments = isAbstractType(type) ? schema.getPossibleTypes(type) : []
-    const [visibleCount, setVisibleCount] = useState(60)
+    const [visibleCount, setVisibleCount] = useState(SCHEMA_FIELD_BATCH)
+    const loadMore = useRef<HTMLLIElement>(null)
+    const hasMore = visibleCount < matching.length
+
+    useEffect(() => {
+        const marker = loadMore.current
+        if (!hasMore || !marker) return
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (!entries.some((entry) => entry.isIntersecting)) return
+                observer.disconnect()
+                setVisibleCount((count) => count + SCHEMA_FIELD_BATCH)
+            },
+            { root: marker.closest('.panel__content'), rootMargin: '0px 0px 120px' },
+        )
+        observer.observe(marker)
+        return () => observer.disconnect()
+    }, [hasMore, visibleCount])
 
     return (
         <ul className="schema-explorer__fields">
@@ -170,17 +190,7 @@ function ExplorerFields(props: IExplorerFieldsProps): React.JSX.Element {
                     />
                 )
             })}
-            {matching.length > visibleCount && (
-                <li>
-                    <button
-                        type="button"
-                        className="btn btn--quiet"
-                        onClick={() => setVisibleCount((count) => count + 60)}
-                    >
-                        {t('Show more')}
-                    </button>
-                </li>
-            )}
+            {hasMore && <li ref={loadMore} className="schema-explorer__sentinel" aria-hidden="true" />}
             {fragments.map((member) => {
                 const part = `... on ${member.name}`
                 const branch = props.selection?.selections.find(

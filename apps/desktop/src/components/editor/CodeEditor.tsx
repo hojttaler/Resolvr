@@ -3,6 +3,7 @@ import {
     closeBrackets,
     closeBracketsKeymap,
     startCompletion,
+    type CompletionSource,
 } from '@codemirror/autocomplete'
 import {
     addSchemaFields,
@@ -16,6 +17,7 @@ import {
     history,
     historyKeymap,
     indentWithTab,
+    isolateHistory,
     redo,
     redoDepth,
     selectAll,
@@ -23,6 +25,7 @@ import {
     undoDepth,
 } from '@codemirror/commands'
 import { json } from '@codemirror/lang-json'
+import { javascript, javascriptLanguage } from '@codemirror/lang-javascript'
 import {
     bracketMatching,
     foldGutter,
@@ -46,7 +49,9 @@ import {
     highlightActiveLineGutter,
     keymap,
     lineNumbers,
+    placeholder as editorPlaceholder,
     rectangularSelection,
+    tooltips,
 } from '@codemirror/view'
 import { graphql, updateSchema } from 'cm6-graphql'
 import { parse, print, type GraphQLSchema } from 'graphql'
@@ -66,6 +71,7 @@ import {
     type IEnvVariablesContext,
 } from './env-completion.js'
 import { createSearchPanel } from './search-panel.js'
+import { standardScriptCompletion } from './script-completion.js'
 import { appEditorTheme } from './theme.js'
 import {
     createVariablesCompletion,
@@ -73,10 +79,11 @@ import {
     insertInputFields,
 } from './variables-completion.js'
 
-export type IEditorLanguage = 'graphql' | 'json'
+export type IEditorLanguage = 'graphql' | 'json' | 'javascript'
 
 export interface ICodeEditorHandle {
     selectFields(): void
+    insertAtStart(text: string): void
 }
 
 export interface ICodeEditorProps {
@@ -86,6 +93,11 @@ export interface ICodeEditorProps {
     schema?: GraphQLSchema
     readOnly?: boolean
     onChange?: (value: string) => void
+    ariaLabel?: string
+    ariaDescribedBy?: string
+    placeholder?: string
+    maxLength?: number
+    completionSource?: CompletionSource
     /** Cmd+Enter выполняет операцию прямо из редактора. */
     onRun?: () => void
     /**
@@ -114,6 +126,7 @@ const externalChange = Annotation.define<boolean>()
 const languageCompartment = new Compartment()
 const readOnlyCompartment = new Compartment()
 const appearanceCompartment = new Compartment()
+const contentAttributesCompartment = new Compartment()
 
 /**
  * Обёртка над CodeMirror 6.
@@ -128,6 +141,7 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
     const viewRef = useRef<EditorView>(null)
     const onChangeRef = useRef(props.onChange)
     const onRunRef = useRef(props.onRun)
+    const completionSource = useRef(props.completionSource)
     const lastText = useRef(props.value)
     const fieldInsertion = useRef<{ at: number; doc: Text; prefix: Text; suffix: Text }>(undefined)
 
@@ -150,6 +164,7 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
 
     onChangeRef.current = props.onChange
     onRunRef.current = props.onRun
+    completionSource.current = props.completionSource
     completionQueryRef.current = props.completionQuery ?? ''
     schemaRef.current = props.schema
     onVariablesAddedRef.current = props.onVariablesAdded
@@ -161,11 +176,29 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
             const view = viewRef.current
             if (view) selectOutputFields(view, view.state.selection.main.head, view.state.doc)
         },
+        insertAtStart(text) {
+            const view = viewRef.current
+            if (!view || view.state.readOnly) return
+
+            const changes = view.state.changes({ from: 0, insert: text })
+            view.dispatch({
+                changes,
+                selection: view.state.selection.map(changes, 1),
+                annotations: isolateHistory.of('full'),
+                scrollIntoView: true,
+                userEvent: 'input',
+            })
+            window.requestAnimationFrame(() => {
+                if (view === viewRef.current) view.focus()
+            })
+        },
     }))
 
     useEffect(() => {
         const host = hostRef.current
         if (!host) return
+        const dialog = host.closest('dialog')
+        const document = host.ownerDocument
 
         const view = new EditorView({
             parent: host,
@@ -182,9 +215,25 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
                     indentOnInput(),
                     bracketMatching(),
                     closeBrackets(),
+                    // WebKit может позиционировать подсказки абсолютно. Вынесенный
+                    // слой остаётся видимым за пределами прокручиваемой панели.
+                    tooltips({
+                        parent: dialog ?? document.body,
+                        position: 'absolute',
+                        tooltipSpace: () => {
+                            const bounds = dialog?.getBoundingClientRect()
+                            const { clientWidth, clientHeight } = document.documentElement
+                            return {
+                                left: Math.max(0, bounds?.left ?? 0) + 8,
+                                top: Math.max(0, bounds?.top ?? 0) + 8,
+                                right: Math.min(clientWidth, bounds?.right ?? clientWidth) - 8,
+                                bottom: Math.min(clientHeight, bounds?.bottom ?? clientHeight) - 8,
+                            }
+                        },
+                    }),
                     autocompletion({
                         activateOnTyping: true,
-                        closeOnBlur: false,
+                        closeOnBlur: props.language === 'javascript',
                         compareCompletions:
                             props.language === 'graphql'
                                 ? (left, right) =>
@@ -206,6 +255,13 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
                                 : undefined,
                     }),
                     EditorState.transactionFilter.of((transaction) => {
+                        if (
+                            props.maxLength !== undefined &&
+                            transaction.docChanged &&
+                            !transaction.annotation(externalChange) &&
+                            transaction.newDoc.length > Math.max(transaction.startState.doc.length, props.maxLength)
+                        ) return []
+
                         const field = fieldInsertion.current
                         const { main } = transaction.startState.selection
                         if (
@@ -257,6 +313,15 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
                         indentWithTab,
                     ]),
                     languageCompartment.of(createLanguage(props.language, props.schema)),
+                    props.language === 'javascript' ? [
+                        javascriptLanguage.data.of({
+                            autocomplete: (context: Parameters<CompletionSource>[0]) =>
+                                completionSource.current?.(context) ?? null,
+                        }),
+                        javascriptLanguage.data.of({ autocomplete: standardScriptCompletion }),
+                    ] : [],
+                    props.placeholder ? editorPlaceholder(props.placeholder) : [],
+                    contentAttributesCompartment.of([]),
                     props.language === 'graphql'
                         ? autoArguments({
                               getSchema: () => schemaRef.current,
@@ -360,6 +425,15 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
             ),
         })
     }, [props.readOnly])
+
+    useEffect(() => {
+        const attributes: Record<string, string> = {}
+        if (props.ariaLabel) attributes['aria-label'] = props.ariaLabel
+        if (props.ariaDescribedBy) attributes['aria-describedby'] = props.ariaDescribedBy
+        viewRef.current?.dispatch({
+            effects: contentAttributesCompartment.reconfigure(EditorView.contentAttributes.of(attributes)),
+        })
+    }, [props.ariaLabel, props.ariaDescribedBy])
 
     // Настройки внешнего вида меняются через compartment: содержимое, история
     // отмен и позиция курсора при этом сохраняются.
@@ -468,8 +542,10 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
                         name: field.name,
                         type: String(field.type),
                         description: field.description ?? undefined,
+                        selected: input.filled.has(field.name),
                     })),
                     single: input.single,
+                    readOnly: input.single && input.filled.size > 0,
                     apply: (names) => {
                         if (
                             view !== viewRef.current ||
@@ -591,11 +667,11 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
                         openSearchPanel(view)
                     },
                 },
-                {
+                ...(props.language !== 'javascript' ? [{
                     label: t(props.language === 'graphql' ? 'Format query' : 'Format JSON'),
                     disabled: readOnly || !hasContent,
                     run: format,
-                },
+                }] : []),
                 ...(props.onRun
                     ? [{ label: t('Run'), hint: kbd('Enter'), separated: true, run: props.onRun }]
                     : []),
@@ -621,6 +697,8 @@ export function CodeEditor(props: ICodeEditorProps): React.JSX.Element {
 }
 
 function createLanguage(language: IEditorLanguage, schema?: GraphQLSchema): Extension {
+    if (language === 'javascript') return javascript()
+
     // `fillLeafsOnComplete` сразу раскрывает выборку у полей объектного типа —
     // вместе с автоподстановкой аргументов выбор поля даёт готовый фрагмент.
     return language === 'graphql'

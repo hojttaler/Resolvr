@@ -24,6 +24,7 @@ export class TokenInfoStore {
     private readonly _fs: IFileSystem
     private readonly _paths: LibraryPaths
     private _cache: ITokensFile | undefined
+    private _cacheVersion = 0
 
     constructor(fs: IFileSystem, paths: LibraryPaths) {
         this._fs = fs
@@ -65,13 +66,21 @@ export class TokenInfoStore {
         }
     }
 
+    /** Сбрасывает сведения о токенах после обновления файла другим процессом. */
+    public invalidate(): void {
+        this._cacheVersion += 1
+        this._cache = undefined
+    }
+
     private async _load(): Promise<ITokensFile> {
         if (this._cache) return this._cache
 
+        const version = this._cacheVersion
         const raw = await this._fs.readText(this._paths.tokensFile())
-        this._cache = raw ? parse(raw) : { version: 1, tokens: {} }
+        const file: ITokensFile = raw ? parse(raw) : { version: 1, tokens: {} }
+        if (version === this._cacheVersion) this._cache = file
 
-        return this._cache
+        return file
     }
 }
 

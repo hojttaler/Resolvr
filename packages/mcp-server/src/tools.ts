@@ -11,11 +11,15 @@ import {
     listRootFields,
     printTypeLimited,
     readPath,
+    RequestScriptsSchema,
     ResolvrError,
     searchSchema,
     SECRET_MASK,
+    SlugSchema,
     toErrorMessage,
     toSlug,
+    type IRequestScripts,
+    type IRequestScriptTarget,
 } from '@resolvr/core'
 import type { INodeContext } from '@resolvr/core/node'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -50,6 +54,7 @@ export function registerTools(
     registerSchemaTools(register, context)
     registerFlowTools(register, context)
     registerEnvironmentTools(register, context)
+    registerScriptTools(register, context)
 }
 
 interface IToolDefinition<TShape extends ZodRawShape, TResult> {
@@ -60,6 +65,8 @@ interface IToolDefinition<TShape extends ZodRawShape, TResult> {
     run: (args: z.infer<z.ZodObject<TShape>>) => Promise<TResult>
     /** Однострочная сводка результата для списка в журнале. */
     summarize: (result: TResult) => string
+    /** Исход операции внутри успешного ответа протокола MCP. */
+    isSuccessful?: (result: TResult) => boolean
 }
 
 type IRegisterTool = <TShape extends ZodRawShape, TResult>(
@@ -96,7 +103,10 @@ function createRegistrar(server: McpServer, recorder: ActivityRecorder): IRegist
                         narration,
                         rest,
                         () => definition.run(parsed),
-                        (value) => definition.summarize(value),
+                        (value) => ({
+                            ok: definition.isSuccessful?.(value) ?? true,
+                            summary: definition.summarize(value),
+                        }),
                     )
 
                     return ok(result)
@@ -154,10 +164,11 @@ function registerNarrationTools(server: McpServer, recorder: ActivityRecorder): 
     server.registerTool(
         'plan',
         {
-            title: 'Объявить план',
+            title: 'Объявить задачу и план',
             description:
-                'Вызывается ПЕРВЫМ, до любых других инструментов. Описывает цель работы и шаги, которые агент собирается выполнить. План показывается пользователю в журнале действий и служит оглавлением для последующих вызовов (поле step).',
+                'Вызывается перед началом каждой новой задачи. Название задачи показывается в списке действий, цель и шаги — в её журнале. Последующие вызовы относятся к объявленной задаче; поле step связывает их с шагом плана.',
             inputSchema: {
+                title: z.string().trim().min(3).max(120).optional().describe('Короткое название задачи для списка, например «Проверка авторизации».'),
                 goal: z.string().min(3).describe('Что проверяется и зачем — одной фразой.'),
                 steps: z
                     .array(z.string())
@@ -166,7 +177,7 @@ function registerNarrationTools(server: McpServer, recorder: ActivityRecorder): 
             },
         },
         async (args) => {
-            await recorder.recordPlan(args.goal, args.steps)
+            await recorder.recordPlan(args.goal, args.steps, args.title)
 
             return ok({
                 planned: args.steps.length,
@@ -234,7 +245,7 @@ function registerWorkspaceTools(register: IRegisterTool, context: INodeContext):
         description:
             'Создаёт workspace с одним эндпоинтом и окружением по умолчанию. Идентификатор выводится из названия, если не задан явно.',
         inputSchema: {
-            name: z.string().describe('Человекочитаемое название, например «Backend API»'),
+            name: z.string().describe('Название проекта для интерфейса, например «API личного кабинета»'),
             endpointUrl: z.string().describe('URL GraphQL-эндпоинта'),
             id: z.string().optional().describe('Явный идентификатор (slug)'),
         },
@@ -247,7 +258,7 @@ function registerWorkspaceTools(register: IRegisterTool, context: INodeContext):
 
             return { created: workspace.id, name: workspace.name }
         },
-        summarize: (result) => `создан ${result.created}`,
+        summarize: (result) => `Создан workspace «${result.name}»`,
     })
 }
 
@@ -293,8 +304,8 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
         description: 'Создаёт коллекцию внутри workspace.',
         inputSchema: {
             workspaceId: z.string(),
-            name: z.string(),
-            id: z.string().optional(),
+            name: z.string().describe('Название предметной области для интерфейса, например «Авторизация» или «Заказы»'),
+            id: z.string().optional().describe('Технический slug коллекции, например auth. Можно опустить'),
         },
         run: async (args) => {
             const collection = await context.workspaces.createCollection(
@@ -303,9 +314,9 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
                 args.id,
             )
 
-            return { created: collection.id }
+            return { created: collection.id, name: collection.name }
         },
-        summarize: (result) => `создана ${result.created}`,
+        summarize: (result) => `Создана коллекция «${result.name}»`,
     })
 
     register({
@@ -336,8 +347,8 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
         inputSchema: {
             workspaceId: z.string(),
             collectionId: z.string(),
-            name: z.string().describe('Имя операции — оно же имя файла'),
-            query: z.string().describe('Текст GraphQL-операции'),
+            name: z.string().describe('Название запроса в интерфейсе и имя файла, например «Получить профиль по ID». Можно использовать пробелы и кириллицу. Без разделителей пути и расширения. При обновлении передай прежнее имя из ref'),
+            query: z.string().describe('GraphQL-документ. Имя операции внутри документа соответствует синтаксису GraphQL, например query GetProfile'),
             description: z.string().optional(),
             variables: z.record(z.string(), z.unknown()).optional(),
             headers: z.record(z.string(), z.string()).optional(),
@@ -371,6 +382,7 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
                 environmentId: args.environmentId,
                 prerequisiteFlow: existing?.prerequisiteFlow,
                 saveToEnvironment: existing?.saveToEnvironment,
+                scripts: existing?.scripts,
                 expectedVersion: args.expectedVersion,
             })
 
@@ -379,10 +391,11 @@ function registerCollectionTools(register: IRegisterTool, context: INodeContext)
                     collectionId: args.collectionId,
                     name: args.name,
                 }),
+                name: operation.name,
                 kind: operation.kind,
             }
         },
-        summarize: (result) => `сохранена ${result.saved}`,
+        summarize: (result) => `Сохранён запрос «${result.name}»`,
     })
 
     register({
@@ -443,6 +456,7 @@ function registerRunTools(register: IRegisterTool, context: INodeContext): void 
                 durationMs: Math.round(result.durationMs),
                 data: result.data,
                 errors: result.errors,
+                scriptError: result.scriptError,
             }
 
             // Выборка пути освобождает контекст: из ответа на тысячи узлов
@@ -455,13 +469,20 @@ function registerRunTools(register: IRegisterTool, context: INodeContext): void 
                     select: args.select,
                     value: readPath(payload, args.select),
                     errors: payload.errors,
+                    scriptError: payload.scriptError,
                 }
             }
 
             return payload
         },
-        summarize: (result) =>
-            `HTTP ${result.status}, ${result.ok ? 'успех' : `ошибок: ${result.errors?.length ?? 0}`}, ${result.durationMs} мс`,
+        isSuccessful: (result) => result.ok,
+        summarize: (result) => {
+            if (result.ok) return `HTTP ${result.status}`
+            if (result.scriptError) return `HTTP ${result.status} · ошибка скрипта`
+            const errors = result.errors?.length ?? 0
+
+            return errors > 0 ? `HTTP ${result.status} · ошибок GraphQL: ${errors}` : `HTTP ${result.status}`
+        },
     })
 
     register({
@@ -644,7 +665,7 @@ function registerSchemaTools(register: IRegisterTool, context: INodeContext): vo
 /** Шаг цепочки в том виде, в каком его передаёт агент: id можно не указывать. */
 const FLOW_STEP_INPUT = z.object({
     id: z.string().optional().describe('Идентификатор шага; без него выдаётся "step-N"'),
-    name: z.string().min(1).describe('Название шага — видно в отчёте'),
+    name: z.string().min(1).describe('Действие шага для отчёта, например «Получить токен» или «Проверить статус заказа»'),
     operationRef: z
         .string()
         .optional()
@@ -733,8 +754,8 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
             flowId: z
                 .string()
                 .optional()
-                .describe('Идентификатор (имя файла); без него выводится из name. Существующий — перезаписывается'),
-            name: z.string().min(1),
+                .describe('Технический slug, например sign-in-check. При обновлении используй существующий flowId. Без него идентификатор выводится из name'),
+            name: z.string().min(1).describe('Название сценария в интерфейсе, например «Вход и проверка профиля»'),
             description: z.string().optional(),
             environmentId: z.string().optional().describe('Окружение по умолчанию для всех шагов'),
             endpointId: z.string().optional(),
@@ -800,10 +821,10 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 expectedVersion: args.expectedVersion,
             })
 
-            return { saved: flow.id, created: existing === undefined, steps: flow.steps.length }
+            return { saved: flow.id, name: flow.name, created: existing === undefined, steps: flow.steps.length }
         },
         summarize: (result) =>
-            `${result.created ? 'создана' : 'перезаписана'} ${result.saved}: ${result.steps} шагов`,
+            `${result.created ? 'Создана' : 'Обновлена'} цепочка «${result.name}»`,
     })
 
     register({
@@ -865,8 +886,12 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 })),
             }
         },
-        summarize: (result) =>
-            `${result.ok ? 'пройдена' : 'упала'}, шагов: ${result.steps.length}, ${result.durationMs} мс`,
+        isSuccessful: (result) => result.ok,
+        summarize: (result) => {
+            const failed = result.steps.find((step) => !step.ok && !step.skipped)
+
+            return result.ok ? 'Цепочка пройдена' : failed ? `Ошибка на шаге «${failed.name}»` : 'Цепочка завершилась с ошибкой'
+        },
     })
 
     register({
@@ -934,6 +959,7 @@ function registerFlowTools(register: IRegisterTool, context: INodeContext): void
                 })),
             }
         },
+        isSuccessful: (result) => result.failed === 0,
         summarize: (result) =>
             result.failed === 0
                 ? `${result.total} цепочек пройдено`
@@ -1017,5 +1043,102 @@ function registerEnvironmentTools(register: IRegisterTool, context: INodeContext
             ])
         },
         summarize: (result) => `задана ${result.updated}${result.secret ? ' (секрет)' : ''}`,
+    })
+}
+
+const ScriptTargetSchema = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('operation'), ref: z.string().describe('Ссылка "collection/operation"') }),
+    z.object({ kind: z.literal('environment'), environmentId: SlugSchema }),
+])
+
+const ScriptPatchSchema = z.object({
+    preRequest: RequestScriptsSchema.shape.preRequest.nullable().describe('Код Pre-request или null для удаления'),
+    postRequest: RequestScriptsSchema.shape.postRequest.nullable().describe('Код Post-request или null для удаления'),
+}).refine((patch) => patch.preRequest !== undefined || patch.postRequest !== undefined, {
+    message: 'Укажите preRequest или postRequest',
+})
+
+function parseScriptTarget(target: z.infer<typeof ScriptTargetSchema>): IRequestScriptTarget {
+    return target.kind === 'operation' ? { kind: target.kind, ref: parseOperationRef(target.ref) } : target
+}
+
+function configuredScriptPhases(scripts: IRequestScripts): string[] {
+    return [
+        ...(scripts.preRequest !== undefined ? ['preRequest'] : []),
+        ...(scripts.postRequest !== undefined ? ['postRequest'] : []),
+    ]
+}
+
+function registerScriptTools(register: IRegisterTool, context: INodeContext): void {
+    const scope = { workspaceId: SlugSchema, target: ScriptTargetSchema }
+    register({
+        name: 'scripts_get',
+        title: 'Прочитать скрипты',
+        description:
+            'Читает Pre-request и Post-request сохранённой операции или окружения и возвращает version для scripts_set. Для длинного скрипта передайте phase, затем используйте nextOffset для чтения следующей части.',
+        inputSchema: {
+            ...scope,
+            phase: z.enum(['preRequest', 'postRequest']).optional(),
+            offset: z.number().int().nonnegative().optional().describe('Начало фрагмента выбранной фазы в единицах UTF-16'),
+        },
+        run: async (args) => {
+            const { scripts, version } = await context.workspaces.getRequestScripts(
+                args.workspaceId,
+                parseScriptTarget(args.target),
+            )
+            const result = { target: args.target, version, configured: configuredScriptPhases(scripts) }
+            if (args.phase) {
+                const script = scripts[args.phase] ?? null
+                const offset = args.offset ?? 0
+                // Управляющий символ может занять до шести знаков при записи в JSON.
+                const end = offset + 6_000
+
+                return {
+                    ...result, phase: args.phase, offset,
+                    script: script?.slice(offset, end) ?? null,
+                    nextOffset: script && script.length > end ? end : undefined,
+                }
+            }
+            if (JSON.stringify(scripts).length > RESPONSE_LIMIT - 1_000) {
+                return { ...result, hint: 'Для чтения длинного скрипта укажите phase и используйте nextOffset.' }
+            }
+
+            return { ...result, scripts }
+        },
+        summarize: (result) => result.configured.length > 0
+            ? `Прочитаны скрипты (${result.configured.join(', ')})`
+            : 'Скрипты не настроены',
+    })
+
+    register({
+        name: 'scripts_set',
+        title: 'Настроить скрипты',
+        description:
+            'Обновляет Pre-request и Post-request сохранённой операции или окружения. Строка заменяет указанную фазу, null удаляет её. Пропущенная фаза сохраняется. Код сохраняется без запуска. Для защиты от параллельной правки передайте expectedVersion из scripts_get.',
+        inputSchema: {
+            ...scope,
+            scripts: ScriptPatchSchema,
+            expectedVersion: z.string().optional().describe('Версия из scripts_get'),
+        },
+        run: async (args) => {
+            const state = await context.workspaces.patchRequestScripts(
+                args.workspaceId,
+                parseScriptTarget(args.target),
+                args.scripts,
+                args.expectedVersion,
+            )
+
+            return {
+                target: args.target,
+                changed: state.changed,
+                version: state.version,
+                configured: configuredScriptPhases(state.scripts),
+            }
+        },
+        summarize: (result) => {
+            const name = result.target.kind === 'operation' ? result.target.ref : result.target.environmentId
+
+            return result.changed ? `Обновлены скрипты «${name}»` : `Скрипты «${name}» уже совпадают`
+        },
     })
 }

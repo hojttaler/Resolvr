@@ -44,7 +44,7 @@ describe('ActivityStore', () => {
         )
         await store.append(buildNoteRecord({ sessionId: 's1', seq: 3, text: 'Токен получен' }))
 
-        const sessions = await store.listSessions()
+        const sessions = await store.listTasks()
 
         expect(sessions).toHaveLength(1)
         expect(sessions[0]?.client.name).toBe('claude-code')
@@ -70,10 +70,55 @@ describe('ActivityStore', () => {
             }),
         )
 
-        const sessions = await store.listSessions()
+        const sessions = await store.listTasks()
 
         expect(sessions[0]?.stats.failedCalls).toBe(1)
         expect(sessions[0]?.entries[0]).toMatchObject({ ok: false, error: 'не найдена' })
+    })
+
+    it('разделяет планы в одном MCP-подключении по номеру начала вызова', async () => {
+        const { store } = createStore()
+        const ts = '2026-08-14T10:00:00.000Z'
+        await store.append({ kind: 'plan', sessionId: 's1', seq: 1, ts, title: 'Login', goal: 'Check login response', steps: ['Run'] })
+        await store.append({ kind: 'plan', sessionId: 's1', seq: 3, ts, title: 'Catalog', goal: 'Check catalog response', steps: ['Run'] })
+        await store.append({
+            ...buildCallRecord({
+                sessionId: 's1', seq: 2, tool: 'run', intent: 'Run login', args: {},
+                ok: true, durationMs: 10, summary: 'HTTP 200',
+            }),
+            ts,
+        })
+        await store.append({ ...buildNoteRecord({ sessionId: 's1', seq: 4, text: 'Catalog loaded' }), ts })
+
+        const tasks = await store.listTasks()
+        expect(tasks).toHaveLength(2)
+        expect(tasks.find((task) => task.plan?.title === 'Login')?.entries.map((entry) => entry.seq)).toEqual([2])
+        expect(tasks.find((task) => task.plan?.title === 'Catalog')?.entries.map((entry) => entry.seq)).toEqual([4])
+    })
+
+    it('показывает начало вызова и заменяет его результатом в исходной задаче', async () => {
+        const { store } = createStore()
+        const ts = '2026-08-14T10:00:00.000Z'
+        const call = { sessionId: 's1', seq: 2, tool: 'run', intent: 'Загружаю профиль' }
+        await store.append({ kind: 'plan', sessionId: 's1', seq: 1, ts, goal: 'Проверить профиль', steps: ['Прочитать профиль'] })
+        await store.append({ kind: 'call_started', ...call, ts })
+
+        expect((await store.listTasks())[0]).toMatchObject({
+            entries: [{ kind: 'call_started', seq: 2 }],
+            stats: { totalCalls: 1, failedCalls: 0 },
+        })
+
+        await store.append({ kind: 'plan', sessionId: 's1', seq: 3, ts, goal: 'Проверить каталог', steps: ['Загрузить каталог'] })
+        await store.append(buildCallRecord({
+            ...call, args: {}, ok: false, durationMs: 150, summary: 'HTTP 200 · ошибок GraphQL: 1',
+        }))
+
+        const tasks = await store.listTasks()
+        expect(tasks.find((task) => task.plan?.seq === 1)).toMatchObject({
+            entries: [{ kind: 'call', seq: 2, ok: false }],
+            stats: { totalCalls: 1, failedCalls: 1, durationMs: 150 },
+        })
+        expect(tasks.find((task) => task.plan?.seq === 3)?.entries).toEqual([])
     })
 
     it('разделяет вызовы разных сессий', async () => {
@@ -94,7 +139,7 @@ describe('ActivityStore', () => {
             )
         }
 
-        const sessions = await store.listSessions()
+        const sessions = await store.listTasks()
 
         expect(sessions).toHaveLength(2)
         expect(new Set(sessions.map((session) => session.sessionId))).toEqual(new Set(['s1', 's2']))
@@ -117,7 +162,7 @@ describe('ActivityStore', () => {
             }),
         )
 
-        const sessions = await store.listSessions()
+        const sessions = await store.listTasks()
 
         expect(sessions[0]?.entries).toHaveLength(1)
     })
@@ -151,10 +196,12 @@ describe('buildCallRecord', () => {
             ok: true,
             durationMs: 1,
             summary: 'схема',
-            result: { sdl: 'x'.repeat(30_000) },
+            result: { token: 'private-123', sdl: 'x'.repeat(30_000) },
+            secretValues: ['private-123'],
         })
 
         expect(record.truncated).toBe(true)
         expect(JSON.stringify(record.result).length).toBeLessThan(21_000)
+        expect(JSON.stringify(record.result)).not.toContain('private-123')
     })
 })

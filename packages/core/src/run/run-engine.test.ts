@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { HistoryStore } from '../storage/history-store.js'
@@ -178,6 +179,133 @@ describe('RunEngine', () => {
                 endpointId: 'missing',
             }),
         ).rejects.toThrow(/Эндпоинт "missing" не найден/)
+    })
+
+    it('применяет скрипты окружения и сохранённого запроса к одному вызову', async () => {
+        const workspace = await harness.workspaces.getWorkspace('api')
+        workspace.environments[0]!.scripts = {
+            preRequest: 'request.variables.count = 2',
+            postRequest: 'assert(response.data.ok, "Environment check failed")',
+        }
+        await harness.workspaces.saveWorkspace(workspace)
+        await harness.workspaces.createCollection('api', 'Test')
+        await harness.workspaces.saveOperation('api', {
+            collectionId: 'test',
+            name: 'Ping',
+            query: 'query Ping { ok }',
+            scripts: {
+                preRequest: 'request.variables.count *= 3\nrequest.headers["x-script"] = "set"',
+                postRequest: 'assert(response.status === 200, "Missing HTTP 200")',
+            },
+        })
+
+        const result = await harness.engine.run({ workspaceId: 'api', operationRef: 'test/Ping' })
+
+        expect(result.ok).toBe(true)
+        const request = harness.transport.exchanges[0]?.request
+        expect(request?.body).toContain('"count":6')
+        expect(request?.headers['x-script']).toBe('set')
+    })
+
+    it('импортирует HMAC и отправляет подпись с ключом только из выбранного окружения', async () => {
+        const workspace = await harness.workspaces.getWorkspace('api')
+        const key = 'temporary-test-key'
+        await harness.secrets.set({ workspace: 'api', environment: 'default', key: 'hmac' }, key)
+        workspace.environments[0]!.variables = { signer: 'keychain://api/default/hmac' }
+        workspace.environments[0]!.scripts = { preRequest: 'request.variables.payload = "Привет, Resolvr"' }
+        await harness.workspaces.saveWorkspace(workspace)
+        const digest = createHmac('sha256', key).update('Привет, Resolvr').digest()
+
+        const result = await harness.engine.run({
+            workspaceId: 'api',
+            query: 'query Ping { ok }',
+            scripts: {
+                preRequest: `
+                    // import { irrelevant } from "example"
+                    import {
+                        hmacSha256 as sign,
+                    } from '@resolvr/crypto'
+                    const payload = request.variables.payload
+                    request.headers["x-signature"] = sign("signer", payload)
+                    request.headers["x-signature-base64"] = sign("signer", payload, "base64")
+                    return
+                    assert(false)
+                `,
+            },
+        })
+
+        expect(result.ok).toBe(true)
+        const request = harness.transport.exchanges[0]?.request
+        expect(request?.headers).toMatchObject({
+            'x-signature': digest.toString('hex'),
+            'x-signature-base64': digest.toString('base64'),
+        })
+        expect(JSON.stringify(request)).not.toContain(key)
+    })
+
+    it('отклоняет другие импорты и ключи вне выбранного окружения до отправки', async () => {
+        const workspace = await harness.workspaces.getWorkspace('api')
+        workspace.environments[0]!.variables = {
+            plain: 'not-a-secret',
+            elsewhere: 'keychain://another/default/hmac',
+        }
+        await harness.secrets.set({ workspace: 'another', environment: 'default', key: 'hmac' }, 'another-key')
+        await harness.workspaces.saveWorkspace(workspace)
+
+        const input = { workspaceId: 'api', query: '{ ok }' }
+        await expect(harness.engine.run({
+            ...input, scripts: { preRequest: 'import "node:crypto"' },
+        })).rejects.toThrow('доступны только встроенные модули Resolvr')
+        for (const name of ['plain', 'elsewhere']) {
+            await expect(harness.engine.run({
+                ...input, scripts: {
+                    preRequest: `import { hmacSha256 } from "@resolvr/crypto"; hmacSha256("${name}", "test");`,
+                },
+            })).rejects.toThrow('Ключ подписи не найден среди секретов выбранного окружения')
+        }
+        expect(harness.transport.exchanges).toHaveLength(0)
+    })
+
+    it('останавливает зависший pre-request и сохраняет ответ при провале post-request', async () => {
+        const input = { workspaceId: 'api', query: '{ ok }' }
+
+        await expect(harness.engine.run({
+            ...input, scripts: { preRequest: 'while (true) {}' },
+        })).rejects.toMatchObject({ code: 'REQUEST_SCRIPT_FAILED' })
+        expect(harness.transport.exchanges).toHaveLength(0)
+
+        const result = await harness.engine.run({
+            ...input,
+            scripts: {
+                postRequest: 'assert(typeof fetch === "undefined"); assert(false, "Expected failure")',
+            },
+        })
+
+        expect(result).toMatchObject({
+            ok: false, status: 200, data: { ok: true },
+            scriptError: 'Post-request: Expected failure',
+        })
+    })
+
+    it('запрашивает только отсутствующие значения переменных перед отправкой', async () => {
+        const workspace = await harness.workspaces.getWorkspace('api')
+        workspace.environments[0]!.variables = { existing: 'kept' }
+        await harness.workspaces.saveWorkspace(workspace)
+        const result = await harness.engine.run({
+            workspaceId: 'api',
+            query: '{ ok }',
+            variables: { nested: ['{{missing}}', '{{ existing }}', '{{$uuid}}', '{{missing}}'] },
+            resolveMissingVariables: async (names) => {
+                expect(names).toEqual(['missing'])
+                expect(harness.transport.exchanges).toHaveLength(0)
+                return { missing: 'filled' }
+            },
+        })
+
+        expect(result.ok).toBe(true)
+        const body = harness.transport.exchanges[0]?.request.body
+        expect(body).toContain('"nested":["filled","kept",')
+        expect(body).not.toContain('{{')
     })
 })
 

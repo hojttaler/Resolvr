@@ -68,6 +68,17 @@ describe('FileSecretStore', () => {
 })
 
 describe('SwitchableSecretStore', () => {
+    it('перечитывает файловый секрет после записи другим экземпляром', async () => {
+        const { fs, paths, store: file } = createStore()
+        const store = new SwitchableSecretStore({ file, keychain: new MemorySecretStore() }, 'file')
+        await store.set(REF, 'first')
+        await new FileSecretStore(fs, paths).set(REF, 'updated')
+
+        store.invalidate()
+
+        expect(await store.get(REF)).toBe('updated')
+    })
+
     it('направляет обращения в выбранный бэкенд', async () => {
         const file = new MemorySecretStore()
         const keychain = new MemorySecretStore()

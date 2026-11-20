@@ -1,17 +1,24 @@
 import type { IFileSystem } from '../ports/file-system.js'
-import { maskSecretsInJson } from '../secrets/secret-resolver.js'
+import { maskSecrets, maskSecretsInJson } from '../secrets/secret-resolver.js'
 import { historyDayKey, type LibraryPaths } from '../storage/paths.js'
 import {
     ActivityRecordSchema,
     type IActivityCallRecord,
     type IActivityNoteRecord,
     type IActivityRecord,
-    type IActivitySession,
+    type IActivitySessionRecord,
+    type IActivityTask,
 } from './activity-model.js'
 
 /** Предел размера результата в записи: длинные ответы усекаются. */
 const RESULT_LIMIT = 20_000
-const DEFAULT_SESSION_LIMIT = 30
+const DEFAULT_TASK_LIMIT = 30
+
+interface IActivityConnection {
+    sessionId: string
+    header?: IActivitySessionRecord
+    records: Exclude<IActivityRecord, IActivitySessionRecord>[]
+}
 
 /**
  * Хранилище журнала действий агента.
@@ -39,20 +46,18 @@ export class ActivityStore {
     }
 
     /**
-     * Сессии от новых к старым, собранные из записей журнала.
-     *
-     * Собирается сразу целиком: сессия без заголовка (журнал начали читать с
-     * середины дня) всё равно должна попасть в список, иначе часть действий
-     * агента просто исчезнет из вида.
+     * Задачи от новых действий к старым. Записи без плана остаются видимыми.
+     * Вызов относится к последнему плану на момент начала, независимо от того,
+     * когда он завершился и попал в файл.
      */
-    public async listSessions(limit = DEFAULT_SESSION_LIMIT): Promise<IActivitySession[]> {
+    public async listTasks(limit = DEFAULT_TASK_LIMIT): Promise<IActivityTask[]> {
         const files = (await this._fs.listDir(this._paths.activityDir()))
             .filter((entry) => !entry.isDirectory && entry.name.endsWith('.jsonl'))
             .map((entry) => entry.name)
             .sort()
             .reverse()
 
-        const sessions = new Map<string, IActivitySession>()
+        const connections = new Map<string, IActivityConnection>()
 
         for (const fileName of files) {
             const raw = await this._fs.readText(`${this._paths.activityDir()}/${fileName}`)
@@ -64,44 +69,23 @@ export class ActivityStore {
                 const record = this._parseLine(line)
                 if (!record) continue
 
-                const session = this._ensureSession(sessions, record.sessionId)
-
-                if (record.kind === 'session') {
-                    session.startedAt = record.startedAt
-                    session.client = record.client
-                    continue
+                let connection = connections.get(record.sessionId)
+                if (!connection) {
+                    connection = { sessionId: record.sessionId, records: [] }
+                    connections.set(record.sessionId, connection)
                 }
-
-                if (record.kind === 'plan') {
-                    session.plan = record
-                    continue
-                }
-
-                session.entries.push(record)
-
-                if (record.kind === 'call') {
-                    session.stats.totalCalls += 1
-                    session.stats.durationMs += record.durationMs
-                    if (!record.ok) session.stats.failedCalls += 1
-                }
-
-                if (record.ts > session.stats.lastActivityAt) {
-                    session.stats.lastActivityAt = record.ts
-                }
+                if (record.kind === 'session') connection.header = record
+                else connection.records.push(record)
             }
 
-            if (sessions.size >= limit) break
+            if (connections.size >= limit) break
         }
 
-        for (const session of sessions.values()) {
-            session.entries.sort((left, right) => left.seq - right.seq)
-            if (session.startedAt.length === 0) {
-                session.startedAt = session.entries[0]?.ts ?? session.stats.lastActivityAt
-            }
-        }
-
-        return [...sessions.values()]
-            .sort((left, right) => right.stats.lastActivityAt.localeCompare(left.stats.lastActivityAt))
+        return [...connections.values()].flatMap(toTasks)
+            .sort((left, right) =>
+                right.stats.lastActivityAt.localeCompare(left.stats.lastActivityAt) ||
+                (right.plan?.seq ?? 0) - (left.plan?.seq ?? 0),
+            )
             .slice(0, limit)
     }
 
@@ -125,25 +109,6 @@ export class ActivityStore {
         return removed
     }
 
-    private _ensureSession(
-        sessions: Map<string, IActivitySession>,
-        sessionId: string,
-    ): IActivitySession {
-        const existing = sessions.get(sessionId)
-        if (existing) return existing
-
-        const created: IActivitySession = {
-            sessionId,
-            startedAt: '',
-            client: { name: 'unknown', version: '' },
-            entries: [],
-            stats: { totalCalls: 0, failedCalls: 0, durationMs: 0, lastActivityAt: '' },
-        }
-        sessions.set(sessionId, created)
-
-        return created
-    }
-
     private _parseLine(line: string): IActivityRecord | undefined {
         try {
             const result = ActivityRecordSchema.safeParse(JSON.parse(line))
@@ -153,6 +118,41 @@ export class ActivityStore {
             return undefined
         }
     }
+}
+
+function toTasks(connection: IActivityConnection): IActivityTask[] {
+    const tasks: IActivityTask[] = []
+    const finished = new Set(connection.records.filter((record) => record.kind === 'call').map((record) => record.seq))
+    let task: IActivityTask | undefined
+
+    for (const record of connection.records.sort((left, right) => left.seq - right.seq)) {
+        if (record.kind === 'call_started' && finished.has(record.seq)) continue
+
+        if (!task || record.kind === 'plan') {
+            const plan = record.kind === 'plan' ? record : undefined
+            task = {
+                id: `${connection.sessionId}:${plan?.seq ?? 'unplanned'}`,
+                sessionId: connection.sessionId,
+                startedAt: plan?.ts ?? connection.header?.startedAt ?? record.ts,
+                client: connection.header?.client ?? { name: 'unknown', version: '' },
+                plan,
+                entries: [],
+                stats: { totalCalls: 0, failedCalls: 0, durationMs: 0, lastActivityAt: record.ts },
+            }
+            tasks.push(task)
+        }
+        if (record.kind === 'plan') continue
+
+        task.entries.push(record)
+        if (record.ts > task.stats.lastActivityAt) task.stats.lastActivityAt = record.ts
+        if (record.kind === 'call' || record.kind === 'call_started') task.stats.totalCalls += 1
+        if (record.kind === 'call') {
+            task.stats.durationMs += record.durationMs
+            if (!record.ok) task.stats.failedCalls += 1
+        }
+    }
+
+    return tasks
 }
 
 /**
@@ -178,7 +178,8 @@ export function buildCallRecord(input: {
     secretValues?: readonly string[]
 }): IActivityCallRecord {
     const secrets = input.secretValues ?? []
-    const serialized = input.result === undefined ? '' : JSON.stringify(input.result)
+    const result = input.result === undefined ? undefined : maskSecretsInJson(input.result, secrets)
+    const serialized = result === undefined ? '' : JSON.stringify(result)
     const truncated = serialized.length > RESULT_LIMIT
 
     return {
@@ -196,9 +197,9 @@ export function buildCallRecord(input: {
         summary: input.summary,
         result: truncated
             ? { truncated: `${serialized.slice(0, RESULT_LIMIT)}…` }
-            : maskSecretsInJson(input.result, secrets),
+            : result,
         truncated,
-        error: input.error,
+        error: input.error && maskSecrets(input.error, secrets),
         workspaceId: input.workspaceId,
     }
 }

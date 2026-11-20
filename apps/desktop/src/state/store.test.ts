@@ -1,4 +1,4 @@
-import { TabStateSchema, WorkspaceSchema } from '@resolvr/core'
+import { FlowSchema, TabStateSchema, WorkspaceSchema } from '@resolvr/core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getAppContext } from '../platform/context.js'
@@ -36,6 +36,158 @@ beforeEach(() => {
 })
 
 describe('операции рабочего пространства', () => {
+    it('при удалении закрывает вкладки workspace и открывает следующий, а после последнего очищает экран', async () => {
+        type Context = Awaited<ReturnType<typeof getAppContext>>
+        const next = { ...workspace, id: 'next', endpoints: [] }
+        const parked = { ...mutation, id: 'next-tab', workspaceId: next.id }
+        const deleteWorkspace = vi.fn(async () => undefined)
+        const deleteDraft = vi.fn(async () => undefined)
+        vi.mocked(getAppContext).mockResolvedValue({
+            workspaces: {
+                deleteWorkspace,
+                getWorkspace: async () => next,
+                listCollections: async () => [],
+                listFlows: async () => [],
+            },
+            tokens: { attach: async () => next },
+            sessions: { deleteDraft },
+            history: { list: async () => [] },
+            flowState: { read: async () => ({}) },
+        } as unknown as Context)
+        useAppStore.setState({
+            workspaces: [workspace, next],
+            tabsByWorkspace: { [next.id]: { tabs: [parked], activeTabId: parked.id } },
+            contents: { [mutation.id]: content, [parked.id]: content },
+            selections: { [workspace.id]: { endpointId: 'main' } },
+        })
+
+        await useAppStore.getState().deleteWorkspace(workspace.id)
+
+        expect(deleteWorkspace).toHaveBeenCalledWith(workspace.id)
+        expect(deleteDraft).toHaveBeenCalledWith(mutation.id)
+        expect(deleteDraft).not.toHaveBeenCalledWith(parked.id)
+        expect(useAppStore.getState()).toMatchObject({
+            workspaces: [next],
+            workspace: next,
+            tabs: [parked],
+            activeTabId: parked.id,
+        })
+        expect(useAppStore.getState().contents[mutation.id]).toBeUndefined()
+        expect(useAppStore.getState().tabsByWorkspace[workspace.id]).toBeUndefined()
+        expect(useAppStore.getState().layouts[workspace.id]).toBeUndefined()
+        expect(useAppStore.getState().selections[workspace.id]).toBeUndefined()
+
+        await useAppStore.getState().deleteWorkspace(next.id)
+
+        expect(useAppStore.getState()).toMatchObject({
+            workspaces: [], workspace: undefined, tabs: [], activeTabId: undefined,
+            tree: [], flows: [], history: [], contents: {},
+        })
+    })
+
+    it('обновляет workspace и схему из файлов после смены эндпоинта по умолчанию', async () => {
+        type Context = Awaited<ReturnType<typeof getAppContext>>
+        const updated = WorkspaceSchema.parse({
+            ...workspace,
+            name: 'Updated workspace',
+            defaultEndpointId: 'stage',
+            endpoints: [
+                ...workspace.endpoints,
+                { id: 'stage', name: 'Stage API', url: 'https://stage.example.invalid/graphql' },
+            ],
+        })
+        const getSchema = vi.fn(async () => undefined)
+        vi.mocked(getAppContext).mockResolvedValue({
+            workspaces: { listWorkspaces: async () => [updated] },
+            tokens: { attach: async () => updated },
+            schemas: { getSchema },
+        } as unknown as Context)
+
+        await useAppStore.getState().applyLibraryChanges(['workspaces\\test\\workspace.json'])
+
+        expect(useAppStore.getState().workspace?.name).toBe('Updated workspace')
+        expect(useAppStore.getState().workspaces).toEqual([updated])
+        expect(getSchema).toHaveBeenCalledWith(workspace.id, 'stage')
+    })
+
+    it('сбрасывает кэши секретов и сведений о токене перед обновлением окружения', async () => {
+        type Context = Awaited<ReturnType<typeof getAppContext>>
+        const invalidateSecrets = vi.fn()
+        const invalidateTokens = vi.fn()
+        const attach = vi.fn(async () => workspace)
+        vi.mocked(getAppContext).mockResolvedValue({
+            workspaces: { getWorkspace: async () => workspace },
+            secrets: { invalidate: invalidateSecrets },
+            tokens: { attach, invalidate: invalidateTokens },
+        } as unknown as Context)
+
+        await useAppStore.getState().applyLibraryChanges(['.secrets/test.json', '.state/tokens.json'])
+
+        expect(invalidateSecrets).toHaveBeenCalledOnce()
+        expect(invalidateTokens).toHaveBeenCalledBefore(attach)
+    })
+
+    it('подхватывает сохранённый запрос и цепочку, сохраняя несохранённый запрос', async () => {
+        type Context = Awaited<ReturnType<typeof getAppContext>>
+        const saved = { ...mutation, id: 'saved', operationRef: 'writes/read', dirty: false }
+        const flowTab = TabStateSchema.parse({ id: 'flow-tab', kind: 'flow', flowId: 'smoke', workspaceId: workspace.id })
+        const flow = FlowSchema.parse({
+            id: 'smoke', name: 'Updated flow', steps: [{ id: 'first', name: 'First', query: '{ ok }' }],
+        })
+        const operation = {
+            name: 'read', collectionId: 'writes', query: 'query Updated { ok }',
+            variables: { name: 'file' }, headers: {}, scripts: { preRequest: 'request.variables.id = 3' },
+        }
+        vi.mocked(getAppContext).mockResolvedValue({
+            workspaces: {
+                listCollections: async () => [{ id: 'writes', name: 'Writes', order: [], headers: {}, description: '' }],
+                listOperations: async () => [operation, { ...operation, name: 'change' }],
+                listFlows: async () => [flow],
+            },
+            flowState: { read: async () => ({}) },
+        } as unknown as Context)
+        useAppStore.setState({
+            tabs: [mutation, saved, flowTab],
+            contents: { [mutation.id]: content, [saved.id]: content },
+        })
+
+        await useAppStore.getState().applyLibraryChanges(['workspaces/test/collections/writes/read.graphql'])
+
+        const state = useAppStore.getState()
+        expect(state.contents[mutation.id]).toBe(content)
+        expect(state.contents[saved.id]).toMatchObject({ query: operation.query, scripts: operation.scripts })
+        expect(state.flowDrafts[flowTab.id]).toEqual(flow)
+        expect(state.tabs.find((tab) => tab.id === flowTab.id)?.title).toBe('Updated flow')
+    })
+
+    it('передаёт выбранный в шапке эндпоинт при запуске цепочки', async () => {
+        type Context = Awaited<ReturnType<typeof getAppContext>>
+        const run = vi.fn(async () => ({
+            flowId: 'smoke', ok: false, durationMs: 0, context: {}, steps: [],
+        }))
+        vi.mocked(getAppContext).mockResolvedValue({
+            flows: { run },
+            flowState: { read: async () => ({}) },
+        } as unknown as Context)
+        useAppStore.setState({
+            workspace: {
+                ...workspace,
+                endpoints: [
+                    ...workspace.endpoints,
+                    { id: 'stage', name: 'Stage', url: 'https://stage.example.invalid/graphql', headers: {}, acceptInvalidCerts: false },
+                ],
+            },
+            selections: { [workspace.id]: { endpointId: 'stage' } },
+            loadHistory: async () => undefined,
+        })
+
+        await useAppStore.getState().runFlow('smoke', { confirmed: true })
+
+        expect(run).toHaveBeenCalledWith(workspace.id, 'smoke', expect.objectContaining({
+            endpointId: 'stage',
+        }))
+    })
+
     it('подтверждение мутации относится к тексту, который был показан при запросе подтверждения', async () => {
         await useAppStore.getState().runActiveTab()
 

@@ -78,6 +78,7 @@ export interface ISchemaFieldChoice {
     name: string
     type: string
     description?: string
+    selected?: boolean
 }
 
 /** Операции документа в порядке редактора. Незавершённый текст нельзя менять через схему. */
@@ -552,14 +553,24 @@ export function schemaFieldChoices(
     schema: GraphQLSchema,
     target: ISchemaFieldTarget,
 ): ISchemaFieldChoice[] {
-    const fields = fieldsForType(schema, target.type)
+    const selected = new Set<string>()
+    for (const entry of target.selection?.selections ?? []) {
+        if (entry.kind === Kind.FIELD) selected.add(entry.name.value)
+        if (entry.kind === Kind.INLINE_FRAGMENT && entry.typeCondition) {
+            selected.add(`... on ${entry.typeCondition.name.value}`)
+        }
+    }
+    const fields = fieldsForType(schema, target.type).map((field) => ({
+        ...field,
+        selected: selected.has(field.name),
+    }))
     if (
         target.operation?.operation !== 'subscription' ||
         target.selection !== target.operation.selectionSet
     )
         return fields
 
-    return fields.filter((field) => schemaSelectionBranch(target.selection, field.name))
+    return fields.filter((field) => field.selected)
 }
 
 /**

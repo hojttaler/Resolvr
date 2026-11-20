@@ -26,6 +26,7 @@ export function DialogSurface(props: IDialogSurfaceProps): React.JSX.Element {
             aria-label={props.label}
             onCancel={(event) => {
                 event.preventDefault()
+                event.stopPropagation()
                 props.onClose()
             }}
             onMouseDown={(event) => {

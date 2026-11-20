@@ -192,11 +192,12 @@ describe('вставка поля по ПКМ', () => {
             inputSchema,
         )
         expect(target?.typeName).toBe('Range')
-        expect(target?.fields.map((field) => field.name)).toEqual(['max'])
-        const field = target?.fields[0]
+        expect(target?.fields.map((field) => field.name)).toEqual(['min', 'max'])
+        expect(target?.filled).toEqual(new Set(['min']))
+        const field = target?.fields.find((item) => item.name === 'max')
         if (!target || !field) throw new Error('Missing nested schema field')
 
-        const transaction = state.update(insertInputFields(state, target, new Set([field.name]), 4))
+        const transaction = state.update(insertInputFields(state, target, new Set(['min', field.name]), 4))
         expect(transaction.state.doc.toString()).toBe(
             text.replace('"min": 3', '"min": 3,\n                "max": 100'),
         )
@@ -215,14 +216,16 @@ describe('вставка поля по ПКМ', () => {
         expect(transaction.state.doc.toString()).toBe('{"filters":[{"range":{"min": 0}}]}')
     })
 
-    it('не предлагает вставку в корень переменных и в заполненный oneOf', () => {
+    it('показывает заданное поле oneOf и исключает повторную вставку', () => {
         const text = '{"choice":{"id":"u1"}}'
         const state = editor(text)
 
         expect(findInputObjectFields(state, 0, query, inputSchema)).toBeUndefined()
-        expect(
-            findInputObjectFields(state, text.indexOf('"id"') + 2, query, inputSchema),
-        ).toBeUndefined()
+        const target = findInputObjectFields(state, text.indexOf('"id"') + 2, query, inputSchema)
+        if (!target) throw new Error('Missing oneOf input object')
+        expect(target.filled).toEqual(new Set(['id']))
+        const transaction = state.update(insertInputFields(state, target, new Set(['email']), 4))
+        expect(transaction.state.doc.toString()).toBe(text)
     })
 
     it('добавляет несколько отмеченных полей одной транзакцией', () => {

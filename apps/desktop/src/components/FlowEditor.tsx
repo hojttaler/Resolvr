@@ -1,6 +1,7 @@
 import {
     formatOperationRef,
     toSlug,
+    type IEndpoint,
     type IFlow,
     type IFlowAssert,
     type IFlowStep,
@@ -8,12 +9,16 @@ import {
     type IFlowStepResult,
 } from '@resolvr/core'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type { GraphQLSchema } from 'graphql'
 
 import { copyText } from '../lib/clipboard.js'
 import { useT } from '../i18n/index.js'
 import { isModKey, kbd } from '../lib/keys.js'
-import { findOperation, parseVariables, useAppStore } from '../state/store.js'
+import { getAppContext } from '../platform/context.js'
+import { findOperation, parseVariables, selectActiveEndpoint, useAppStore } from '../state/store.js'
 import { CodeEditor } from './editor/CodeEditor.js'
+import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { JsonViewer } from './JsonViewer.js'
 import { KeyValueEditor } from './KeyValueEditor.js'
 
@@ -63,6 +68,7 @@ const ASSERT_OPS: Array<{ value: IFlowAssert['op']; label: string; needsValue: b
 export function FlowPage(props: IFlowPageProps): React.JSX.Element {
     const tree = useAppStore((state) => state.tree)
     const workspace = useAppStore((state) => state.workspace)
+    const activeEndpoint = useAppStore(selectActiveEndpoint)
     const draft = useAppStore((state) => state.flowDrafts[props.tabId])
     const tab = useAppStore((state) => state.tabs.find((item) => item.id === props.tabId))
     const updateFlowDraft = useAppStore((state) => state.updateFlowDraft)
@@ -73,6 +79,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
     const linkTo = useAppStore((state) => state.linkTo)
 
     const [error, setError] = useState<string | undefined>()
+    const [menu, setMenu] = useState<IContextMenuState>()
     const [busy, setBusy] = useState(false)
     const running = useRef(false)
     const [stepId, setStepId] = useState<string>()
@@ -81,6 +88,13 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
         {},
     )
     const t = useT()
+
+    useEffect(() => {
+        if (!tab?.dirty) {
+            setJsonDrafts({})
+            setTagsText(undefined)
+        }
+    }, [draft, tab?.dirty])
 
     // ⌘↩ запускает цепочку так же, как запрос в обычной вкладке.
     useEffect(() => {
@@ -144,6 +158,7 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
         }))
         setError(undefined)
         if (!(value instanceof Error)) onValid(value)
+        else if (!tab?.dirty) setDraft((current) => current)
     }
 
     function moveStep(index: number, direction: -1 | 1): void {
@@ -204,76 +219,89 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
     const selected = draft.steps.find((step) => step.id === stepId) ?? draft.steps[0]
     const index = draft.steps.findIndex((step) => step.id === selected?.id)
     const stepResult = run?.steps.find((item) => item.stepId === selected?.id)
+    const endpoints = workspace?.endpoints ?? []
+    const flowEndpoint = endpoints.find((endpoint) => endpoint.id === draft.endpointId)
+    const inheritedEndpoint = flowEndpoint ?? activeEndpoint
 
     return (
         <div className="panel flow-page">
             <div className="panel__header flow-page__header">
-                <input
-                    className="input flow-page__title"
-                    value={draft.name}
-                    placeholder={t('Flow name')}
-                    aria-label={t('Flow name')}
-                    title={
-                        workspace
-                            ? `workspaces/${workspace.id}/flows/${fileName}.flow.json`
-                            : undefined
-                    }
-                    onChange={(event) =>
-                        setDraft((current) => ({ ...current, name: event.target.value }))
-                    }
-                />
-                {run && (
-                    <span className={`badge ${run.ok ? 'badge--ok' : 'badge--fail'}`}>
-                        {run.ok ? t('passed') : t('failed')} · {t('{n} ms', { n: run.durationMs })}
-                    </span>
-                )}
-                {tab?.dirty && <span className="badge">{t('not saved')}</span>}
+                <div className="flow-page__identity">
+                    <div className="flow-page__name">
+                        <span aria-hidden="true">{draft.name || t('Flow name')}{'\u200b'}</span>
+                        <textarea
+                            className="input flow-page__title"
+                            rows={1}
+                            value={draft.name}
+                            placeholder={t('Flow name')}
+                            aria-label={t('Flow name')}
+                            title={workspace ? `workspaces/${workspace.id}/flows/${fileName}.flow.json` : undefined}
+                            onChange={(event) => {
+                                const name = event.target.value
+                                setDraft((current) => ({ ...current, name }))
+                            }}
+                        />
+                    </div>
+                    {(run || tab?.dirty) && (
+                        <div className="flow-page__status">
+                            {run && (
+                                <span className={`badge ${run.ok ? 'badge--ok' : 'badge--fail'}`}>
+                                    {run.ok ? t('passed') : t('failed')} · {t('{n} ms', { n: run.durationMs })}
+                                </span>
+                            )}
+                            {tab?.dirty && <span className="flow-page__dirty">{t('not saved')}</span>}
+                        </div>
+                    )}
+                </div>
 
-                <span className="panel__spacer" />
-
-                {draft.id.length > 0 && (
+                <div className="flow-page__actions">
+                    {draft.id && (
+                        <button
+                            type="button"
+                            className="btn btn--quiet btn--icon"
+                            aria-label={t('More actions')}
+                            aria-haspopup="menu"
+                            aria-expanded={Boolean(menu)}
+                            title={t('More actions')}
+                            onClick={(event) => {
+                                const { left, bottom } = event.currentTarget.getBoundingClientRect()
+                                setMenu({
+                                    x: left,
+                                    y: bottom + 4,
+                                    items: [
+                                        {
+                                            label: t('Copy resolvr:// link to this flow'),
+                                            run: () => copyText(linkTo({ flowId: draft.id }) ?? ''),
+                                        },
+                                        { label: t('Delete flow and close the tab'), separated: true, run: () => deleteFlow(draft.id) },
+                                    ],
+                                })
+                            }}
+                        >
+                            <span aria-hidden="true">⋯</span>
+                        </button>
+                    )}
                     <button
                         type="button"
-                        className="btn btn--quiet"
-                        onClick={() => void copyText(linkTo({ flowId: draft.id }) ?? '')}
-                        title={t('Copy resolvr:// link to this flow')}
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => void persist()}
                     >
-                        {t('Link')}
+                        {t('Save')}
                     </button>
-                )}
-
-                {draft.id.length > 0 && (
                     <button
                         type="button"
-                        className="btn btn--quiet"
-                        style={{ color: 'var(--danger)' }}
-                        onClick={() => void deleteFlow(draft.id)}
-                        title={t('Delete flow and close the tab')}
+                        className="btn btn--primary"
+                        disabled={busy}
+                        onClick={() => void saveAndRun()}
+                        title={t('Save and run ({keys})', { keys: kbd('Enter') })}
                     >
-                        {t('Delete')}
+                        {!busy && <span aria-hidden="true">▶</span>}
+                        {busy ? t('Running…') : t('Run')}
                     </button>
-                )}
-
-                <button
-                    type="button"
-                    className="btn"
-                    disabled={busy}
-                    onClick={() => void persist()}
-                >
-                    {t('Save')}
-                </button>
-                <button
-                    type="button"
-                    className="btn btn--primary"
-                    disabled={busy}
-                    onClick={() => void saveAndRun()}
-                    title={t('Save and run ({keys})', { keys: kbd('Enter') })}
-                >
-                    {!busy && <span aria-hidden="true">▶</span>}
-                    {busy ? t('Running…') : t('Run')}
-                    {!busy && <kbd className="btn__key">{kbd('Enter')}</kbd>}
-                </button>
+                </div>
             </div>
+            {menu && createPortal(<ContextMenu menu={menu} onClose={() => setMenu(undefined)} />, document.body)}
 
             {error && (
                 <div className="flow__error" role="alert">
@@ -282,50 +310,20 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
             )}
             <div className="flow-page__body">
                 <div className="flow-page__steps">
-                    <div className="flow__grid flow__metadata">
-                        <label className="field__label" htmlFor="flow-tags">
-                            {t('Tags')}
-                        </label>
-                        <input
-                            id="flow-tags"
-                            className="input"
-                            value={tagsText ?? draft.tags.join(', ')}
-                            placeholder="smoke, billing"
-                            onBlur={() => setTagsText(undefined)}
-                            onChange={(event) => {
-                                const text = event.target.value
-                                setTagsText(text)
-                                setDraft((current) => ({ ...current, tags: parseTags(text) }))
-                            }}
-                        />
-                        <label className="field__label" htmlFor="flow-preconditions">
-                            {t('Preconditions')}
-                        </label>
-                        <input
-                            id="flow-preconditions"
-                            className="input"
-                            value={draft.preconditions}
-                            placeholder={t('a client with an active contract')}
-                            onChange={(event) =>
-                                setDraft((current) => ({
-                                    ...current,
-                                    preconditions: event.target.value,
-                                }))
-                            }
-                        />
-                    </div>
-
-                    <ConstantsEditor
-                        value={jsonDrafts['']?.text ?? JSON.stringify(draft.variables, null, 2)}
-                        invalid={jsonDrafts['']?.valid === false}
-                        onChange={(text) =>
-                            updateJson('', text, (variables) =>
-                                setDraft((current) => ({ ...current, variables })),
-                            )
-                        }
+                    <FlowEndpointField
+                        endpoints={endpoints}
+                        endpointId={draft.endpointId}
+                        label={t('Flow endpoint')}
+                        inheritedLabel={t('Use toolbar endpoint')}
+                        inheritedName={activeEndpoint?.name}
+                        onChange={(endpointId) => setDraft((current) => ({ ...current, endpointId }))}
                     />
-
-                    <h2 className="flow-page__heading">{t('Steps')}</h2>
+                    <div className="flow-page__steps-header">
+                        <h2 className="flow-page__heading">{t('Steps')}</h2>
+                        <button type="button" className="btn btn--quiet" onClick={addStep}>
+                            {t('+ Add step')}
+                        </button>
+                    </div>
                     <ol className="flow-page__step-list">
                         {draft.steps.map((step, position) => (
                             <li key={step.id}>
@@ -343,34 +341,51 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                                     </strong>
                                     <span className="inspector__hint">
                                         {step.operationRef ?? t('Custom query')}
+                                        {step.endpointId && ` · ${endpoints.find((endpoint) => endpoint.id === step.endpointId)?.name ?? step.endpointId}`}
                                     </span>
                                 </button>
                             </li>
                         ))}
                     </ol>
 
-                    <button type="button" className="btn btn--quiet" onClick={addStep}>
-                        {t('+ Add step')}
-                    </button>
-
-                    {run && Object.keys(run.context).length > 0 && (
-                        <div className="flow__summary">
-                            <div className="settings__caption">{t('Flow result')}</div>
-                            <div className="inspector__hint">
-                                {t(
-                                    'Values extracted by steps — they were substituted further as {{name}}',
-                                )}
-                            </div>
-                            <JsonViewer value={run.context} defaultExpandDepth={3} />
-                            <button
-                                type="button"
-                                className="btn btn--quiet"
-                                onClick={() => void copyText(JSON.stringify(run.context, null, 2))}
-                            >
-                                {t('Copy result')}
-                            </button>
-                        </div>
-                    )}
+                    <div className="flow__metadata">
+                        <label className="field">
+                            <span className="field__label">{t('Tags')}</span>
+                            <input
+                                className="input"
+                                value={tagsText ?? draft.tags.join(', ')}
+                                placeholder="smoke, billing"
+                                onBlur={() => setTagsText(undefined)}
+                                onChange={(event) => {
+                                    const text = event.target.value
+                                    setTagsText(text)
+                                    setDraft((current) => ({ ...current, tags: parseTags(text) }))
+                                }}
+                            />
+                        </label>
+                        <label className="field">
+                            <span className="field__label">{t('Preconditions')}</span>
+                            <textarea
+                                className="input flow-page__preconditions"
+                                rows={3}
+                                value={draft.preconditions}
+                                placeholder={t('a client with an active contract')}
+                                onChange={(event) => {
+                                    const preconditions = event.target.value
+                                    setDraft((current) => ({ ...current, preconditions }))
+                                }}
+                            />
+                        </label>
+                    </div>
+                    <ConstantsEditor
+                        value={jsonDrafts['']?.text ?? JSON.stringify(draft.variables, null, 2)}
+                        invalid={jsonDrafts['']?.valid === false}
+                        onChange={(text) =>
+                            updateJson('', text, (variables) =>
+                                setDraft((current) => ({ ...current, variables })),
+                            )
+                        }
+                    />
                 </div>
                 <div className="flow-page__detail">
                     {selected ? (
@@ -381,6 +396,9 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                             total={draft.steps.length}
                             result={stepResult}
                             collections={tree}
+                            endpoints={endpoints}
+                            inheritedEndpoint={inheritedEndpoint}
+                            inheritFromFlow={Boolean(flowEndpoint)}
                             variablesText={
                                 jsonDrafts[selected.id]?.text ??
                                 JSON.stringify(selected.variables, null, 2)
@@ -403,6 +421,21 @@ export function FlowPage(props: IFlowPageProps): React.JSX.Element {
                         />
                     ) : (
                         <p className="empty">{t('Add at least one step')}</p>
+                    )}
+                    {run && Object.keys(run.context).length > 0 && (
+                        <div className="flow__summary">
+                            <div className="flow__summary-header">
+                                <h3>{t('Flow result')}</h3>
+                                <button
+                                    type="button"
+                                    className="btn btn--quiet"
+                                    onClick={() => void copyText(JSON.stringify(run.context, null, 2))}
+                                >
+                                    {t('Copy result')}
+                                </button>
+                            </div>
+                            <JsonViewer value={run.context} defaultExpandDepth={3} />
+                        </div>
                     )}
                 </div>
             </div>
@@ -454,6 +487,9 @@ interface IStepEditorProps {
     total: number
     result: IFlowStepResult | undefined
     collections: Parameters<typeof findOperation>[0]
+    endpoints: IEndpoint[]
+    inheritedEndpoint?: IEndpoint
+    inheritFromFlow: boolean
     variablesText: string
     invalidVariables: boolean
     onVariablesChange: (text: string) => void
@@ -465,8 +501,30 @@ interface IStepEditorProps {
 function StepEditor(props: IStepEditorProps): React.JSX.Element {
     const t = useT()
     const { step, result } = props
-    const schema = useAppStore((state) => state.schema)
+    const operationId = useId()
+    const toolbarSchema = useAppStore((state) => state.schema)
+    const toolbarEndpointId = useAppStore(selectActiveEndpoint)?.id
+    const workspaceId = useAppStore((state) => state.workspace?.id)
     const [showResponse, setShowResponse] = useState(true)
+    const endpointId = step.endpointId ?? props.inheritedEndpoint?.id
+    const customEndpoint = endpointId !== toolbarEndpointId ? endpointId : undefined
+    const [cached, setCached] = useState<{ endpointId: string; workspaceId: string; schema?: GraphQLSchema }>()
+
+    useEffect(() => {
+        if (!workspaceId || !customEndpoint) return
+        let active = true
+        void getAppContext()
+            .then((context) => context.schemas.getSchema(workspaceId, customEndpoint))
+            .then((schema) => { if (active) setCached({ endpointId: customEndpoint, workspaceId, schema }) })
+            .catch(() => { if (active) setCached(undefined) })
+        return () => { active = false }
+    }, [customEndpoint, workspaceId])
+
+    const schema = customEndpoint
+        ? cached?.endpointId === customEndpoint && cached.workspaceId === workspaceId
+            ? cached.schema
+            : undefined
+        : toolbarSchema
 
     const stepQuery = step.query ?? findOperation(props.collections, step.operationRef)?.query ?? ''
     const payload = useMemo(
@@ -544,31 +602,43 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
             </div>
 
             <div className="flow__grid">
-                <label className="field__label">{t('Operation')}</label>
-                <select
-                    className="select"
-                    style={{ maxWidth: 'none' }}
-                    value={step.operationRef ?? ''}
-                    onChange={(event) =>
-                        props.onPatch({ operationRef: event.target.value || undefined })
-                    }
-                >
-                    <option value="">— {t('Custom query')} —</option>
-                    {props.collections.map((node) =>
-                        node.operations.map((operation) => {
-                            const ref = formatOperationRef({
-                                collectionId: node.collection.id,
-                                name: operation.name,
-                            })
+                <div className="flow__routing">
+                    <FlowEndpointField
+                        endpoints={props.endpoints}
+                        endpointId={step.endpointId}
+                        label={t('Step endpoint')}
+                        inheritedLabel={t(props.inheritFromFlow ? 'Use flow endpoint' : 'Use toolbar endpoint')}
+                        inheritedName={props.inheritedEndpoint?.name}
+                        onChange={(endpointId) => props.onPatch({ endpointId })}
+                    />
+                    <div className="field">
+                        <label className="field__label" htmlFor={operationId}>{t('Operation')}</label>
+                        <select
+                            id={operationId}
+                            className="select"
+                            value={step.operationRef ?? ''}
+                            onChange={(event) =>
+                                props.onPatch({ operationRef: event.target.value || undefined })
+                            }
+                        >
+                            <option value="">{t('Custom query')}</option>
+                            {props.collections.map((node) =>
+                                node.operations.map((operation) => {
+                                    const ref = formatOperationRef({
+                                        collectionId: node.collection.id,
+                                        name: operation.name,
+                                    })
 
-                            return (
-                                <option key={ref} value={ref}>
-                                    {node.collection.name} / {operation.name}
-                                </option>
-                            )
-                        }),
-                    )}
-                </select>
+                                    return (
+                                        <option key={ref} value={ref}>
+                                            {node.collection.name} / {operation.name}
+                                        </option>
+                                    )
+                                }),
+                            )}
+                        </select>
+                    </div>
+                </div>
 
                 {!step.operationRef && (
                     <>
@@ -686,6 +756,45 @@ function StepEditor(props: IStepEditorProps): React.JSX.Element {
                     )}
                 </div>
             )}
+        </div>
+    )
+}
+
+interface IFlowEndpointFieldProps {
+    endpoints: IEndpoint[]
+    endpointId?: string
+    label: string
+    inheritedLabel: string
+    inheritedName?: string
+    onChange: (id: string | undefined) => void
+}
+
+function FlowEndpointField(props: IFlowEndpointFieldProps): React.JSX.Element {
+    const t = useT()
+    const id = useId()
+    const missing = props.endpoints.some((endpoint) => endpoint.id === props.endpointId)
+        ? undefined
+        : props.endpointId
+
+    return (
+        <div className="field">
+            <label className="field__label" htmlFor={id}>{props.label}</label>
+            <select
+                id={id}
+                className="select"
+                value={props.endpointId ?? ''}
+                onChange={(event) => props.onChange(event.target.value || undefined)}
+            >
+                <option value="">
+                    {props.inheritedLabel}{props.inheritedName ? ` · ${props.inheritedName}` : ''}
+                </option>
+                {missing && (
+                    <option value={missing}>{t('Endpoint not found: {id}', { id: missing })}</option>
+                )}
+                {props.endpoints.map((endpoint) => (
+                    <option key={endpoint.id} value={endpoint.id}>{endpoint.name}</option>
+                ))}
+            </select>
         </div>
     )
 }

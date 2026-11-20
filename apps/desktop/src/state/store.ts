@@ -17,6 +17,8 @@ import {
     readJwtInfo,
     TokenKeeper,
     EnvironmentWriter,
+    ErrorCodeEnum,
+    isResolvrError,
     validateVariables,
     toErrorMessage,
     type ICollection,
@@ -39,8 +41,10 @@ import {
     type ILocalThemeCatalog,
     type IOperation,
     type IOperationKind,
-    type IActivitySession,
+    type IActivityTask,
     type IRunResult,
+    type IMissingVariableResolver,
+    type IRequestScripts,
     type ISchemaChange,
     type ISchemaCompletion,
     type IVariableProblem,
@@ -74,6 +78,12 @@ export interface ITabContent {
     /** Переменные хранятся текстом: пользователь имеет право на невалидный JSON. */
     variables: string
     headers: Record<string, string>
+    scripts?: IRequestScripts
+}
+
+interface IMissingVariablesPrompt {
+    names: readonly string[]
+    finish: (values?: Record<string, string>) => void
 }
 
 export interface ISubscriptionEvent {
@@ -136,6 +146,12 @@ let treeLoad = 0
 let historyLoad = 0
 let schemaLoad = 0
 let themeLoad = 0
+let activityLoad = 0
+let workspaceConfigLoad = 0
+let workspaceCatalogLoad = 0
+let settingsLoad = 0
+let settingsWrite = 0
+let settingsWritePending = false
 
 const EMPTY_THEME_CATALOG: ILocalThemeCatalog = { themes: [], invalidFiles: [] }
 
@@ -197,6 +213,7 @@ export interface IAppState {
     tokenRefreshing: boolean
     /** Запрос подтверждения перед необратимым или боевым действием. */
     confirm?: IConfirmRequest
+    missingVariables?: IMissingVariablesPrompt
     /** Вкладка-черновик, которую закрыть сразу после сохранения через диалог. */
     closeAfterSaveTabId?: string
 
@@ -221,8 +238,8 @@ export interface IAppState {
     dialog: IDialogKind
     flowRun?: IFlowRunResult
 
-    /** Журнал действий агента, сгруппированный по сессиям MCP. */
-    activitySessions: IActivitySession[]
+    /** Журнал действий агента, сгруппированный по задачам MCP. */
+    activityTasks: IActivityTask[]
 
     /** Активные отписки от GraphQL-подписок по вкладкам. */
     subscriptions: Record<string, () => void>
@@ -230,9 +247,11 @@ export interface IAppState {
 
 export interface IAppActions {
     initialize(): Promise<void>
+    applyLibraryChanges(paths: readonly string[]): Promise<void>
     reloadTree(): Promise<void>
-    selectWorkspace(workspaceId: string): Promise<void>
+    selectWorkspace(workspaceId: string | undefined): Promise<void>
     createWorkspace(name: string, endpointUrl: string): Promise<void>
+    deleteWorkspace(workspaceId: string): Promise<void>
     /** Создаёт демо-workspace на публичном API и открывает первую операцию. */
     openDemoWorkspace(): Promise<void>
 
@@ -283,6 +302,7 @@ export interface IAppActions {
     updateQuery(tabId: string, query: string): void
     updateVariables(tabId: string, variables: string): void
     updateHeaders(tabId: string, headers: Record<string, string>): void
+    updateRequestScripts(tabId: string, scripts: IRequestScripts): void
     /** Выбирает окружение для всего workspace. */
     setActiveEnvironment(environmentId: string): void
     /** Выбирает эндпоинт для всего workspace и подгружает его схему из кэша. */
@@ -406,7 +426,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     sidebarTab: 'collections',
     paletteOpen: false,
     dialog: 'none',
-    activitySessions: [],
+    activityTasks: [],
     subscriptions: {},
 
     async initialize() {
@@ -423,16 +443,15 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             const workspaces = await context.workspaces.listWorkspaces()
             const session = await context.sessions.load()
 
-            const workspaceId = session.workspaceId ?? workspaces[0]?.id
-            const listed = workspaces.find((item) => item.id === workspaceId)
+            const workspaceIds = new Set(workspaces.map((item) => item.id))
+            const listed = workspaces.find((item) => item.id === session.workspaceId) ?? workspaces[0]
             const workspace = listed ? await context.tokens.attach(listed) : undefined
 
             // Вкладки старых сессий не знают своего workspace — они принадлежат
             // тому, что был активен при сохранении.
-            const allTabs = session.tabs.map((tab) => ({
-                ...tab,
-                workspaceId: tab.workspaceId ?? session.workspaceId,
-            }))
+            const allTabs = session.tabs
+                .map((tab) => ({ ...tab, workspaceId: tab.workspaceId ?? session.workspaceId }))
+                .filter((tab) => !tab.workspaceId || workspaceIds.has(tab.workspaceId))
 
             // Черновики читаются до первой отрисовки: вкладки должны появиться
             // сразу с текстом, а не мигнуть пустыми.
@@ -464,7 +483,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                         context.sessions.readDraftQuery(tab.id),
                         context.sessions.readDraftData(tab.id),
                     ])
-                    contents[tab.id] = { query, variables: data.variables, headers: data.headers }
+                    contents[tab.id] = { query, ...data }
                 }),
             )
 
@@ -522,12 +541,94 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         }
     },
 
+    async applyLibraryChanges(changes) {
+        const paths = changes.map((path) => path.replaceAll('\\', '/').split('/'))
+        const current = get()
+        const workspaceId = current.workspace?.id
+        const workspacePaths = paths.filter(([root, id]) =>
+            root === 'workspaces' && (!id || id === workspaceId),
+        )
+        const hasCatalogChange = paths.some(([root, , area]) =>
+            root === 'workspaces' && (!area || area === 'workspace.json'),
+        )
+        const hasWorkspaceChange = workspacePaths.some(([, , area]) => !area || area === 'workspace.json')
+        const hasSecretChange = paths.some(([root]) => root === '.secrets')
+        const hasTokenInfoChange = paths.some(([root, file]) => root === '.state' && file === 'tokens.json')
+        const hasTokenChange = hasSecretChange || hasTokenInfoChange
+        const hasSchemaChange = workspacePaths.some(([, , area]) => area === '.cache')
+        const hasTreeChange = workspaceId && workspacePaths.some(([, , area]) =>
+            !area || area === 'collections' || area === 'flows',
+        )
+        const jobs: Promise<void>[] = []
+
+        if (current.dialog === 'activity' && paths.some(([root]) => root === '.activity'))
+            jobs.push(current.loadActivity())
+        if (paths.some(([root]) => root === 'settings.json'))
+            jobs.push(reloadDiskSettings(get, set))
+        if (paths.some(([root]) => root === 'themes'))
+            jobs.push(current.refreshLocalThemes())
+        if (hasTreeChange) jobs.push(current.reloadTree())
+        if (hasCatalogChange || hasWorkspaceChange || hasTokenChange) {
+            jobs.push(refreshDiskWorkspace())
+        } else if (hasSchemaChange && current.workspace) {
+            const endpoint = selectActiveEndpoint(current)
+            if (changedSchemaCache(endpoint)) jobs.push(loadCachedSchema(current.workspace, endpoint, get, set))
+        }
+        if (workspaceId && paths.some(([root, file]) => root === '.state' && file === `flow-runs.${workspaceId}.json`)) {
+            jobs.push(getAppContext().then(async (context) => {
+                const flowRuns = await context.flowState.read(workspaceId)
+                if (get().workspace?.id === workspaceId) set({ flowRuns })
+            }))
+        }
+        await Promise.all(jobs)
+
+        async function refreshDiskWorkspace(): Promise<void> {
+            const refreshWorkspace = Boolean(workspaceId && (hasWorkspaceChange || hasTokenChange))
+            const request = refreshWorkspace ? ++workspaceConfigLoad : undefined
+            const catalogRequest = hasCatalogChange ? ++workspaceCatalogLoad : undefined
+            const context = await getAppContext()
+            if (hasSecretChange) context.secrets.invalidate()
+            if (hasTokenInfoChange) context.tokens.invalidate()
+            const workspaces = hasCatalogChange ? await context.workspaces.listWorkspaces() : undefined
+            const raw = workspaceId && refreshWorkspace
+                ? workspaces
+                    ? workspaces.find((item) => item.id === workspaceId)
+                    : await context.workspaces.getWorkspace(workspaceId)
+                : undefined
+            const workspace = raw ? await context.tokens.attach(raw) : undefined
+            if (workspaces && catalogRequest === workspaceCatalogLoad) set({ workspaces })
+            if (get().workspace?.id !== workspaceId || (request !== undefined && request !== workspaceConfigLoad)) return
+
+            const previousEndpoint = selectActiveEndpoint(get())
+            if (workspace && JSON.stringify(workspace) !== JSON.stringify(get().workspace)) {
+                set({ workspace })
+            }
+            const live = get().workspace
+            if (!live) return
+            const endpoint = selectActiveEndpoint(get())
+            const endpointChanged = previousEndpoint?.id !== endpoint?.id || previousEndpoint?.url !== endpoint?.url
+            if (endpointChanged) {
+                schemaLoad += 1
+                set({ schema: undefined, schemaError: undefined, schemaFetchedAt: undefined, schemaDiff: undefined })
+            }
+            if (changedSchemaCache(endpoint) || previousEndpoint?.id !== endpoint?.id) {
+                await loadCachedSchema(live, endpoint, get, set)
+            }
+        }
+
+        function changedSchemaCache(endpoint: IEndpoint | undefined): boolean {
+            return workspacePaths.some(([, , area, file]) =>
+                area === '.cache' && (!file || file === `schema.${endpoint?.id}.json`),
+            )
+        }
+    },
+
     async reloadTree() {
         const { workspace } = get()
         if (!workspace) return
 
-        const context = await getAppContext()
         const request = ++treeLoad
+        const context = await getAppContext()
         const collections = await context.workspaces.listCollections(workspace.id)
 
         const [tree, flows, flowRuns] = await Promise.all([
@@ -542,7 +643,11 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         ])
 
         if (treeLoad === request && get().workspace?.id === workspace.id) {
-            set({ tree, flows, flowRuns })
+            const updates = syncSavedTabs(get(), tree, flows)
+            set({ tree, flows, flowRuns, ...updates.state })
+            for (const id of updates.operations) scheduleDraftSave(id, get)
+            for (const id of updates.flows) scheduleFlowDraftSave(id, get)
+            if (updates.state.tabs) scheduleSessionSave(get)
         }
     },
 
@@ -551,10 +656,11 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         if (get().workspace?.id === workspaceId) return
 
         const context = await getAppContext()
-        const workspace = await context.tokens.attach(
-            await context.workspaces.getWorkspace(workspaceId),
-        )
+        const workspace = workspaceId
+            ? await context.tokens.attach(await context.workspaces.getWorkspace(workspaceId))
+            : undefined
         if (workspaceSelection !== request) return
+        get().missingVariables?.finish()
 
         set((state) => {
             // Текущие вкладки и раскладка убираются в запас, набор нового
@@ -566,17 +672,17 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                     activeTabId: state.activeTabId,
                 }
             }
-            const incoming = tabsByWorkspace[workspaceId] ?? { tabs: [] }
-            delete tabsByWorkspace[workspaceId]
+            const incoming = workspaceId ? tabsByWorkspace[workspaceId] : undefined
+            if (workspaceId) delete tabsByWorkspace[workspaceId]
 
             const layouts = { ...state.layouts }
             if (state.workspace) layouts[state.workspace.id] = currentLayout(state)
-            const layout = layouts[workspaceId] ?? workspace.layout
+            const layout = workspaceId ? layouts[workspaceId] ?? workspace?.layout : undefined
 
             return {
                 workspace,
-                tabs: incoming.tabs,
-                activeTabId: incoming.activeTabId ?? incoming.tabs.at(-1)?.id,
+                tabs: incoming?.tabs ?? [],
+                activeTabId: incoming?.activeTabId ?? incoming?.tabs.at(-1)?.id,
                 tabsByWorkspace,
                 layouts,
                 layoutPreset: layout?.preset ?? 'classic',
@@ -599,6 +705,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         })
 
         scheduleSessionSave(get)
+        if (!workspace) return
+
         await Promise.all([
             get().reloadTree(),
             get().loadHistory(),
@@ -614,6 +722,40 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         set({ workspaces: await context.workspaces.listWorkspaces() })
         await get().selectWorkspace(workspace.id)
         await get().refreshSchema()
+    },
+
+    async deleteWorkspace(workspaceId) {
+        const context = await getAppContext()
+        await context.workspaces.deleteWorkspace(workspaceId)
+
+        workspaceCatalogLoad += 1
+        const state = get()
+        const workspaces = state.workspaces.filter((item) => item.id !== workspaceId)
+        const wasActive = state.workspace?.id === workspaceId
+        const tabs = wasActive ? state.tabs : state.tabsByWorkspace[workspaceId]?.tabs ?? []
+        set({ workspaces })
+
+        await get().closeTabs(tabs.map((tab) => tab.id))
+        if (get().workspace?.id === workspaceId) await get().selectWorkspace(undefined)
+
+        set((current) => {
+            const tabsByWorkspace = { ...current.tabsByWorkspace }
+            const layouts = { ...current.layouts }
+            const selections = { ...current.selections }
+            delete tabsByWorkspace[workspaceId]
+            delete layouts[workspaceId]
+            delete selections[workspaceId]
+
+            return { tabsByWorkspace, layouts, selections }
+        })
+        scheduleSessionSave(get)
+
+        try {
+            const next = get().workspaces[0]
+            if (wasActive && !get().workspace && next) await get().selectWorkspace(next.id)
+        } finally {
+            await sessionSaver.flush()
+        }
     },
 
     async openDemoWorkspace() {
@@ -648,6 +790,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         let query = input.query ?? ''
         let variables = input.variables ? JSON.stringify(input.variables, null, 2) : '{}'
         let headers: Record<string, string> = {}
+        let scripts: IRequestScripts | undefined
         let title = input.title ?? t('New request')
 
         if (input.operationRef && workspace) {
@@ -658,6 +801,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             query = operation.query
             variables = JSON.stringify(operation.variables, null, 2)
             headers = operation.headers
+            scripts = operation.scripts
             title = operation.name
         }
 
@@ -674,7 +818,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             activeTabId: tabId,
             schemaRequestTabId: tabId,
             schemaCompletion: input.schemaCompletion && { tabId, ...input.schemaCompletion },
-            contents: { ...state.contents, [tabId]: { query, variables, headers } },
+            contents: { ...state.contents, [tabId]: { query, variables, headers, scripts } },
         }))
 
         scheduleDraftSave(tabId, get)
@@ -733,6 +877,17 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         set((state) => {
             const tabs = state.tabs.filter((tab) => !closing.has(tab.id))
+            const tabsByWorkspace = { ...state.tabsByWorkspace }
+            for (const [workspaceId, group] of Object.entries(tabsByWorkspace)) {
+                const remaining = group.tabs.filter((tab) => !closing.has(tab.id))
+                if (remaining.length === group.tabs.length) continue
+                tabsByWorkspace[workspaceId] = {
+                    tabs: remaining,
+                    activeTabId: group.activeTabId && closing.has(group.activeTabId)
+                        ? remaining.at(-1)?.id
+                        : group.activeTabId,
+                }
+            }
             const contents = { ...state.contents }
             const runs = { ...state.runs }
             const subscriptions = { ...state.subscriptions }
@@ -758,12 +913,15 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
             return {
                 tabs,
+                tabsByWorkspace,
                 contents,
                 runs,
                 subscriptions,
                 flowDrafts,
                 reports,
                 schemaNav,
+                ...(state.schemaRequestTabId && closing.has(state.schemaRequestTabId) && { schemaRequestTabId: undefined }),
+                ...(state.schemaCompletion && closing.has(state.schemaCompletion.tabId) && { schemaCompletion: undefined }),
                 activeTabId: activeClosed ? next?.id : state.activeTabId,
             }
         })
@@ -839,6 +997,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 body: entry.responseBody,
                 data,
                 errors,
+                scriptError: entry.scriptError,
                 kind: entry.kind,
                 durationMs: entry.durationMs,
                 responseBytes: entry.responseBytes,
@@ -1074,6 +1233,18 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         scheduleDraftSave(tabId, get)
     },
 
+    updateRequestScripts(tabId, scripts) {
+        set((state) => ({
+            contents: {
+                ...state.contents,
+                [tabId]: { ...requireContent(state.contents, tabId), scripts },
+            },
+            tabs: markDirty(state.tabs, tabId),
+        }))
+        scheduleDraftSave(tabId, get)
+        scheduleSessionSave(get)
+    },
+
     setActiveEnvironment(environmentId) {
         const { workspace } = get()
         if (!workspace) return
@@ -1128,12 +1299,16 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         const tab = state.tabs.find((item) => item.id === state.activeTabId)
         const workspace = state.workspace
         if (!tab || !workspace) return
+        if (state.missingVariables) return
         const existingRun = state.runs[tab.id]
         if (existingRun?.status === 'running' || existingRun?.status === 'streaming') return
 
         const content = state.contents[tab.id]
         if (!content) return
 
+        const operation = findOperation(state.tree, tab.operationRef)
+        const scripts = content.scripts ?? operation?.scripts
+        const environment = selectActiveEnvironment(state)
         const kind: IOperationKind = detectOperationKind(content.query)
         const variables = parseVariables(content.variables)
 
@@ -1150,7 +1325,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         set({ variableProblems: problems })
 
-        if (blocking.length > 0 && !options.force) {
+        const hasPreRequest = Boolean(scripts?.preRequest?.trim() || environment?.scripts?.preRequest?.trim())
+        if (blocking.length > 0 && !options.force && !hasPreRequest) {
             setRun(set, tab.id, {
                 status: 'invalid',
                 events: [],
@@ -1162,7 +1338,6 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
         // Мутация на боевом окружении или в защищённом workspace выполняется
         // только после подтверждения.
-        const environment = selectActiveEnvironment(state)
         const endpoint = selectActiveEndpoint(state)
         const what = t('mutation {name}', {
             name: extractOperationName(content.query) ?? t('unnamed'),
@@ -1211,7 +1386,10 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 environmentId: environment?.id,
                 operationName: extractOperationName(content.query),
                 timeoutMs: state.settings.request.timeoutMs,
-                saveToEnvironment: findOperation(state.tree, tab.operationRef)?.saveToEnvironment ?? [],
+                saveToEnvironment: operation?.saveToEnvironment ?? [],
+                scripts,
+                prerequisiteFlow: operation?.prerequisiteFlow,
+                resolveMissingVariables: createVariableResolver(workspace.id, set, get),
                 confirmed: options.confirmed,
             })
 
@@ -1230,7 +1408,9 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             if (get().workspace?.id === workspace.id) await get().loadHistory()
         } catch (error) {
             if (get().runs[tab.id] === running) {
-                setRun(set, tab.id, { status: 'error', error: toErrorMessage(error), events: [] })
+                setRun(set, tab.id, isRunCancelled(error)
+                    ? existingRun ?? { status: 'idle', events: [] }
+                    : { status: 'error', error: toErrorMessage(error), events: [] })
             }
         }
     },
@@ -1418,7 +1598,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
     async runFlow(flowId, options = {}) {
         const { workspace } = get()
-        if (!workspace) return
+        if (!workspace || get().missingVariables) return
 
         const environment = selectActiveEnvironment(get())
         const environmentId = environment?.id
@@ -1446,6 +1626,8 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         try {
             const run = await context.flows.run(workspace.id, flowId, {
                 environmentId,
+                endpointId,
+                resolveMissingVariables: createVariableResolver(workspace.id, set, get),
                 confirmed: options.confirmed,
             })
             if (get().workspace?.id === workspace.id) set({ flowRun: run })
@@ -1473,6 +1655,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 }
             }
         } catch (error) {
+            if (isRunCancelled(error)) return
             set({
                 flowRun: {
                     flowId,
@@ -1490,10 +1673,11 @@ export const useAppStore = create<IAppStore>((set, get) => ({
 
     async runAllFlows(options = {}) {
         const { workspace, flows } = get()
-        if (!workspace || flows.length === 0 || get().reportRunning) return
+        if (!workspace || flows.length === 0 || get().reportRunning || get().missingVariables) return
 
         const environment = selectActiveEnvironment(get())
         const environmentId = environment?.id
+        const endpointId = selectActiveEndpoint(get())?.id
 
         if (!options.confirmed) {
             const what = t('run of all flows ({n})', { n: flows.length })
@@ -1548,9 +1732,12 @@ export const useAppStore = create<IAppStore>((set, get) => ({
                 try {
                     run = await context.flows.run(workspace.id, flow.id, {
                         environmentId,
+                        endpointId,
+                        resolveMissingVariables: createVariableResolver(workspace.id, set, get),
                         confirmed: options.confirmed,
                     })
                 } catch (error) {
+                    if (isRunCancelled(error)) break
                     run = {
                         flowId: flow.id,
                         ok: false,
@@ -1850,6 +2037,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             environmentId: operation.environmentId,
             prerequisiteFlow: operation.prerequisiteFlow,
             saveToEnvironment: operation.saveToEnvironment,
+            scripts: operation.scripts,
         })
         await get().reloadTree()
     },
@@ -1868,6 +2056,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             query: content.query,
             variables: variables instanceof Error ? {} : variables,
             headers: content.headers,
+            scripts: content.scripts ?? findOperation(state.tree, tab.operationRef)?.scripts,
             endpointId: selectActiveEndpoint(state)?.id,
             environmentId: selectActiveEnvironment(state)?.id,
             operationName: extractOperationName(content.query),
@@ -2034,6 +2223,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             environmentId: operation.environmentId,
             prerequisiteFlow: flowId,
             saveToEnvironment: operation.saveToEnvironment,
+            scripts: operation.scripts,
         })
 
         await get().reloadTree()
@@ -2058,6 +2248,7 @@ export const useAppStore = create<IAppStore>((set, get) => ({
             environmentId: operation.environmentId,
             prerequisiteFlow: operation.prerequisiteFlow,
             saveToEnvironment: captures,
+            scripts: operation.scripts,
         })
 
         await get().reloadTree()
@@ -2096,10 +2287,12 @@ export const useAppStore = create<IAppStore>((set, get) => ({
     /** Перечитывает журнал действий агента с диска. */
     async loadActivity() {
         if (!isTauri()) return
+        const request = ++activityLoad
         const context = await getAppContext()
         const store = new ActivityStore(context.fs, context.paths)
 
-        set({ activitySessions: await store.listSessions() })
+        const activityTasks = await store.listTasks()
+        if (request === activityLoad) set({ activityTasks })
     },
 
     async refreshLocalThemes() {
@@ -2126,9 +2319,15 @@ export const useAppStore = create<IAppStore>((set, get) => ({
         set({ settings: next })
         if (!isTauri()) return
 
+        const write = ++settingsWrite
+        settingsWritePending = true
         settingsSaver.schedule(async () => {
-            const context = await getAppContext()
-            await context.workspaces.saveSettings(get().settings)
+            try {
+                const context = await getAppContext()
+                await context.workspaces.saveSettings(get().settings)
+            } finally {
+                if (write === settingsWrite) settingsWritePending = false
+            }
         })
         if (next.secrets.storage !== previous.secrets.storage) {
             const context = await getAppContext()
@@ -2228,6 +2427,26 @@ function applyTheme(selected: ISettings['theme'], themes: readonly ILocalTheme[]
     }
 }
 
+async function reloadDiskSettings(
+    get: () => IAppStore,
+    set: (partial: Partial<IAppState>) => void,
+): Promise<void> {
+    if (settingsWritePending) return
+    const request = ++settingsLoad
+    const previous = get().settings
+    const context = await getAppContext()
+    const settings = await context.workspaces.getSettings()
+    if (JSON.stringify(settings) === JSON.stringify(previous)) return
+    const catalog = settings.theme.startsWith('local:') && settings.theme !== previous.theme
+        ? await context.workspaces.listLocalThemes()
+        : undefined
+    if (request !== settingsLoad || settingsWritePending || get().settings !== previous) return
+
+    if (settings.secrets.storage !== previous.secrets.storage) context.secrets.use(settings.secrets.storage)
+    applySettings(settings, (catalog ?? get().localThemeCatalog).themes, previous)
+    set({ settings, ...(catalog && { localThemeCatalog: catalog, localThemeCatalogError: false }) })
+}
+
 /** Читает схему из кэша, чтобы автокомплит работал сразу после запуска. */
 async function loadCachedSchema(
     workspace: IWorkspace,
@@ -2240,12 +2459,16 @@ async function loadCachedSchema(
 
     const context = await getAppContext()
     const schema = await context.schemas.getSchema(workspace.id, endpoint.id)
+    const current = get()
+    const active = selectActiveEndpoint(current)
     if (
         request === schemaLoad &&
-        get().workspace?.id === workspace.id &&
-        selectActiveEndpoint(get())?.id === endpoint.id
+        current.workspace?.id === workspace.id &&
+        active?.id === endpoint.id &&
+        active.url === endpoint.url &&
+        (schema !== current.schema || (schema && current.schemaError))
     ) {
-        set({ schema, schemaFetchedAt: undefined })
+        set({ schema, schemaFetchedAt: undefined, schemaError: undefined, schemaDiff: undefined })
     }
 }
 
@@ -2336,6 +2559,63 @@ export function findOperation(tree: ICollectionNode[], operationRef: string | un
         ?.operations.find((operation) => operation.name === ref.name)
 }
 
+/** Обновляет открытые сохранённые вкладки, оставляя локальные черновики нетронутыми. */
+function syncSavedTabs(
+    state: IAppState,
+    tree: ICollectionNode[],
+    flows: IFlow[],
+): { state: Partial<IAppState>; operations: string[]; flows: string[] } {
+    const operations = new Map(tree.flatMap(({ collection, operations }) =>
+        operations.map((operation) => [
+            formatOperationRef({ collectionId: collection.id, name: operation.name }),
+            operation,
+        ] as const),
+    ))
+    const savedFlows = new Map(flows.map((flow) => [flow.id, flow]))
+    const updatedOperations: string[] = []
+    const updatedFlows: string[] = []
+    let contents = state.contents
+    let flowDrafts = state.flowDrafts
+
+    const tabs = state.tabs.map((tab) => {
+        if (tab.dirty) return tab
+        const operation = tab.operationRef ? operations.get(tab.operationRef) : undefined
+        const flow = tab.flowId ? savedFlows.get(tab.flowId) : undefined
+        if (operation) {
+            const content: ITabContent = {
+                query: operation.query,
+                variables: JSON.stringify(operation.variables, null, 2),
+                headers: operation.headers,
+                scripts: operation.scripts,
+            }
+            if (JSON.stringify(content) !== JSON.stringify(state.contents[tab.id])) {
+                if (contents === state.contents) contents = { ...contents }
+                contents[tab.id] = content
+                updatedOperations.push(tab.id)
+            }
+        }
+        if (flow && JSON.stringify(flow) !== JSON.stringify(state.flowDrafts[tab.id])) {
+            if (flowDrafts === state.flowDrafts) flowDrafts = { ...flowDrafts }
+            flowDrafts[tab.id] = flow
+            updatedFlows.push(tab.id)
+        }
+        const title = operation?.name ?? flow?.name
+        if (!title || title === tab.title) return tab
+        return { ...tab, title }
+    })
+
+    return {
+        state: {
+            ...(updatedOperations.length && { contents }),
+            ...(updatedFlows.length && { flowDrafts }),
+            ...(tabs.some((tab, index) => tab !== state.tabs[index]) && { tabs }),
+            ...(state.schemaCompletion && updatedOperations.includes(state.schemaCompletion.tabId) && { schemaCompletion: undefined }),
+        },
+        operations: updatedOperations,
+        flows: updatedFlows,
+    }
+}
+
 function requireContent(
     contents: Record<string, ITabContent>,
     tabId: string,
@@ -2375,6 +2655,7 @@ function scheduleDraftSave(tabId: string, get: () => IAppStore): void {
         await context.sessions.writeDraftData(tabId, {
             variables: content.variables,
             headers: content.headers,
+            scripts: content.scripts,
         })
     })
 }
@@ -2487,6 +2768,42 @@ function markDirty(tabs: ITabState[], tabId: string): ITabState[] {
     return tabs.map((item) => (item.id === tabId ? { ...item, dirty: true } : item))
 }
 
+function isRunCancelled(error: unknown): boolean {
+    return isResolvrError(error) && error.code === ErrorCodeEnum.RUN_CANCELLED
+}
+
+/** Запоминает введённые значения до завершения текущего прогона. */
+function createVariableResolver(
+    workspaceId: string,
+    set: (updater: (state: IAppState) => Partial<IAppState>) => void,
+    get: () => IAppStore,
+): IMissingVariableResolver {
+    const values = new Map<string, string>()
+
+    return async (names) => {
+        if (get().workspace?.id !== workspaceId || get().missingVariables) return undefined
+        const missing = names.filter((name) => !values.has(name))
+        if (missing.length > 0) {
+            const supplied = await new Promise<Record<string, string> | undefined>((resolve) => {
+                const prompt: IMissingVariablesPrompt = {
+                    names: missing,
+                    finish: (result) => {
+                        if (get().missingVariables === prompt) {
+                            set(() => ({ missingVariables: undefined }))
+                        }
+                        resolve(result)
+                    },
+                }
+                set(() => ({ missingVariables: prompt }))
+            })
+            if (!supplied || get().workspace?.id !== workspaceId) return undefined
+            for (const [name, value] of Object.entries(supplied)) values.set(name, value)
+        }
+
+        return Object.fromEntries(names.map((name) => [name, values.get(name) ?? '']))
+    }
+}
+
 /** Раскладка активного workspace в форме, пригодной для сессии. */
 function currentLayout(state: IAppState): ILayoutState {
     return {
@@ -2568,6 +2885,8 @@ async function startSubscription(
                 query: content.query,
                 variables,
                 headers: content.headers,
+                scripts: content.scripts ?? findOperation(get().tree, tab.operationRef)?.scripts,
+                resolveMissingVariables: createVariableResolver(workspaceId, set, get),
                 endpointId: selectActiveEndpoint(get())?.id,
                 environmentId: selectActiveEnvironment(get())?.id,
                 operationName: extractOperationName(content.query),
@@ -2619,7 +2938,9 @@ async function startSubscription(
         set((state) => ({
             runs: {
                 ...state.runs,
-                [tab.id]: { status: 'error', error: toErrorMessage(error), events: [] },
+                [tab.id]: isRunCancelled(error)
+                    ? { status: 'idle', events: [] }
+                    : { status: 'error', error: toErrorMessage(error), events: [] },
             },
         }))
     }
@@ -2667,6 +2988,7 @@ async function saveOperationTab(
         environmentId: selectActiveEnvironment(state)?.id,
         prerequisiteFlow: existing?.prerequisiteFlow,
         saveToEnvironment: existing?.saveToEnvironment,
+        scripts: content.scripts ?? findOperation(state.tree, tab.operationRef)?.scripts ?? existing?.scripts,
     })
 
     set((state) => ({

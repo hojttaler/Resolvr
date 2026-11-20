@@ -5,39 +5,47 @@ import {
     type IEnvironment,
     type IWorkspace,
 } from '@resolvr/core'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DialogSurface } from './DialogSurface.js'
 
 import { useT } from '../i18n/index.js'
 import { useAppStore } from '../state/store.js'
 import { KeyValueEditor } from './KeyValueEditor.js'
+import { RequestScriptsEditor } from './RequestScriptsEditor.js'
 
 export interface IWorkspaceSettingsProps {
     onClose: () => void
 }
 
-/**
- * Настройки workspace: эндпоинты и окружения.
- *
- * До этого экрана заголовки существовали только в файлах и в каждой вкладке
- * отдельно, поэтому один и тот же `Authorization` приходилось копировать в
- * каждый запрос. Здесь он задаётся один раз на окружение или эндпоинт и
- * применяется ко всем запросам.
- */
+const WORKSPACE_SECTIONS = ['General', 'Endpoints', 'Environments'] as const
+const ENVIRONMENT_SECTIONS = ['General', 'Headers and variables', 'Authorization', 'Scripts'] as const
+
+type IWorkspaceSection = typeof WORKSPACE_SECTIONS[number]
+type IEnvironmentSection = typeof ENVIRONMENT_SECTIONS[number]
+
+/** Настройки workspace, эндпоинтов и окружений в общем черновике. */
 export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Element {
     const workspace = useAppStore((state) => state.workspace)
     const flows = useAppStore((state) => state.flows)
     const secretStorage = useAppStore((state) => state.settings.secrets.storage)
     const saveWorkspace = useAppStore((state) => state.saveWorkspaceSettings)
+    const deleteWorkspace = useAppStore((state) => state.deleteWorkspace)
+    const requestConfirm = useAppStore((state) => state.requestConfirm)
     const t = useT()
 
     const [draft, setDraft] = useState<IWorkspace | undefined>(workspace)
+    const sourceWorkspace = useRef(workspace)
     const [warning, setWarning] = useState<string>()
     const [saving, setSaving] = useState(false)
-    const [tab, setTab] = useState<'environments' | 'endpoints'>('environments')
+    const [section, setSection] = useState<IWorkspaceSection>('General')
+    const [environmentSection, setEnvironmentSection] = useState<IEnvironmentSection>('General')
+    const [environmentId, setEnvironmentId] = useState<string>()
+    const [endpointId, setEndpointId] = useState<string>()
 
     useEffect(() => {
-        setDraft((current) => (current?.id === workspace?.id ? current : workspace))
+        const previous = sourceWorkspace.current
+        sourceWorkspace.current = workspace
+        setDraft((current) => current !== previous && current?.id === workspace?.id ? current : workspace)
     }, [workspace])
 
     if (!draft) {
@@ -48,402 +56,318 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
         )
     }
 
-    function patchEnvironment(id: string, patch: Partial<IEnvironment>): void {
-        setDraft((current) =>
-            current
-                ? {
-                      ...current,
-                      environments: current.environments.map((item) =>
-                          item.id === id ? { ...item, ...patch } : item,
-                      ),
-                  }
-                : current,
-        )
+    const environment = draft.environments.find((item) => item.id === environmentId) ??
+        draft.environments.find((item) => item.id === draft.defaultEnvironmentId) ??
+        draft.environments[0]
+    const endpoint = draft.endpoints.find((item) => item.id === endpointId) ??
+        draft.endpoints.find((item) => item.id === draft.defaultEndpointId) ??
+        draft.endpoints[0]
+
+    function patch(patchValue: Partial<IWorkspace>): void {
+        setDraft((current) => current ? { ...current, ...patchValue } : current)
     }
 
-    /** Свободный идентификатор из названия: «Staging» → `staging`, повтор — `staging-2`. */
-    function freshId(name: string, taken: string[]): string {
-        const base = toSlug(name) || 'item'
-        let id = base
-        for (let index = 2; taken.includes(id); index += 1) id = `${base}-${index}`
+    function patchEnvironment(value: Partial<IEnvironment>): void {
+        if (!environment) return
+        setDraft((current) => current && ({
+            ...current,
+            environments: current.environments.map((item) =>
+                item.id === environment.id ? { ...item, ...value } : item,
+            ),
+        }))
+    }
 
-        return id
+    function patchEndpoint(value: Partial<IEndpoint>): void {
+        if (!endpoint) return
+        setDraft((current) => current && ({
+            ...current,
+            endpoints: current.endpoints.map((item) =>
+                item.id === endpoint.id ? { ...item, ...value } : item,
+            ),
+        }))
     }
 
     function addEnvironment(): void {
-        setDraft((current) => {
-            if (!current) return current
-
-            const name = t('New environment')
-            const id = freshId(
-                name,
-                current.environments.map((item) => item.id),
-            )
-            const environment: IEnvironment = {
-                id,
-                name,
-                production: false,
-                variables: {},
-                headers: {},
-                auth: { type: 'none' },
-            }
-
-            return {
-                ...current,
-                environments: [...current.environments, environment],
-                defaultEnvironmentId: current.defaultEnvironmentId ?? id,
-            }
+        if (!draft) return
+        const name = t('New environment')
+        const id = freshId(name, draft.environments)
+        patch({
+            environments: [
+                ...draft.environments,
+                { id, name, production: false, variables: {}, headers: {}, auth: { type: 'none' } },
+            ],
+            defaultEnvironmentId: draft.defaultEnvironmentId ?? id,
         })
+        setEnvironmentId(id)
+        setEnvironmentSection('General')
     }
 
-    function removeEnvironment(id: string): void {
-        setDraft((current) => {
-            if (!current) return current
-
-            const environments = current.environments.filter((item) => item.id !== id)
-
-            return {
-                ...current,
-                environments,
-                defaultEnvironmentId:
-                    current.defaultEnvironmentId === id
-                        ? environments[0]?.id
-                        : current.defaultEnvironmentId,
-            }
+    function removeEnvironment(): void {
+        if (!draft || !environment) return
+        const environments = draft.environments.filter((item) => item.id !== environment.id)
+        patch({
+            environments,
+            defaultEnvironmentId: draft.defaultEnvironmentId === environment.id
+                ? environments[0]?.id
+                : draft.defaultEnvironmentId,
         })
+        setEnvironmentId(undefined)
+        setEnvironmentSection('General')
     }
 
     function addEndpoint(): void {
-        setDraft((current) => {
-            if (!current) return current
-
-            const name = t('New endpoint')
-            const id = freshId(
-                name,
-                current.endpoints.map((item) => item.id),
-            )
-            const endpoint: IEndpoint = {
-                id,
-                name,
-                url: 'https://',
-                headers: {},
-                acceptInvalidCerts: false,
-            }
-
-            return {
-                ...current,
-                endpoints: [...current.endpoints, endpoint],
-                defaultEndpointId: current.defaultEndpointId ?? id,
-            }
+        if (!draft) return
+        const name = t('New endpoint')
+        const id = freshId(name, draft.endpoints)
+        patch({
+            endpoints: [
+                ...draft.endpoints,
+                { id, name, url: 'https://', headers: {}, acceptInvalidCerts: false },
+            ],
+            defaultEndpointId: draft.defaultEndpointId ?? id,
         })
+        setEndpointId(id)
     }
 
-    function removeEndpoint(id: string): void {
-        setDraft((current) => {
-            if (!current) return current
-
-            const endpoints = current.endpoints.filter((item) => item.id !== id)
-
-            return {
-                ...current,
-                endpoints,
-                defaultEndpointId:
-                    current.defaultEndpointId === id ? endpoints[0]?.id : current.defaultEndpointId,
-            }
+    function removeEndpoint(): void {
+        if (!draft || !endpoint) return
+        const endpoints = draft.endpoints.filter((item) => item.id !== endpoint.id)
+        patch({
+            endpoints,
+            defaultEndpointId: draft.defaultEndpointId === endpoint.id
+                ? endpoints[0]?.id
+                : draft.defaultEndpointId,
         })
+        setEndpointId(undefined)
     }
 
-    function patchEndpoint(id: string, patch: Partial<IEndpoint>): void {
-        setDraft((current) =>
-            current
-                ? {
-                      ...current,
-                      endpoints: current.endpoints.map((item) =>
-                          item.id === id ? { ...item, ...patch } : item,
-                      ),
-                  }
-                : current,
-        )
+    function confirmDeleteWorkspace(): void {
+        if (!workspace || workspace.id !== draft?.id) return
+
+        requestConfirm({
+            title: t('Delete workspace'),
+            description: t('Workspace “{name}” will be permanently deleted from disk, including its collections, flows, history and open drafts.', {
+                name: workspace.name,
+            }),
+            actionLabel: t('Delete workspace'),
+            danger: true,
+            run: async () => {
+                setSaving(true)
+                setWarning(undefined)
+                try {
+                    await deleteWorkspace(workspace.id)
+                    props.onClose()
+                } catch (error) {
+                    setWarning(error instanceof Error ? error.message : String(error))
+                } finally {
+                    setSaving(false)
+                }
+            },
+        })
     }
 
     return (
         <DialogSurface
             label={t('Workspace settings')}
             className="dialog--wide workspace-settings"
-            onClose={() => {
-                if (!saving) props.onClose()
-            }}
+            onClose={() => { if (!saving) props.onClose() }}
         >
-            <div className="dialog__body">
-                <div className="dialog__title">
-                    {t('Workspace')} <span>{draft.name}</span>
-                </div>
+            <header className="workspace-settings__header">
+                <h2 className="dialog__title">{t('Workspace settings')}</h2>
+                <span className="workspace-settings__name" title={draft.name}>{draft.name}</span>
+            </header>
+            <div className="settings-dialog__layout workspace-settings__layout">
+                <nav className="settings-dialog__nav" aria-label={t('Workspace settings')}>
+                    {WORKSPACE_SECTIONS.map((item) => (
+                        <button
+                            key={item}
+                            type="button"
+                            className="settings-dialog__link"
+                            aria-current={section === item ? 'page' : undefined}
+                            onClick={() => setSection(item)}
+                        >
+                            {t(item)}
+                        </button>
+                    ))}
+                </nav>
 
-                {/* Защита принадлежит workspace, а не окружению: она
-                    действует и при ручной работе, и при запуске агентом
-                    через MCP, каким бы окружением он ни пользовался. */}
-                <div className="workspace-settings__grid">
-                    <label className="field__label">
-                        {t('Protection')}
-                        <div className="inspector__hint">
-                            {t('applies to the app and to the agent (MCP)')}
+                <div className="settings-dialog__content workspace-settings__content">
+                    {section === 'General' && (
+                        <div className="workspace-settings__entry">
+                            <label className="field">
+                                <span className="field__label">{t('Protection')}</span>
+                                <select
+                                    className="select"
+                                    value={draft.protection}
+                                    onChange={(event) => patch({
+                                        protection: WorkspaceSchema.shape.protection.parse(event.target.value),
+                                    })}
+                                >
+                                    <option value="none">{t('None — mutations run as usual')}</option>
+                                    <option value="confirm">{t('Confirmation for every mutation')}</option>
+                                    <option value="readOnly">{t('Read only — mutations are refused')}</option>
+                                </select>
+                                <span className="inspector__hint">{t('applies to the app and to the agent (MCP)')}</span>
+                            </label>
+                            <div className="workspace-settings__delete">
+                                <button
+                                    type="button"
+                                    className="btn btn--danger"
+                                    disabled={saving}
+                                    onClick={confirmDeleteWorkspace}
+                                >
+                                    {t('Delete workspace…')}
+                                </button>
+                            </div>
                         </div>
-                    </label>
-                    <select
-                        className="select"
-                        value={draft.protection}
-                        onChange={(event) =>
-                            setDraft((current) =>
-                                current
-                                    ? {
-                                          ...current,
-                                          protection: WorkspaceSchema.shape.protection.parse(
-                                              event.target.value,
-                                          ),
-                                      }
-                                    : current,
-                            )
-                        }
-                    >
-                        <option value="none">{t('None — mutations run as usual')}</option>
-                        <option value="confirm">{t('Confirmation for every mutation')}</option>
-                        <option value="readOnly">{t('Read only — mutations are refused')}</option>
-                    </select>
-                </div>
-
-                <div className="segmented">
-                    <button
-                        type="button"
-                        className={`segmented__item${
-                            tab === 'environments' ? ' segmented__item--active' : ''
-                        }`}
-                        onClick={() => setTab('environments')}
-                    >
-                        {t('Environments')}
-                    </button>
-                    <button
-                        type="button"
-                        className={`segmented__item${
-                            tab === 'endpoints' ? ' segmented__item--active' : ''
-                        }`}
-                        onClick={() => setTab('endpoints')}
-                    >
-                        {t('Endpoints')}
-                    </button>
-                </div>
-
-                {tab === 'environments' &&
-                    draft.environments.map((environment) => (
-                        <section key={environment.id} className="workspace-settings__entry">
-                            <div className="flow__step-head">
-                                <span className="badge">ENV</span>
-                                <input
-                                    className="input input--name"
-                                    value={environment.name}
-                                    onChange={(event) =>
-                                        patchEnvironment(environment.id, {
-                                            name: event.target.value,
-                                        })
-                                    }
-                                />
-                                {draft.defaultEnvironmentId === environment.id ? (
-                                    <span className="badge badge--ok">{t('default')}</span>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        className="btn btn--quiet"
-                                        onClick={() =>
-                                            setDraft((current) =>
-                                                current
-                                                    ? {
-                                                          ...current,
-                                                          defaultEnvironmentId: environment.id,
-                                                      }
-                                                    : current,
-                                            )
-                                        }
-                                    >
-                                        {t('Make default')}
-                                    </button>
-                                )}
-                                <button
-                                    type="button"
-                                    className="btn btn--quiet btn--icon"
-                                    disabled={draft.environments.length <= 1}
-                                    onClick={() => removeEnvironment(environment.id)}
-                                    title={t('Delete environment')}
-                                    aria-label={t('Delete environment')}
-                                >
-                                    ×
-                                </button>
-                            </div>
-
-                            <div className="workspace-settings__grid">
-                                <label className="field__label">
-                                    {t('Production')}
-                                    <div className="inspector__hint">prod-guard</div>
-                                </label>
-                                <label className="row" style={{ alignSelf: 'center' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={environment.production}
-                                        onChange={(event) =>
-                                            patchEnvironment(environment.id, {
-                                                production: event.target.checked,
-                                            })
-                                        }
-                                    />
-                                    <span>
-                                        {t('Mark as')}{' '}
-                                        <span className="badge badge--prod">PROD</span>{' '}
-                                        {t('and ask for confirmation before mutations and flows')}
-                                    </span>
-                                </label>
-
-                                <label className="field__label">
-                                    {t('Headers')}
-                                    <div className="inspector__hint">
-                                        {t('for all requests of the environment')}
-                                    </div>
-                                </label>
-                                <KeyValueEditor
-                                    value={environment.headers}
-                                    onChange={(headers) =>
-                                        patchEnvironment(environment.id, { headers })
-                                    }
-                                    keyPlaceholder="authorization"
-                                    valuePlaceholder="Bearer {{token}}"
-                                    addLabel={t('+ Header')}
-                                />
-
-                                <label className="field__label">
-                                    {t('Variables')}
-                                    <div className="inspector__hint">
-                                        {t('substitution {{name}}')}
-                                    </div>
-                                </label>
-                                <KeyValueEditor
-                                    value={environment.variables}
-                                    onChange={(variables) =>
-                                        patchEnvironment(environment.id, { variables })
-                                    }
-                                    keyPlaceholder="token"
-                                    valuePlaceholder={t('value')}
-                                    addLabel={t('+ Variable')}
-                                    secretHint={
-                                        secretStorage === 'file'
-                                            ? t('stored in the file')
-                                            : t('stored in Keychain')
-                                    }
-                                />
-
-                                <label className="field__label">
-                                    {t('Authorization')}
-                                    <div className="inspector__hint">
-                                        {t('where the token comes from')}
-                                    </div>
-                                </label>
-                                <RecoveryEditor
-                                    environment={environment}
-                                    flowOptions={flows.map((flow) => ({
-                                        id: flow.id,
-                                        name: flow.name,
-                                    }))}
-                                    onChange={(recovery) =>
-                                        patchEnvironment(environment.id, { recovery })
-                                    }
-                                />
-                            </div>
-                        </section>
-                    ))}
-
-                {tab === 'environments' && (
-                    <button type="button" className="btn" onClick={addEnvironment}>
-                        {t('+ Environment')}
-                    </button>
-                )}
-
-                {tab === 'endpoints' &&
-                    draft.endpoints.map((endpoint) => (
-                        <section key={endpoint.id} className="workspace-settings__entry">
-                            <div className="flow__step-head">
-                                <span className="badge">URL</span>
-                                <input
-                                    className="input input--name"
-                                    value={endpoint.name}
-                                    onChange={(event) =>
-                                        patchEndpoint(endpoint.id, { name: event.target.value })
-                                    }
-                                />
-                                {draft.defaultEndpointId === endpoint.id ? (
-                                    <span className="badge badge--ok">{t('default')}</span>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        className="btn btn--quiet"
-                                        onClick={() =>
-                                            setDraft((current) =>
-                                                current
-                                                    ? { ...current, defaultEndpointId: endpoint.id }
-                                                    : current,
-                                            )
-                                        }
-                                    >
-                                        {t('Make default')}
-                                    </button>
-                                )}
-                                <button
-                                    type="button"
-                                    className="btn btn--quiet btn--icon"
-                                    disabled={draft.endpoints.length <= 1}
-                                    onClick={() => removeEndpoint(endpoint.id)}
-                                    title={t('Delete endpoint')}
-                                    aria-label={t('Delete endpoint')}
-                                >
-                                    ×
-                                </button>
-                            </div>
-
-                            <div className="workspace-settings__grid">
-                                <label className="field__label">{t('URL')}</label>
-                                <input
-                                    className="input mono"
-                                    autoCorrect="off"
-                                    autoCapitalize="off"
-                                    spellCheck={false}
-                                    value={endpoint.url}
-                                    onChange={(event) =>
-                                        patchEndpoint(endpoint.id, { url: event.target.value })
-                                    }
-                                />
-
-                                <label className="field__label">{t('Headers')}</label>
-                                <KeyValueEditor
-                                    value={endpoint.headers}
-                                    onChange={(headers) => patchEndpoint(endpoint.id, { headers })}
-                                    keyPlaceholder="x-api-key"
-                                    valuePlaceholder={t('value or {{variable}}')}
-                                    addLabel={t('+ Header')}
-                                />
-                            </div>
-                        </section>
-                    ))}
-
-                {tab === 'endpoints' && (
-                    <button type="button" className="btn" onClick={addEndpoint}>
-                        {t('+ Endpoint')}
-                    </button>
-                )}
-
-                {warning && (
-                    <div className="form-error" role="alert">
-                        {warning}
-                    </div>
-                )}
-                <div className="inspector__hint">
-                    {t(
-                        'Header precedence: endpoint → environment → collection → operation → tab. The auth profile is applied last.',
                     )}
+
+                    {section === 'Endpoints' && (
+                        <div className="workspace-settings__detail-layout">
+                            <WorkspaceItemPicker
+                                label={t('Endpoints')}
+                                items={draft.endpoints}
+                                activeId={endpoint?.id}
+                                defaultId={draft.defaultEndpointId}
+                                addLabel={t('+ Endpoint')}
+                                onSelect={setEndpointId}
+                                onAdd={addEndpoint}
+                            />
+                            {endpoint && (
+                                <section key={endpoint.id} className="workspace-settings__entry">
+                                    <WorkspaceItemActions
+                                        name={endpoint.name}
+                                        nameLabel={t('Endpoint name')}
+                                        isDefault={draft.defaultEndpointId === endpoint.id}
+                                        deleteLabel={t('Delete endpoint')}
+                                        canDelete={draft.endpoints.length > 1}
+                                        onName={(name) => patchEndpoint({ name })}
+                                        onDefault={() => patch({ defaultEndpointId: endpoint.id })}
+                                        onDelete={removeEndpoint}
+                                    />
+                                    <label className="field">
+                                        <span className="field__label">{t('URL')}</span>
+                                        <input
+                                            className="input mono"
+                                            autoCorrect="off"
+                                            autoCapitalize="off"
+                                            spellCheck={false}
+                                            value={endpoint.url}
+                                            onChange={(event) => patchEndpoint({ url: event.target.value })}
+                                        />
+                                    </label>
+                                    <div className="field">
+                                        <span className="field__label">{t('Headers')}</span>
+                                        <KeyValueEditor
+                                            value={endpoint.headers}
+                                            onChange={(headers) => patchEndpoint({ headers })}
+                                            keyPlaceholder="x-api-key"
+                                            valuePlaceholder={t('value or {{variable}}')}
+                                            addLabel={t('+ Header')}
+                                        />
+                                    </div>
+                                </section>
+                            )}
+                        </div>
+                    )}
+
+                    {section === 'Environments' && (
+                        <div className="workspace-settings__detail-layout">
+                            <WorkspaceItemPicker
+                                label={t('Environments')}
+                                items={draft.environments}
+                                activeId={environment?.id}
+                                defaultId={draft.defaultEnvironmentId}
+                                addLabel={t('+ Environment')}
+                                onSelect={setEnvironmentId}
+                                onAdd={addEnvironment}
+                            />
+                            {environment && (
+                                <section key={environment.id} className="workspace-settings__entry">
+                                    <nav className="workspace-settings__tabs" aria-label={t('Environment settings')}>
+                                        {ENVIRONMENT_SECTIONS.map((item) => (
+                                            <button
+                                                key={item}
+                                                type="button"
+                                                className="workspace-settings__tab"
+                                                aria-current={environmentSection === item ? 'page' : undefined}
+                                                onClick={() => setEnvironmentSection(item)}
+                                            >
+                                                {t(item)}
+                                            </button>
+                                        ))}
+                                    </nav>
+                                    {environmentSection === 'General' && (
+                                        <>
+                                            <WorkspaceItemActions
+                                                name={environment.name}
+                                                nameLabel={t('Environment name')}
+                                                isDefault={draft.defaultEnvironmentId === environment.id}
+                                                deleteLabel={t('Delete environment')}
+                                                canDelete={draft.environments.length > 1}
+                                                onName={(name) => patchEnvironment({ name })}
+                                                onDefault={() => patch({ defaultEnvironmentId: environment.id })}
+                                                onDelete={removeEnvironment}
+                                            />
+                                            <label className="row">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={environment.production}
+                                                    onChange={(event) => patchEnvironment({ production: event.target.checked })}
+                                                />
+                                                <span>
+                                                    {t('Mark as')}{' '}
+                                                    <span className="badge badge--prod">PROD</span>{' '}
+                                                    {t('and ask for confirmation before mutations and flows')}
+                                                </span>
+                                            </label>
+                                        </>
+                                    )}
+                                    {environmentSection === 'Headers and variables' && (
+                                        <>
+                                            <div className="field">
+                                                <span className="field__label">{t('Variables')}</span>
+                                                <KeyValueEditor
+                                                    value={environment.variables}
+                                                    onChange={(variables) => patchEnvironment({ variables })}
+                                                    keyPlaceholder="token"
+                                                    valuePlaceholder={t('value')}
+                                                    addLabel={t('+ Variable')}
+                                                    secretHint={secretStorage === 'file' ? t('stored in the file') : t('stored in Keychain')}
+                                                />
+                                            </div>
+                                            <div className="field">
+                                                <span className="field__label">{t('Headers')}</span>
+                                                <KeyValueEditor
+                                                    value={environment.headers}
+                                                    onChange={(headers) => patchEnvironment({ headers })}
+                                                    keyPlaceholder="authorization"
+                                                    valuePlaceholder="Bearer {{token}}"
+                                                    addLabel={t('+ Header')}
+                                                />
+                                            </div>
+                                        </>
+                                    )}
+                                    {environmentSection === 'Authorization' && (
+                                        <RecoveryEditor
+                                            environment={environment}
+                                            flowOptions={flows}
+                                            onChange={(recovery) => patchEnvironment({ recovery })}
+                                        />
+                                    )}
+                                    {environmentSection === 'Scripts' && (
+                                        <RequestScriptsEditor
+                                            scripts={environment.scripts}
+                                            environment={environment}
+                                            onChange={(scripts) => patchEnvironment({ scripts })}
+                                        />
+                                    )}
+                                </section>
+                            )}
+                        </div>
+                    )}
+
+                    {warning && <div className="form-error" role="alert">{warning}</div>}
                 </div>
             </div>
 
@@ -470,6 +394,86 @@ export function WorkspaceSettings(props: IWorkspaceSettingsProps): React.JSX.Ele
                 </button>
             </div>
         </DialogSurface>
+    )
+}
+
+function freshId(name: string, items: readonly { id: string }[]): string {
+    const base = toSlug(name) || 'item'
+    const taken = new Set(items.map((item) => item.id))
+    let id = base
+    for (let index = 2; taken.has(id); index += 1) id = `${base}-${index}`
+
+    return id
+}
+
+interface IWorkspaceItemPickerProps {
+    label: string
+    items: readonly { id: string; name: string }[]
+    activeId?: string
+    defaultId?: string
+    addLabel: string
+    onSelect: (id: string) => void
+    onAdd: () => void
+}
+
+function WorkspaceItemPicker(props: IWorkspaceItemPickerProps): React.JSX.Element {
+    const t = useT()
+    return (
+        <div className="workspace-settings__picker">
+            <select
+                className="select"
+                aria-label={props.label}
+                value={props.activeId ?? ''}
+                disabled={props.items.length === 0}
+                onChange={(event) => props.onSelect(event.target.value)}
+            >
+                {props.items.length === 0 && <option value="">—</option>}
+                {props.items.map((item) => (
+                    <option key={item.id} value={item.id}>
+                        {item.name || item.id}{item.id === props.defaultId ? ` · ${t('default')}` : ''}
+                    </option>
+                ))}
+            </select>
+            <button type="button" className="btn" onClick={props.onAdd}>
+                {props.addLabel}
+            </button>
+        </div>
+    )
+}
+
+interface IWorkspaceItemActionsProps {
+    name: string
+    nameLabel: string
+    isDefault: boolean
+    deleteLabel: string
+    canDelete: boolean
+    onName: (name: string) => void
+    onDefault: () => void
+    onDelete: () => void
+}
+
+function WorkspaceItemActions(props: IWorkspaceItemActionsProps): React.JSX.Element {
+    const t = useT()
+    return (
+        <div className="workspace-settings__item-actions">
+            <label className="field">
+                <span className="field__label">{props.nameLabel}</span>
+                <input className="input" value={props.name} onChange={(event) => props.onName(event.target.value)} />
+            </label>
+            {!props.isDefault && (
+                <button type="button" className="btn" onClick={props.onDefault}>{t('Make default')}</button>
+            )}
+            <button
+                type="button"
+                className="btn btn--quiet"
+                title={props.deleteLabel}
+                aria-label={props.deleteLabel}
+                disabled={!props.canDelete}
+                onClick={props.onDelete}
+            >
+                {t('Delete')}
+            </button>
+        </div>
     )
 }
 

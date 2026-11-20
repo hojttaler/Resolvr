@@ -36,6 +36,7 @@ export * from './activity/activity-model.js'
 export * from './activity/activity-store.js'
 
 export * from './run/run-engine.js'
+export { REQUEST_SCRIPT_CRYPTO_MODULE, splitScriptImports } from './run/request-script-modules.js'
 export * from './run/curl.js'
 export * from './flow/flow-runner.js'
 export * from './flow/flow-state.js'

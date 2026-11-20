@@ -157,6 +157,64 @@ export function CreateWorkspaceDialog(props: IDialogProps): React.JSX.Element {
     )
 }
 
+/** Ввод недостающих переменных с продолжением приостановленного запуска. */
+export function MissingVariablesDialog(): React.JSX.Element | null {
+    const prompt = useAppStore((state) => state.missingVariables)
+    const t = useT()
+    if (!prompt) return null
+
+    return (
+        <DialogSurface
+            label={t('Missing variables')}
+            className="dialog--missing-variables"
+            onClose={() => prompt.finish()}
+        >
+            <form
+                className="missing-variables-form"
+                onKeyDown={(event) => {
+                    if (event.key !== 'Enter' || !isModKey(event.nativeEvent)) return
+                    event.preventDefault()
+                    event.currentTarget.requestSubmit()
+                }}
+                onSubmit={(event) => {
+                    event.preventDefault()
+                    const fields = new FormData(event.currentTarget)
+                    prompt.finish(Object.fromEntries(
+                        prompt.names.map((name) => {
+                            const value = fields.get(name)
+                            return [name, typeof value === 'string' ? value : '']
+                        }),
+                    ))
+                }}
+            >
+                <div className="dialog__body">
+                    <div className="dialog__title">{t('Missing variables')}</div>
+                    <p className="dialog__text">{t('Values are used for this run only.')}</p>
+                    <div className="missing-variables-form__fields">
+                        {prompt.names.map((name, index) => (
+                            <label key={name} className="missing-variables-form__row">
+                                <span className="mono">{`{{${name}}}`}</span>
+                                <input
+                                    className="input"
+                                    name={name}
+                                    required
+                                    autoFocus={index === 0}
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                />
+                            </label>
+                        ))}
+                    </div>
+                </div>
+                <div className="dialog__footer">
+                    <button type="button" className="btn" onClick={() => prompt.finish()}>{t('Cancel')}</button>
+                    <button type="submit" className="btn btn--primary">{t('Continue run')}</button>
+                </div>
+            </form>
+        </DialogSurface>
+    )
+}
+
 /**
  * Подтверждение необратимого действия: prod-guard, удаление коллекции.
  *

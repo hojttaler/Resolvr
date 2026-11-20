@@ -92,11 +92,34 @@ export function interpolate(
     generators: IGeneratorContext = defaultContext(),
 ): string {
     return template.replace(PLACEHOLDER_PATTERN, (match, name: string) => {
-        const value = variables[name]
+        const value = Object.hasOwn(variables, name) ? variables[name] : undefined
         if (value !== undefined) return value
 
         return (isGeneratorName(name) ? evaluateGenerator(name, generators) : undefined) ?? match
     })
+}
+
+/** Собирает отсутствующие имена из строковых значений переменных запроса. */
+export function missingVariableNames(
+    value: unknown,
+    variables: Readonly<Record<string, string>>,
+): string[] {
+    const names = new Set<string>()
+    function visit(node: unknown): void {
+        if (typeof node === 'string') {
+            for (const match of node.matchAll(PLACEHOLDER_PATTERN)) {
+                const name = match[1]
+                if (name && !isGeneratorName(name) &&
+                    (!Object.hasOwn(variables, name) || typeof variables[name] !== 'string')) names.add(name)
+            }
+        } else if (node && typeof node === 'object') {
+            for (const item of Object.values(node)) visit(item)
+        }
+    }
+
+    visit(value)
+
+    return [...names]
 }
 
 /** Подставляет переменные во все значения заголовков. */

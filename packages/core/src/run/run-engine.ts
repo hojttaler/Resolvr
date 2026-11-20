@@ -8,9 +8,10 @@ import {
     type IEnvironmentCapture,
     type IHistoryEntry,
     type IOperationKind,
+    type IRequestScripts,
     type IWorkspace,
 } from '../model/schemas.js'
-import type { ISecretStore } from '../ports/secret-store.js'
+import { parseSecretRef, type ISecretStore } from '../ports/secret-store.js'
 import {
     EnvironmentWriter,
     toEnvironmentValue,
@@ -31,6 +32,8 @@ import {
     maskHeaders,
     maskSecrets,
     maskSecretsInJson,
+    missingVariableNames,
+    type IResolvedEnvironment,
     type SecretResolver,
 } from '../secrets/secret-resolver.js'
 import { buildResponsePreview, type HistoryStore } from '../storage/history-store.js'
@@ -39,6 +42,7 @@ import {
     parseOperationRef,
     type WorkspaceStore,
 } from '../storage/workspace-store.js'
+import { applyPostRequestScripts, applyPreRequestScripts } from './request-scripts.js'
 
 const TOKEN_EXPIRY_SUFFIX = '__expires_at'
 const EXPIRY_MARGIN_MS = 30_000
@@ -53,7 +57,7 @@ export interface IFlowExecutor {
     run(
         workspaceId: string,
         flowId: string,
-        options?: { environmentId?: string; endpointId?: string },
+        options?: Pick<IRunInput, 'environmentId' | 'endpointId' | 'resolveMissingVariables'>,
     ): Promise<{ ok: boolean; context: Record<string, unknown> }>
 }
 
@@ -123,6 +127,9 @@ export interface IRunInput {
      * окружение не меняют — у цепочки для этого есть `extract`.
      */
     saveToEnvironment?: IEnvironmentCapture[]
+    scripts?: IRequestScripts
+    resolveMissingVariables?: IMissingVariableResolver
+    prerequisiteFlow?: string
     /**
      * Подтверждение мутации в защищённом workspace (`protection: 'confirm'`).
      *
@@ -132,6 +139,10 @@ export interface IRunInput {
      */
     confirmed?: boolean
 }
+
+export type IMissingVariableResolver = (
+    names: readonly string[],
+) => Promise<Record<string, string> | undefined>
 
 /** Переменная окружения, записанная по правилу операции после запуска. */
 export interface ISavedVariable {
@@ -170,6 +181,7 @@ export interface IRunResult {
     savedVariables?: ISavedVariable[]
     /** Правила, которые не сработали: путь не найден в ответе или нет окружения. */
     captureWarnings?: string[]
+    scriptError?: string
 }
 
 /** След выполнения вспомогательной цепочки внутри запроса. */
@@ -190,6 +202,8 @@ export interface ISubscribeInput {
     operationName?: string
     endpointId?: string
     environmentId?: string
+    scripts?: IRequestScripts
+    resolveMissingVariables?: IMissingVariableResolver
 }
 
 /** Подготовленный к отправке запрос со всеми раскрытыми переменными. */
@@ -213,6 +227,7 @@ interface IPreparedRequest {
     kind: IOperationKind
     /** Имена заголовков, отброшенных из-за нераскрытых переменных. */
     unresolvedHeaders: string[]
+    scripts?: IRequestScripts
 }
 
 /**
@@ -291,7 +306,7 @@ export class RunEngine {
      * подготовки и восстановления при этом не выполняются.
      */
     public async describeRequest(input: IRunInput): Promise<IRequestDescription> {
-        const prepared = await this._prepare(input)
+        const prepared = await this._prepare(input, true)
 
         return {
             url: prepared.endpoint.url,
@@ -325,7 +340,7 @@ export class RunEngine {
             query: getIntrospectionQuery({ descriptions: true }),
             operationName: 'IntrospectionQuery',
             skipHistory: true,
-        })
+        }, false)
 
         const { status } = executed.response
         try {
@@ -348,7 +363,7 @@ export class RunEngine {
         }
     }
 
-    private async _runWithAuthorization(input: IRunInput): Promise<{ executed: IExecuted; flowRuns: IFlowRunSummary[] }> {
+    private async _runWithAuthorization(input: IRunInput, scripts = true): Promise<{ executed: IExecuted; flowRuns: IFlowRunSummary[] }> {
         const flowRuns: IFlowRunSummary[] = []
         let flowContext = { ...(input.flowContext ?? {}) }
 
@@ -364,11 +379,15 @@ export class RunEngine {
             flowContext = { ...flowContext, ...toStringContext(prerequisite.context) }
         }
 
-        let executed = await this._execute({ ...input, flowContext })
+        let executed = await this._execute({ ...input, flowContext }, scripts)
         let attempt = 0
 
         for (;;) {
-            const recovery = await this._planRecovery(input, executed.result, attempt)
+            const recovery = await this._planRecovery(
+                input,
+                { ...executed.result, ok: executed.responseOk },
+                attempt,
+            )
             if (!recovery) break
 
             attempt += 1
@@ -376,7 +395,7 @@ export class RunEngine {
             if (!recovery.ok) break
 
             flowContext = { ...flowContext, ...toStringContext(recovery.context) }
-            executed = await this._execute({ ...input, flowContext })
+            executed = await this._execute({ ...input, flowContext }, scripts)
         }
 
         return { executed, flowRuns }
@@ -450,8 +469,8 @@ export class RunEngine {
     }
 
     /** Один проход запроса без цепочек: подготовка, отправка, запись истории. */
-    private async _execute(input: IRunInput): Promise<IExecuted> {
-        const prepared = await this._prepare(input)
+    private async _execute(input: IRunInput, scripts: boolean): Promise<IExecuted> {
+        const prepared = await this._prepare(input, scripts)
         guardProtection(prepared.workspace, prepared.kind, input.confirmed === true)
 
         const response = await this._transport.request({
@@ -468,9 +487,31 @@ export class RunEngine {
         })
 
         const result = this._buildResult(prepared, response)
+        const responseOk = result.ok
+        const scopes = [prepared.scripts, prepared.environment?.scripts]
+        if (scripts && scopes.some((scope) => scope?.postRequest?.trim())) {
+            try {
+                await applyPostRequestScripts(
+                    scopes,
+                    {
+                        status: result.status,
+                        ok: result.ok,
+                        headers: result.headers,
+                        data: result.data,
+                        errors: result.errors ?? [],
+                        body: result.body,
+                    },
+                    prepared.secretValues,
+                )
+            } catch (error) {
+                if (!(error instanceof ResolvrError)) throw error
+                result.scriptError = error.message
+                result.ok = false
+            }
+        }
         if (!input.skipHistory) await this._writeHistory(input.workspaceId, prepared, result, input)
 
-        return { result, response }
+        return { result, response, responseOk }
     }
 
     /**
@@ -501,6 +542,7 @@ export class RunEngine {
         const flow = await this._flows.run(input.workspaceId, rule.flowId, {
             environmentId: input.environmentId,
             endpointId: input.endpointId,
+            resolveMissingVariables: input.resolveMissingVariables,
         })
 
         if (flow.ok) {
@@ -532,22 +574,21 @@ export class RunEngine {
 
     /** Запускает цепочку подготовки, если операция её объявляет. */
     private async _runPrerequisite(input: IRunInput): Promise<IFlowRunSummary | undefined> {
-        if (input.skipFlows || !this._flows || !input.operationRef) return undefined
+        if (input.skipFlows || !this._flows) return undefined
+        const flowId = input.prerequisiteFlow ?? (input.operationRef
+            ? (await this._workspaces.getOperation(input.workspaceId, parseOperationRef(input.operationRef))).prerequisiteFlow
+            : undefined)
+        if (!flowId) return undefined
 
-        const operation = await this._workspaces.getOperation(
-            input.workspaceId,
-            parseOperationRef(input.operationRef),
-        )
-        if (!operation.prerequisiteFlow) return undefined
-
-        const flow = await this._flows.run(input.workspaceId, operation.prerequisiteFlow, {
+        const flow = await this._flows.run(input.workspaceId, flowId, {
             environmentId: input.environmentId,
             endpointId: input.endpointId,
+            resolveMissingVariables: input.resolveMissingVariables,
         })
 
         return {
             kind: 'prerequisite',
-            flowId: operation.prerequisiteFlow,
+            flowId,
             ok: flow.ok,
             context: flow.context,
         }
@@ -577,6 +618,7 @@ export class RunEngine {
         const flow = await this._flows.run(input.workspaceId, rule.flowId, {
             environmentId: input.environmentId,
             endpointId: input.endpointId,
+            resolveMissingVariables: input.resolveMissingVariables,
         })
 
         if (flow.ok) {
@@ -595,10 +637,19 @@ export class RunEngine {
         input: ISubscribeInput,
         handlers: ISubscriptionHandlers,
     ): Promise<IUnsubscribe> {
-        const prepared = await this._prepare(input)
+        const prepared = await this._prepare(input, true)
         const url = prepared.endpoint.subscriptionUrl ?? toWebSocketUrl(prepared.endpoint.url)
+        const scopes = [prepared.scripts, prepared.environment?.scripts]
+        const hasPostScripts = scopes.some((scope) => scope?.postRequest?.trim())
+        let active = true
+        let pending = Promise.resolve()
+        const stop = (): void => {
+            if (!active) return
+            active = false
+            unsubscribe()
+        }
 
-        return this._transport.subscribe(
+        const unsubscribe = this._transport.subscribe(
             {
                 url,
                 headers: prepared.headers,
@@ -609,19 +660,43 @@ export class RunEngine {
             },
             {
                 ...handlers,
-                onNext: (payload) =>
-                    handlers.onNext(maskSecretsInJson(payload, prepared.secretValues)),
+                onNext: (payload) => {
+                    const masked = maskSecretsInJson(payload, prepared.secretValues)
+                    if (!hasPostScripts) {
+                        handlers.onNext(masked)
+                        return
+                    }
+
+                    pending = pending.then(async () => {
+                        if (!active) return
+                        const event = masked && typeof masked === 'object' ? masked : { data: masked }
+                        await applyPostRequestScripts(scopes, event, prepared.secretValues)
+                        if (active) handlers.onNext(masked)
+                    }).catch((error: unknown) => {
+                        if (!active) return
+                        stop()
+                        handlers.onError(error instanceof Error ? error : new Error('Post-request failed'))
+                    })
+                },
+                onComplete: () => {
+                    if (!hasPostScripts) handlers.onComplete()
+                    else void pending.then(() => { if (active) handlers.onComplete() })
+                },
             },
         )
+
+        return stop
     }
 
     /** Собирает всё необходимое для отправки: запрос, переменные, заголовки, авторизацию. */
-    private async _prepare(input: IRunInput | ISubscribeInput): Promise<IPreparedRequest> {
+    private async _prepare(input: IRunInput | ISubscribeInput, runScripts = false): Promise<IPreparedRequest> {
         const workspace = await this._workspaces.getWorkspace(input.workspaceId)
 
         let query = input.query
         let variables = input.variables ?? {}
         let operationHeaders: Record<string, string> = {}
+        let collectionHeaders: Record<string, string> = {}
+        let scripts = input.scripts
         let endpointId = input.endpointId
         let environmentId = input.environmentId
 
@@ -635,7 +710,9 @@ export class RunEngine {
 
             query = query ?? operation.query
             variables = { ...operation.variables, ...(input.variables ?? {}) }
-            operationHeaders = { ...collection.headers, ...operation.headers }
+            collectionHeaders = collection.headers
+            operationHeaders = operation.headers
+            scripts ??= operation.scripts
             endpointId = endpointId ?? operation.endpointId
             environmentId = environmentId ?? operation.environmentId
         }
@@ -650,22 +727,55 @@ export class RunEngine {
 
         const endpoint = this._resolveEndpoint(workspace, endpointId)
         const environment = this._resolveEnvironment(workspace, environmentId)
+        const request = { variables, headers: { ...operationHeaders, ...input.headers } }
+        let resolvedEnvironment: Promise<IResolvedEnvironment> | undefined
+        const resolveEnvironment = (): Promise<IResolvedEnvironment> =>
+            resolvedEnvironment ??= environment
+                ? this._resolver.resolveEnvironment(workspace, environment)
+                : Promise.resolve({ variables: {}, secretValues: [], missing: [] })
+        const scripted = runScripts
+            ? await applyPreRequestScripts([environment?.scripts, scripts], request, async () => {
+                const resolved = await resolveEnvironment()
+                const keys = new Map<string, string>()
+                for (const [name, value] of Object.entries(environment?.variables ?? {})) {
+                    const ref = parseSecretRef(value)
+                    if (
+                        ref?.workspace === workspace.id &&
+                        ref.environment === environment?.id &&
+                        Object.hasOwn(resolved.variables, name)
+                    ) keys.set(name, resolved.variables[name]!)
+                }
 
-        const resolved = environment
-            ? await this._resolver.resolveEnvironment(workspace, environment)
-            : { variables: {}, secretValues: [], missing: [] }
+                return { keys, secretValues: resolved.secretValues }
+            })
+            : request
 
-        const produced = ('producedVariables' in input ? input.producedVariables : undefined) ?? []
-        const skipAuth = produced.length > 0 || ('skipAuth' in input && input.skipAuth === true)
-        const authHeaders =
-            environment && !skipAuth ? await this._applyAuth(workspace, environment, resolved) : {}
-
-        const environmentHeaders = dropHeadersUsingVariables(environment?.headers ?? {}, produced)
+        const resolved = await resolveEnvironment()
 
         // Значения цепочки подготовки перекрывают переменные окружения: свежий
         // токен из логина должен побеждать сохранённый ранее.
         const flowContext = 'flowContext' in input ? (input.flowContext ?? {}) : {}
         const substitutions = { ...resolved.variables, ...flowContext }
+        if (runScripts && input.resolveMissingVariables) {
+            const missing = missingVariableNames(scripted.variables, substitutions)
+            if (missing.length > 0) {
+                const provided = await input.resolveMissingVariables(missing)
+                if (!provided) throw new ResolvrError(ErrorCodeEnum.RUN_CANCELLED, 'Запуск отменён')
+                for (const name of missing) {
+                    const value = provided[name]
+                    if (!Object.hasOwn(provided, name) || typeof value !== 'string') {
+                        throw new ResolvrError(ErrorCodeEnum.INVALID_OPERATION, 'Не заполнены переменные запроса')
+                    }
+                    Object.defineProperty(substitutions, name, { value, enumerable: true })
+                }
+            }
+        }
+
+        const produced = ('producedVariables' in input ? input.producedVariables : undefined) ?? []
+        const skipAuth = produced.length > 0 || ('skipAuth' in input && input.skipAuth === true)
+        const authHeaders =
+            environment && !skipAuth ? await this._applyAuth(workspace, environment, resolved) : {}
+        const environmentHeaders = dropHeadersUsingVariables(environment?.headers ?? {}, produced)
 
         // Порядок наложения — от общего к частному: эндпоинт, окружение,
         // коллекция, операция, вызов; авторизация применяется последней.
@@ -674,8 +784,8 @@ export class RunEngine {
             accept: 'application/json',
             ...interpolateHeaders(endpoint.headers, substitutions),
             ...interpolateHeaders(environmentHeaders, substitutions),
-            ...interpolateHeaders(operationHeaders, substitutions),
-            ...interpolateHeaders(input.headers ?? {}, substitutions),
+            ...interpolateHeaders(collectionHeaders, substitutions),
+            ...interpolateHeaders(scripted.headers, substitutions),
             ...authHeaders,
         }
 
@@ -689,12 +799,13 @@ export class RunEngine {
             endpoint,
             environment,
             query,
-            variables: interpolateJson(variables, substitutions),
+            variables: interpolateJson(scripted.variables, substitutions),
             headers,
             operationName: input.operationName,
             secretValues: resolved.secretValues,
             kind: detectOperationKind(query),
             unresolvedHeaders,
+            scripts,
         }
     }
 
@@ -761,6 +872,9 @@ export class RunEngine {
             skipAuth: true,
         })
 
+        if (loginResult.scriptError) {
+            throw new ResolvrError(ErrorCodeEnum.REQUEST_SCRIPT_FAILED, loginResult.scriptError)
+        }
         const token = readPath(
             { data: loginResult.data, errors: loginResult.errors },
             auth.tokenPath,
@@ -913,6 +1027,7 @@ export class RunEngine {
             ok: result.ok,
             durationMs: result.durationMs,
             errorCount: result.errors?.length ?? 0,
+            scriptError: result.scriptError,
             responseBytes: result.responseBytes,
             responsePreview: buildResponsePreview(result.body),
             operationRef: input.operationRef,
@@ -936,6 +1051,7 @@ export class RunEngine {
 interface IExecuted {
     result: IRunResult
     response: IHttpResponse
+    responseOk: boolean
 }
 
 interface IRawResponse {

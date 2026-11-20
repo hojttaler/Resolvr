@@ -112,8 +112,8 @@ export class TauriFileSystem implements IFileSystem {
 
         try {
             await remove(path, { recursive: true })
-        } catch {
-            // Удаление идемпотентно.
+        } catch (error) {
+            if (await exists(path).catch(() => true)) throw error
         }
     }
 

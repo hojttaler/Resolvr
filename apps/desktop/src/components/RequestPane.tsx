@@ -18,6 +18,7 @@ import { findUnknownPlaceholders, type IEnvVariablesContext } from './editor/env
 import { buildVariablesSkeleton } from './editor/variables-completion.js'
 import { ContextMenu, type IContextMenuState } from './ContextMenu.js'
 import { KeyValueEditor } from './KeyValueEditor.js'
+import { RequestScriptsEditor } from './RequestScriptsEditor.js'
 
 /* Высота строки редактора и шапки панели — для подгонки под содержимое. */
 const LINE_HEIGHT = 20
@@ -41,6 +42,7 @@ export function RequestPane(): React.JSX.Element {
     const updateQuery = useAppStore((state) => state.updateQuery)
     const updateVariables = useAppStore((state) => state.updateVariables)
     const updateHeaders = useAppStore((state) => state.updateHeaders)
+    const updateRequestScripts = useAppStore((state) => state.updateRequestScripts)
     const setBottomTab = useAppStore((state) => state.setBottomTab)
     const runActiveTab = useAppStore((state) => state.runActiveTab)
     const stopActiveTab = useAppStore((state) => state.stopActiveTab)
@@ -349,6 +351,13 @@ export function RequestPane(): React.JSX.Element {
                                     {t('To environment')}
                                 </button>
                             )}
+                            <button
+                                type="button"
+                                className={`segmented__item${tab.bottomTab === 'scripts' ? ' segmented__item--active' : ''}`}
+                                onClick={() => setBottomTab(activeTabId, 'scripts')}
+                            >
+                                {t('Scripts')}
+                            </button>
                         </div>
 
                         <span className="panel__spacer" />
@@ -391,6 +400,12 @@ export function RequestPane(): React.JSX.Element {
                             />
                         ) : tab.bottomTab === 'captures' && tab.operationRef ? (
                             <EnvironmentCaptures key={tab.operationRef} operationRef={tab.operationRef} />
+                        ) : tab.bottomTab === 'scripts' ? (
+                            <RequestScriptsEditor
+                                key={activeTabId}
+                                scripts={content.scripts ?? findOperation(tree, tab.operationRef)?.scripts}
+                                onChange={(scripts) => updateRequestScripts(activeTabId, scripts)}
+                            />
                         ) : (
                             <div style={{ padding: 'var(--pad-sm) var(--pad-md)' }}>
                                 <InheritedHeaders />
